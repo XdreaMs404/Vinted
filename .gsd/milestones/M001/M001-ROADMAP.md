@@ -64,7 +64,7 @@ This milestone is complete only when all are true:
 - [x] **S04: Market Scores + Lightweight Contextualization** `risk:medium` `depends:[S02,S03]`
   > After this: the product computes explainable “demande pure” and “premium” rankings plus a market summary of performing and rising segments, all backed by observed data and lightweight contextualization where it is robust.
 
-- [ ] **S05: Mixed Dashboard + Filters + Listing Detail** `risk:medium` `depends:[S03,S04]`
+- [x] **S05: Mixed Dashboard + Filters + Listing Detail** `risk:medium` `depends:[S03,S04]`
   > After this: the local dashboard shows market summary first and listing proof immediately underneath, with useful filters and a detail view that reveals timeline, transitions, signals, and inference basis.
 
 - [ ] **S06: Local Batch + Continuous End-to-End Loop** `risk:medium` `depends:[S01,S02,S03,S04,S05]`

@@ -16,3 +16,11 @@ Local-first batch collector and analysis stack for public Vinted Homme/Femme mar
 - `python -m vinted_radar.cli rankings --db data/vinted-radar.db --kind premium --limit 10`
 - `python -m vinted_radar.cli market-summary --db data/vinted-radar.db --limit 8`
 - `python -m vinted_radar.cli score --db data/vinted-radar.db --listing-id <id>`
+- `python -m vinted_radar.cli dashboard --db data/vinted-radar.db --host 127.0.0.1 --port 8765`
+
+## Dashboard diagnostics
+
+- HTML dashboard: `http://127.0.0.1:8765/`
+- JSON dashboard payload: `http://127.0.0.1:8765/api/dashboard`
+- JSON listing detail payload: `http://127.0.0.1:8765/api/listings/<id>`
+- Health check: `http://127.0.0.1:8765/health`

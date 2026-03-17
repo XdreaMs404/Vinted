@@ -6,6 +6,7 @@ import sys
 
 import typer
 
+from vinted_radar.dashboard import serve_dashboard
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
@@ -443,6 +444,22 @@ def market_summary(
                 **segment
             )
         )
+
+
+@app.command("dashboard")
+def dashboard(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server."),
+    port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server."),
+    now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic rendering."),
+) -> None:
+    typer.echo(f"Dashboard URL: http://{host}:{port}")
+    typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
+    typer.echo(f"Database: {db}")
+    try:
+        serve_dashboard(db_path=db, host=host, port=port, now=now)
+    except KeyboardInterrupt:
+        typer.echo("Dashboard server stopped.")
 
 
 def _render_state_summary(summary: dict[str, object]) -> None:

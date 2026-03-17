@@ -37,39 +37,6 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: S03 proof: `python -m pytest`, `python -m vinted_radar.cli state-refresh --db data/vinted-radar-s02.db --limit 10 --request-delay 0.0`, `python -m vinted_radar.cli state-summary --db data/vinted-radar-s02.db`, and `python -m vinted_radar.cli state --db data/vinted-radar-s02.db --listing-id 4176710128` verified the cautious state taxonomy and explanation surfaces against live data plus fixture coverage for sold/deleted/unavailable paths.
 - Notes: S03 shipped a cautious state engine over `listing_observations`, `catalog_scans`, and optional `item_page_probes`. Current state codes are `active`, `sold_observed`, `sold_probable`, `unavailable_non_conclusive`, `deleted`, and `unknown`, each with explicit basis kind, confidence, and reasons surfaced through the CLI.
 
-### R004 — The product must visibly show what the radar has covered, over which time window, with what revisit freshness, and with what confidence.
-- Class: failure-visibility
-- Status: active
-- Description: The product must visibly show what the radar has covered, over which time window, with what revisit freshness, and with what confidence.
-- Why it matters: A market read is only trustworthy if the user can see its evidence base and blind spots.
-- Source: user
-- Primary owning slice: M001/S03
-- Supporting slices: M001/S05, M001/S06
-- Validation: Current proof is CLI-level only: `coverage`, `freshness`, `state-summary`, and per-listing `state` show what was covered, how fresh it is, and how confident the current state engine is.
-- Notes: S02 and S03 now expose coverage, freshness, state confidence, and basis visibility through CLI surfaces (`coverage`, `freshness`, `state-summary`, `state`). These are durable inspection surfaces, but the requirement is not fully validated until they reach the main product experience in S05.
-
-### R005 — The product must rank listings and market segments by real demand and sell-through signals rather than by simplistic popularity proxies such as likes or recency alone.
-- Class: primary-user-loop
-- Status: active
-- Description: The product must rank listings and market segments by real demand and sell-through signals rather than by simplistic popularity proxies such as likes or recency alone.
-- Why it matters: The user wants to know what really moves now, not what merely looks popular.
-- Source: user
-- Primary owning slice: M001/S04
-- Supporting slices: M001/S05, M001/S06
-- Validation: S04 proof: `python -m pytest`, `python -m vinted_radar.cli rankings --db data/vinted-radar-s02.db --kind demand --limit 10`, and `python -m vinted_radar.cli score --db data/vinted-radar-s02.db --listing-id 8305280693` verified the demand ranking surface and its explanation payloads.
-- Notes: S04 now exposes a demand ranking surface grounded in state/history evidence, follow-up misses, confidence, and freshness rather than recency-only sorting. The score remains explainable through per-listing factor payloads.
-
-### R006 — The product must provide a separate premium ranking that rewards items that perform well while remaining relatively expensive in their context.
-- Class: differentiator
-- Status: active
-- Description: The product must provide a separate premium ranking that rewards items that perform well while remaining relatively expensive in their context.
-- Why it matters: The user wants to distinguish cheap fast movers from items that sustain strong demand without collapsing in price.
-- Source: user
-- Primary owning slice: M001/S04
-- Supporting slices: M001/S05, M001/S06
-- Validation: S04 proof: `python -m pytest`, `python -m vinted_radar.cli rankings --db data/vinted-radar-s02.db --kind premium --limit 10`, and `python -m vinted_radar.cli score --db data/vinted-radar-s02.db --listing-id 8305280693` verified that premium ranking stays separate and shows its contextual price basis.
-- Notes: S04 now exposes a separate premium ranking that starts from demand score and adds only a modest contextual price boost when the chosen peer sample is strong enough.
-
 ### R007 — The scoring model must contextualize comparisons inside the right market context when there is enough support, starting lightly in M001 and becoming much stronger in M002.
 - Class: quality-attribute
 - Status: active
@@ -80,28 +47,6 @@ This file is the explicit capability and coverage contract for the project.
 - Supporting slices: M002 (provisional)
 - Validation: S04 proof: `python -m pytest tests/test_scoring.py` verified support-threshold-based context selection and graceful fallback when no trustworthy peer group exists.
 - Notes: S04 applies lightweight contextualization opportunistically through explicit peer tiers (`catalog_brand_condition`, `catalog_condition`, `catalog_brand`, `catalog`, `root_condition`, `root`) with minimum support thresholds and a no-context fallback when support is too thin.
-
-### R008 — The main product surface must summarize which sub-categories are performing, which are rising recently, and which segments appear to move quickly or hold price well.
-- Class: primary-user-loop
-- Status: active
-- Description: The main product surface must summarize which sub-categories are performing, which are rising recently, and which segments appear to move quickly or hold price well.
-- Why it matters: The user wants a market read first, not just raw listing tables.
-- Source: user
-- Primary owning slice: M001/S04
-- Supporting slices: M001/S05, M001/S06
-- Validation: Current S04 proof is CLI-level: `python -m vinted_radar.cli market-summary --db data/vinted-radar-s02.db --limit 8` produces performing and rising segment summaries tied to tracked listing counts and score aggregates.
-- Notes: S04 adds a CLI-level market summary showing performing and rising segments with evidence counts, demand/premium aggregates, and recent-arrival / visible-delta signals. The requirement is still not fully validated until this reaches the main product surface in S05.
-
-### R009 — The main screen must combine a market summary with concrete ranking tables, support useful filters, and allow drill-down into a listing detail view with history, signals, and inference basis.
-- Class: primary-user-loop
-- Status: active
-- Description: The main screen must combine a market summary with concrete ranking tables, support useful filters, and allow drill-down into a listing detail view with history, signals, and inference basis.
-- Why it matters: The product promise depends on linking macro market reading to micro evidence quickly.
-- Source: user
-- Primary owning slice: M001/S05
-- Supporting slices: M001/S03, M001/S04, M001/S06
-- Validation: mapped
-- Notes: The dashboard should be visually rich and comfortable to use, but analytical clarity matters more than decorative complexity.
 
 ### R010 — The system must run locally in both a simple batch mode and a continuous mode that keeps the radar alive through repeated discovery and revisits.
 - Class: operability
@@ -179,6 +124,63 @@ This file is the explicit capability and coverage contract for the project.
 - Supporting slices: none
 - Validation: mapped
 - Notes: Commercialization must preserve the radar’s credibility rather than turn it into a shallow dashboard.
+
+## Validated
+
+### R004 — The product must visibly show what the radar has covered, over which time window, with what revisit freshness, and with what confidence.
+- Class: failure-visibility
+- Status: validated
+- Description: The product must visibly show what the radar has covered, over which time window, with what revisit freshness, and with what confidence.
+- Why it matters: A market read is only trustworthy if the user can see its evidence base and blind spots.
+- Source: user
+- Primary owning slice: M001/S03
+- Supporting slices: M001/S05, M001/S06
+- Validation: S05 proof: `python -m pytest`, `python -m vinted_radar.cli discover --db data/vinted-radar-s05.db --page-limit 1 --max-leaf-categories 4 --request-delay 0.0`, `python -m vinted_radar.cli state-refresh --db data/vinted-radar-s05.db --limit 8 --request-delay 0.0`, and `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765` plus browser verification at `http://127.0.0.1:8765` confirmed visible latest-run coverage, freshness buckets, confidence counts, filter-lens counts, and listing-detail timeline/explanation surfaces.
+- Notes: CLI coverage/freshness/state surfaces from S02/S03 remain authoritative diagnostics, and S05 now renders the same evidence on the main product surface via the local dashboard.
+
+### R005 — The product must rank listings and market segments by real demand and sell-through signals rather than by simplistic popularity proxies such as likes or recency alone.
+- Class: primary-user-loop
+- Status: validated
+- Description: The product must rank listings and market segments by real demand and sell-through signals rather than by simplistic popularity proxies such as likes or recency alone.
+- Why it matters: The user wants to know what really moves now, not what merely looks popular.
+- Source: user
+- Primary owning slice: M001/S04
+- Supporting slices: M001/S05, M001/S06
+- Validation: S04+S05 proof: `python -m pytest`, `python -m vinted_radar.cli rankings --db data/vinted-radar-s05.db --kind demand --limit 10`, and `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765` plus browser verification confirmed a demand-led ranking table and listing-detail score explanations on the main product surface.
+- Notes: Demand ranking remains grounded in state/history evidence, follow-up misses, confidence, and freshness rather than recency-only sorting, and the dashboard now renders that ranking without adding separate client-side scoring logic.
+
+### R006 — The product must provide a separate premium ranking that rewards items that perform well while remaining relatively expensive in their context.
+- Class: differentiator
+- Status: validated
+- Description: The product must provide a separate premium ranking that rewards items that perform well while remaining relatively expensive in their context.
+- Why it matters: The user wants to distinguish cheap fast movers from items that sustain strong demand without collapsing in price.
+- Source: user
+- Primary owning slice: M001/S04
+- Supporting slices: M001/S05, M001/S06
+- Validation: S04+S05 proof: `python -m pytest`, `python -m vinted_radar.cli rankings --db data/vinted-radar-s05.db --kind premium --limit 10`, and `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765` plus browser verification confirmed that premium remains a separate ranking surface with contextual-price explanations available in listing detail.
+- Notes: Premium ranking still starts from demand and adds only a modest contextual price boost when the chosen peer sample is strong enough; S05 now exposes that distinction directly in the product surface.
+
+### R008 — The main product surface must summarize which sub-categories are performing, which are rising recently, and which segments appear to move quickly or hold price well.
+- Class: primary-user-loop
+- Status: validated
+- Description: The main product surface must summarize which sub-categories are performing, which are rising recently, and which segments appear to move quickly or hold price well.
+- Why it matters: The user wants a market read first, not just raw listing tables.
+- Source: user
+- Primary owning slice: M001/S04
+- Supporting slices: M001/S05, M001/S06
+- Validation: S05 proof: `python -m pytest`, `python -m vinted_radar.cli market-summary --db data/vinted-radar-s05.db --limit 6 --format json`, and `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765` plus browser verification confirmed performing/rising segment modules on the main product surface.
+- Notes: S04 introduced the segment-summary payloads, and S05 now renders them as the first view in the local dashboard while keeping the underlying CLI output available for diagnostics.
+
+### R009 — The main screen must combine a market summary with concrete ranking tables, support useful filters, and allow drill-down into a listing detail view with history, signals, and inference basis.
+- Class: primary-user-loop
+- Status: validated
+- Description: The main screen must combine a market summary with concrete ranking tables, support useful filters, and allow drill-down into a listing detail view with history, signals, and inference basis.
+- Why it matters: The product promise depends on linking macro market reading to micro evidence quickly.
+- Source: user
+- Primary owning slice: M001/S05
+- Supporting slices: M001/S03, M001/S04, M001/S06
+- Validation: S05 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765`, and browser verification at `http://127.0.0.1:8765` confirmed a mixed dashboard with segment summaries, demand/premium ranking tables, root/state/catalog/search filters, and listing-detail drill-down into history, score factors, transitions, and state reasons.
+- Notes: The delivered dashboard is server-rendered and backed by the same repository/state/scoring payloads exposed through `/api/dashboard` and `/api/listings/<id>` for truthful diagnostics.
 
 ## Deferred
 
@@ -268,12 +270,12 @@ This file is the explicit capability and coverage contract for the project.
 | R001 | core-capability | active | M001/S01 | M001/S02, M001/S06 | S01 proof: `python -m pytest`, `python -m vinted_radar.cli discover --db data/vinted-radar.db --page-limit 1 --max-leaf-categories 6 --request-delay 0.0`, and `python -m vinted_radar.cli coverage --db data/vinted-radar.db` verified public seed sync and live listing ingestion without login. |
 | R002 | continuity | active | M001/S02 | M001/S03, M001/S05, M001/S06 | S02 proof: `python -m pytest`, two consecutive `python -m vinted_radar.cli discover --db data/vinted-radar-s02.db --page-limit 1 --max-leaf-categories 4 --request-delay 0.0` runs, plus `python -m vinted_radar.cli freshness --db data/vinted-radar-s02.db`, `python -m vinted_radar.cli revisit-plan --db data/vinted-radar-s02.db --limit 5`, and `python -m vinted_radar.cli history --db data/vinted-radar-s02.db --listing-id 4176710128` verified persisted repeated observations and revisit history surfaces. |
 | R003 | core-capability | active | M001/S03 | M001/S05, M001/S06 | S03 proof: `python -m pytest`, `python -m vinted_radar.cli state-refresh --db data/vinted-radar-s02.db --limit 10 --request-delay 0.0`, `python -m vinted_radar.cli state-summary --db data/vinted-radar-s02.db`, and `python -m vinted_radar.cli state --db data/vinted-radar-s02.db --listing-id 4176710128` verified the cautious state taxonomy and explanation surfaces against live data plus fixture coverage for sold/deleted/unavailable paths. |
-| R004 | failure-visibility | active | M001/S03 | M001/S05, M001/S06 | Current proof is CLI-level only: `coverage`, `freshness`, `state-summary`, and per-listing `state` show what was covered, how fresh it is, and how confident the current state engine is. |
-| R005 | primary-user-loop | active | M001/S04 | M001/S05, M001/S06 | S04 proof: `python -m pytest`, `python -m vinted_radar.cli rankings --db data/vinted-radar-s02.db --kind demand --limit 10`, and `python -m vinted_radar.cli score --db data/vinted-radar-s02.db --listing-id 8305280693` verified the demand ranking surface and its explanation payloads. |
-| R006 | differentiator | active | M001/S04 | M001/S05, M001/S06 | S04 proof: `python -m pytest`, `python -m vinted_radar.cli rankings --db data/vinted-radar-s02.db --kind premium --limit 10`, and `python -m vinted_radar.cli score --db data/vinted-radar-s02.db --listing-id 8305280693` verified that premium ranking stays separate and shows its contextual price basis. |
+| R004 | failure-visibility | validated | M001/S03 | M001/S05, M001/S06 | S05 proof: `python -m pytest`, live `discover` + `state-refresh` into `data/vinted-radar-s05.db`, and browser-verified `dashboard` confirmed visible coverage, freshness, confidence, and listing-detail explanation surfaces on the main product UI. |
+| R005 | primary-user-loop | validated | M001/S04 | M001/S05, M001/S06 | S04+S05 proof: `rankings --kind demand` plus browser-verified `dashboard` confirmed demand-led ranking and score explanations on the main product surface. |
+| R006 | differentiator | validated | M001/S04 | M001/S05, M001/S06 | S04+S05 proof: `rankings --kind premium` plus browser-verified `dashboard` confirmed a separate premium table with contextual-price explanation in listing detail. |
 | R007 | quality-attribute | active | M001/S04 | M002 (provisional) | S04 proof: `python -m pytest tests/test_scoring.py` verified support-threshold-based context selection and graceful fallback when no trustworthy peer group exists. |
-| R008 | primary-user-loop | active | M001/S04 | M001/S05, M001/S06 | Current S04 proof is CLI-level: `python -m vinted_radar.cli market-summary --db data/vinted-radar-s02.db --limit 8` produces performing and rising segment summaries tied to tracked listing counts and score aggregates. |
-| R009 | primary-user-loop | active | M001/S05 | M001/S03, M001/S04, M001/S06 | mapped |
+| R008 | primary-user-loop | validated | M001/S04 | M001/S05, M001/S06 | S05 proof: `market-summary --db data/vinted-radar-s05.db --limit 6 --format json` plus browser-verified `dashboard` confirmed performing and rising segment modules on the main product surface. |
+| R009 | primary-user-loop | validated | M001/S05 | M001/S03, M001/S04, M001/S06 | S05 proof: browser-verified `dashboard` confirmed market summary, ranking tables, useful filters, and listing-detail drill-down with history, signals, and inference basis. |
 | R010 | operability | active | M001/S06 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05 | mapped |
 | R011 | quality-attribute | active | M001/S03 | M001/S01, M001/S02, M001/S04, M001/S05, M001/S06 | mapped |
 | R012 | differentiator | active | M002 (provisional) | none | mapped |
@@ -291,7 +293,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 16
+- Active requirements: 11
 - Mapped to slices: 16
-- Validated: 0
+- Validated: 5
 - Unmapped active requirements: 0
