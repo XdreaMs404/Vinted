@@ -5,9 +5,10 @@ from datetime import UTC, datetime
 import html
 import json
 from pathlib import Path
+from threading import Thread
 from typing import Any
 from urllib.parse import parse_qs, urlencode
-from wsgiref.simple_server import make_server
+from wsgiref.simple_server import WSGIServer, make_server
 
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_market_summary, build_rankings, load_listing_scores
@@ -58,6 +59,19 @@ class DashboardFilters:
         return payload
 
 
+@dataclass(slots=True)
+class DashboardServerHandle:
+    host: str
+    port: int
+    server: WSGIServer
+    thread: Thread
+
+    def stop(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2.0)
+
+
 class DashboardApplication:
     def __init__(self, db_path: str | Path, *, now: str | None = None) -> None:
         self.db_path = Path(db_path)
@@ -80,6 +94,12 @@ class DashboardApplication:
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
+        if path == "/api/runtime":
+            with RadarRepository(self.db_path) as repository:
+                payload = repository.runtime_status(limit=8)
+            body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+            return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
+
         if path.startswith("/api/listings/"):
             listing_id = _parse_int(path.rsplit("/", 1)[-1])
             if listing_id is None:
@@ -97,12 +117,14 @@ class DashboardApplication:
             with RadarRepository(self.db_path) as repository:
                 coverage = repository.coverage_summary()
                 listing_scores = load_listing_scores(repository, now=self.now)
+                runtime_status = repository.runtime_status(limit=1)
             body = json.dumps(
                 {
                     "status": "ok",
                     "db_path": str(self.db_path),
                     "has_run": coverage is not None,
                     "tracked_listings": len(listing_scores),
+                    "latest_runtime_cycle": runtime_status["latest_cycle"],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -125,6 +147,20 @@ def serve_dashboard(
         server.serve_forever()
 
 
+def start_dashboard_server(
+    db_path: str | Path,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    now: str | None = None,
+) -> DashboardServerHandle:
+    application = DashboardApplication(db_path, now=now)
+    server = make_server(host, port, application)
+    thread = Thread(target=server.serve_forever, name=f"dashboard-{port}", daemon=True)
+    thread.start()
+    return DashboardServerHandle(host=host, port=port, server=server, thread=thread)
+
+
 def build_dashboard_payload(
     repository: RadarRepository,
     *,
@@ -135,6 +171,7 @@ def build_dashboard_payload(
     listing_scores = load_listing_scores(repository, now=now)
     coverage = repository.coverage_summary()
     freshness = repository.freshness_summary(now=now)
+    runtime = repository.runtime_status(limit=8)
     overall_state = summarize_state_evaluations(listing_scores, generated_at=generated_at)
     filter_options = _build_filter_options(listing_scores)
     filtered_scores = _apply_filters(listing_scores, filters)
@@ -156,6 +193,7 @@ def build_dashboard_payload(
         "latest_run": None if coverage is None else coverage["run"],
         "coverage": coverage,
         "freshness": freshness,
+        "runtime": runtime,
         "overall_state": overall_state,
         "market_summary": market_summary,
         "filters": {
@@ -183,6 +221,7 @@ def build_dashboard_payload(
         "detail": detail,
         "diagnostics": {
             "dashboard_api": "/api/dashboard",
+            "runtime_api": "/api/runtime",
             "listing_api": None if selected_listing is None else f"/api/listings/{selected_listing['listing_id']}",
             "health": "/health",
             "latest_failures": [] if coverage is None else coverage["failures"],
@@ -254,11 +293,21 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
     )
 
     latest_run = payload.get("latest_run") or {}
+    latest_runtime = payload["runtime"].get("latest_cycle") or {}
     freshness = payload["freshness"]["overall"]
     state_summary = payload["overall_state"]["overall"]
     results = payload["results"]
     detail = payload.get("detail")
     diagnostics = payload["diagnostics"]
+
+    runtime_value = _escape(str(latest_runtime.get("status") or "No cycle yet"))
+    runtime_items = [
+        f"Mode {latest_runtime.get('mode', 'n/a')}",
+        f"Phase {latest_runtime.get('phase', 'n/a')}",
+        f"Discovery run {latest_runtime.get('discovery_run_id', 'n/a')}",
+    ]
+    if latest_runtime.get("last_error"):
+        runtime_items.append(f"Last error {latest_runtime['last_error']}")
 
     cards = [
         _metric_card(
@@ -268,6 +317,11 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
                 f"Leaf catalogs {latest_run.get('scanned_leaf_catalogs', 0)} / {latest_run.get('total_leaf_catalogs', 0)}",
                 f"Page scans {latest_run.get('successful_scans', 0)} ok · {latest_run.get('failed_scans', 0)} failed",
             ],
+        ),
+        _metric_card(
+            "Runtime",
+            runtime_value,
+            runtime_items,
         ),
         _metric_card(
             "Freshness",
@@ -517,6 +571,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       </div>
       <div class=\"api-links\">
         <a class=\"button secondary\" href=\"{_escape(diagnostics['dashboard_api'] + _suffix_query(filters, include_listing=True))}\">Dashboard payload</a>
+        <a class=\"button secondary\" href=\"{_escape(diagnostics['runtime_api'])}\">Runtime payload</a>
         <a class=\"button secondary\" href=\"{_escape(diagnostics['health'])}\">Health</a>
         {'' if diagnostics['listing_api'] is None else f'<a class="button secondary" href="{_escape(diagnostics["listing_api"])}">Selected listing payload</a>'}
       </div>

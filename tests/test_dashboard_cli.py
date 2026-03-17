@@ -34,6 +34,7 @@ def test_dashboard_cli_reports_local_urls_and_calls_server(monkeypatch, tmp_path
     assert result.exit_code == 0
     assert "Dashboard URL: http://127.0.0.1:8765" in result.stdout
     assert "Dashboard API: http://127.0.0.1:8765/api/dashboard" in result.stdout
+    assert "Runtime API: http://127.0.0.1:8765/api/runtime" in result.stdout
     assert captured == {
         "db_path": Path(tmp_path / "dash.db"),
         "host": "127.0.0.1",

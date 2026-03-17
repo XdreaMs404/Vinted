@@ -48,17 +48,6 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: S04 proof: `python -m pytest tests/test_scoring.py` verified support-threshold-based context selection and graceful fallback when no trustworthy peer group exists.
 - Notes: S04 applies lightweight contextualization opportunistically through explicit peer tiers (`catalog_brand_condition`, `catalog_condition`, `catalog_brand`, `catalog`, `root_condition`, `root`) with minimum support thresholds and a no-context fallback when support is too thin.
 
-### R010 — The system must run locally in both a simple batch mode and a continuous mode that keeps the radar alive through repeated discovery and revisits.
-- Class: operability
-- Status: active
-- Description: The system must run locally in both a simple batch mode and a continuous mode that keeps the radar alive through repeated discovery and revisits.
-- Why it matters: Batch mode supports quick testing and controlled reruns; continuous mode is required for real temporal value.
-- Source: user
-- Primary owning slice: M001/S06
-- Supporting slices: M001/S01, M001/S02, M001/S03, M001/S04, M001/S05
-- Validation: mapped
-- Notes: A single user should be able to operate the local system without excessive setup complexity.
-
 ### R011 — The pipeline and product must continue to function when public signals are missing, partial, or inconsistent, while making those gaps explicit.
 - Class: quality-attribute
 - Status: active
@@ -182,6 +171,17 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: S05 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765`, and browser verification at `http://127.0.0.1:8765` confirmed a mixed dashboard with segment summaries, demand/premium ranking tables, root/state/catalog/search filters, and listing-detail drill-down into history, score factors, transitions, and state reasons.
 - Notes: The delivered dashboard is server-rendered and backed by the same repository/state/scoring payloads exposed through `/api/dashboard` and `/api/listings/<id>` for truthful diagnostics.
 
+### R010 — The system must run locally in both a simple batch mode and a continuous mode that keeps the radar alive through repeated discovery and revisits.
+- Class: operability
+- Status: validated
+- Description: The system must run locally in both a simple batch mode and a continuous mode that keeps the radar alive through repeated discovery and revisits.
+- Why it matters: Batch mode supports quick testing and controlled reruns; continuous mode is required for real temporal value.
+- Source: user
+- Primary owning slice: M001/S06
+- Supporting slices: M001/S01, M001/S02, M001/S03, M001/S04, M001/S05
+- Validation: S06 proof: `python -m pytest`, `python -m vinted_radar.cli batch --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --request-delay 0.0`, `python -m vinted_radar.cli runtime-status --db data/vinted-radar-s06.db --format json`, and `python -m vinted_radar.cli continuous --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 2 --state-refresh-limit 4 --interval-seconds 5 --request-delay 0.0 --dashboard --host 127.0.0.1 --port 8766` plus browser verification at `http://127.0.0.1:8766` and direct checks against `/api/runtime`, `/api/dashboard`, and `/health` confirmed both operator modes and persisted runtime diagnostics.
+- Notes: Runtime truth now lives in SQLite `runtime_cycles`, with batch/continuous orchestration exposed through the CLI and mirrored on the dashboard runtime card plus `/api/runtime`.
+
 ## Deferred
 
 ### R020 — The product could notify the user when segments accelerate, weaken, or cross notable confidence thresholds.
@@ -276,7 +276,7 @@ This file is the explicit capability and coverage contract for the project.
 | R007 | quality-attribute | active | M001/S04 | M002 (provisional) | S04 proof: `python -m pytest tests/test_scoring.py` verified support-threshold-based context selection and graceful fallback when no trustworthy peer group exists. |
 | R008 | primary-user-loop | validated | M001/S04 | M001/S05, M001/S06 | S05 proof: `market-summary --db data/vinted-radar-s05.db --limit 6 --format json` plus browser-verified `dashboard` confirmed performing and rising segment modules on the main product surface. |
 | R009 | primary-user-loop | validated | M001/S05 | M001/S03, M001/S04, M001/S06 | S05 proof: browser-verified `dashboard` confirmed market summary, ranking tables, useful filters, and listing-detail drill-down with history, signals, and inference basis. |
-| R010 | operability | active | M001/S06 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05 | mapped |
+| R010 | operability | validated | M001/S06 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05 | S06 proof: `python -m pytest`, live `batch`, `runtime-status`, and `continuous --dashboard` verification against `data/vinted-radar-s06.db` plus checks against `/api/runtime`, `/api/dashboard`, and `/health` confirmed both operator modes and persisted runtime diagnostics. |
 | R011 | quality-attribute | active | M001/S03 | M001/S01, M001/S02, M001/S04, M001/S05, M001/S06 | mapped |
 | R012 | differentiator | active | M002 (provisional) | none | mapped |
 | R013 | core-capability | active | M003 (provisional) | none | mapped |
@@ -293,7 +293,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 11
+- Active requirements: 10
 - Mapped to slices: 16
-- Validated: 5
+- Validated: 6
 - Unmapped active requirements: 0

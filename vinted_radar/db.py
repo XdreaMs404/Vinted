@@ -133,11 +133,33 @@ CREATE TABLE IF NOT EXISTS item_page_probes (
     FOREIGN KEY (listing_id) REFERENCES listings(listing_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS runtime_cycles (
+    cycle_id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    interval_seconds REAL,
+    state_probe_limit INTEGER NOT NULL DEFAULT 0,
+    discovery_run_id TEXT,
+    state_probed_count INTEGER NOT NULL DEFAULT 0,
+    tracked_listings INTEGER NOT NULL DEFAULT 0,
+    first_pass_only INTEGER NOT NULL DEFAULT 0,
+    fresh_followup INTEGER NOT NULL DEFAULT 0,
+    aging_followup INTEGER NOT NULL DEFAULT 0,
+    stale_followup INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (discovery_run_id) REFERENCES discovery_runs(run_id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_catalogs_root_leaf ON catalogs(root_title, is_leaf);
 CREATE INDEX IF NOT EXISTS idx_catalog_scans_run_success ON catalog_scans(run_id, success);
 CREATE INDEX IF NOT EXISTS idx_listing_discoveries_run_catalog ON listing_discoveries(run_id, source_catalog_id);
 CREATE INDEX IF NOT EXISTS idx_listing_observations_listing_time ON listing_observations(listing_id, observed_at);
 CREATE INDEX IF NOT EXISTS idx_item_page_probes_listing_time ON item_page_probes(listing_id, probed_at);
+CREATE INDEX IF NOT EXISTS idx_runtime_cycles_started_at ON runtime_cycles(started_at DESC);
 """
 
 

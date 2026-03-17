@@ -6,10 +6,11 @@ import sys
 
 import typer
 
-from vinted_radar.dashboard import serve_dashboard
+from vinted_radar.dashboard import serve_dashboard, start_dashboard_server
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
+from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
 from vinted_radar.services.state_refresh import build_default_state_refresh_service
 from vinted_radar.state_machine import evaluate_listing_state, summarize_state_evaluations
 
@@ -44,6 +45,149 @@ def discover(
     typer.echo(f"Page scans: {report.successful_scans} successful, {report.failed_scans} failed")
     typer.echo(f"Listings discovered: {report.raw_listing_hits} sightings, {report.unique_listing_hits} unique IDs")
     typer.echo(f"Database: {db}")
+
+
+@app.command("batch")
+def batch_run(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    page_limit: int = typer.Option(1, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
+    max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in the batch cycle."),
+    root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
+    state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after discovery."),
+    request_delay: float = typer.Option(0.5, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
+    timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
+    dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard after the batch cycle completes."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
+    port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
+) -> None:
+    runtime_service = RadarRuntimeService(db)
+    options = _build_runtime_options(
+        page_limit=page_limit,
+        max_leaf_categories=max_leaf_categories,
+        root_scope=root_scope,
+        state_refresh_limit=state_refresh_limit,
+        request_delay=request_delay,
+        timeout_seconds=timeout_seconds,
+    )
+    try:
+        report = runtime_service.run_cycle(options, mode="batch")
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Batch cycle failed: {type(exc).__name__}: {exc}", err=True)
+        typer.echo(f"Inspect runtime status with: python -m vinted_radar.cli runtime-status --db {db}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    _render_runtime_cycle_report(report, db=db)
+    if not dashboard:
+        return
+
+    typer.echo(f"Dashboard URL: http://{host}:{port}")
+    typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
+    typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
+    try:
+        serve_dashboard(db_path=db, host=host, port=port)
+    except KeyboardInterrupt:
+        typer.echo("Dashboard server stopped.")
+
+
+@app.command("continuous")
+def continuous_run(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    page_limit: int = typer.Option(1, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
+    max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in each cycle."),
+    root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
+    state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after each discovery cycle."),
+    interval_seconds: float = typer.Option(1800.0, "--interval-seconds", min=0.1, help="Delay between completed cycles in seconds."),
+    max_cycles: int | None = typer.Option(None, "--max-cycles", min=1, help="Optional cycle cap for smoke runs or tests."),
+    request_delay: float = typer.Option(0.5, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
+    timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
+    dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard alongside the continuous loop."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
+    port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
+) -> None:
+    runtime_service = RadarRuntimeService(db)
+    options = _build_runtime_options(
+        page_limit=page_limit,
+        max_leaf_categories=max_leaf_categories,
+        root_scope=root_scope,
+        state_refresh_limit=state_refresh_limit,
+        request_delay=request_delay,
+        timeout_seconds=timeout_seconds,
+    )
+    dashboard_server = None
+    if dashboard:
+        dashboard_server = start_dashboard_server(db_path=db, host=host, port=port)
+        typer.echo(f"Dashboard URL: http://{host}:{port}")
+        typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
+        typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
+
+    typer.echo(f"Database: {db}")
+    typer.echo(f"Continuous interval: {interval_seconds:.1f}s")
+    if max_cycles is not None:
+        typer.echo(f"Cycle cap: {max_cycles}")
+    try:
+        runtime_service.run_continuous(
+            options,
+            interval_seconds=interval_seconds,
+            max_cycles=max_cycles,
+            continue_on_error=True,
+            on_cycle_complete=lambda report: _render_runtime_cycle_report(report, db=db),
+        )
+    except KeyboardInterrupt:
+        typer.echo("Continuous radar stopped.")
+    finally:
+        if dashboard_server is not None:
+            dashboard_server.stop()
+
+
+@app.command("runtime-status")
+def runtime_status(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    limit: int = typer.Option(5, "--limit", min=1, help="How many recent runtime cycles to show."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    with RadarRepository(db) as repository:
+        status = repository.runtime_status(limit=limit)
+
+    if status["latest_cycle"] is None:
+        typer.echo(f"Database: {db}")
+        typer.echo("No runtime cycles recorded yet.")
+        return
+
+    if output_format == "json":
+        typer.echo(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    latest = status["latest_cycle"]
+    totals = status["totals"]
+    typer.echo(f"Database: {db}")
+    typer.echo(f"Latest cycle: {latest['cycle_id']}")
+    typer.echo(f"Mode: {latest['mode']}")
+    typer.echo(f"Status: {latest['status']} (phase {latest['phase']})")
+    typer.echo(f"Started: {latest['started_at']}")
+    typer.echo(f"Finished: {latest['finished_at'] or 'still running'}")
+    typer.echo(f"Discovery run: {latest.get('discovery_run_id') or 'n/a'}")
+    typer.echo(f"State probes: {latest.get('state_probed_count', 0)} / {latest.get('state_probe_limit', 0)}")
+    typer.echo(
+        "Freshness snapshot: first-pass {first_pass_only}, fresh {fresh_followup}, aging {aging_followup}, stale {stale_followup}".format(
+            **latest
+        )
+    )
+    typer.echo(
+        "Cycle totals: completed {completed_cycles}, failed {failed_cycles}, running {running_cycles}, interrupted {interrupted_cycles}".format(
+            **totals
+        )
+    )
+    if latest.get("last_error"):
+        _echo(f"Last error: {latest['last_error']}")
+    typer.echo("Recent cycles:")
+    for cycle in status["recent_cycles"]:
+        typer.echo(
+            "- {cycle_id} | {mode} | {status} | phase {phase} | tracked {tracked_listings} | probes {state_probed_count}".format(
+                **cycle
+            )
+        )
 
 
 @app.command()
@@ -455,11 +599,74 @@ def dashboard(
 ) -> None:
     typer.echo(f"Dashboard URL: http://{host}:{port}")
     typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
+    typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
     typer.echo(f"Database: {db}")
     try:
         serve_dashboard(db_path=db, host=host, port=port, now=now)
     except KeyboardInterrupt:
         typer.echo("Dashboard server stopped.")
+
+
+def _build_runtime_options(
+    *,
+    page_limit: int,
+    max_leaf_categories: int | None,
+    root_scope: str,
+    state_refresh_limit: int,
+    request_delay: float,
+    timeout_seconds: float,
+) -> RadarRuntimeOptions:
+    return RadarRuntimeOptions(
+        page_limit=page_limit,
+        max_leaf_categories=max_leaf_categories,
+        root_scope=root_scope,
+        request_delay=request_delay,
+        timeout_seconds=timeout_seconds,
+        state_refresh_limit=state_refresh_limit,
+    )
+
+
+def _render_runtime_cycle_report(report: RadarRuntimeCycleReport, *, db: Path) -> None:
+    typer.echo(f"Database: {db}")
+    typer.echo(f"Cycle: {report.cycle_id}")
+    typer.echo(f"Mode: {report.mode}")
+    typer.echo(f"Status: {report.status} (phase {report.phase})")
+    typer.echo(f"Started: {report.started_at}")
+    typer.echo(f"Finished: {report.finished_at or 'still running'}")
+    typer.echo(f"Discovery run: {report.discovery_run_id or 'n/a'}")
+    if report.discovery_report is not None:
+        successful_scans = report.discovery_report.successful_scans
+        failed_scans = report.discovery_report.failed_scans
+        if failed_scans:
+            discovery_summary = (
+                "Discovery: {raw_listing_hits} sightings, {unique_listing_hits} unique IDs, {successful_scans} successful scans, {failed_scans} scan failures"
+            ).format(
+                raw_listing_hits=report.discovery_report.raw_listing_hits,
+                unique_listing_hits=report.discovery_report.unique_listing_hits,
+                successful_scans=successful_scans,
+                failed_scans=failed_scans,
+            )
+        else:
+            discovery_summary = (
+                "Discovery: {raw_listing_hits} sightings, {unique_listing_hits} unique IDs, {successful_scans} successful scans, all scans clean"
+            ).format(
+                raw_listing_hits=report.discovery_report.raw_listing_hits,
+                unique_listing_hits=report.discovery_report.unique_listing_hits,
+                successful_scans=successful_scans,
+            )
+        typer.echo(discovery_summary)
+    typer.echo(f"State probes: {report.state_probed_count} / {report.config.get('state_refresh_limit', 0)}")
+    typer.echo(f"Tracked listings: {report.tracked_listings}")
+    typer.echo(
+        "Freshness snapshot: first-pass {first_pass_only}, fresh {fresh_followup}, aging {aging_followup}, stale {stale_followup}".format(
+            first_pass_only=report.freshness_counts["first-pass-only"],
+            fresh_followup=report.freshness_counts["fresh-followup"],
+            aging_followup=report.freshness_counts["aging-followup"],
+            stale_followup=report.freshness_counts["stale-followup"],
+        )
+    )
+    if report.last_error:
+        _echo(f"Last error: {report.last_error}")
 
 
 def _render_state_summary(summary: dict[str, object]) -> None:

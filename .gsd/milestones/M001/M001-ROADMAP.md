@@ -67,7 +67,7 @@ This milestone is complete only when all are true:
 - [x] **S05: Mixed Dashboard + Filters + Listing Detail** `risk:medium` `depends:[S03,S04]`
   > After this: the local dashboard shows market summary first and listing proof immediately underneath, with useful filters and a detail view that reveals timeline, transitions, signals, and inference basis.
 
-- [ ] **S06: Local Batch + Continuous End-to-End Loop** `risk:medium` `depends:[S01,S02,S03,S04,S05]`
+- [x] **S06: Local Batch + Continuous End-to-End Loop** `risk:medium` `depends:[S01,S02,S03,S04,S05]`
   > After this: one local user can run a simple batch workflow or leave the radar running continuously, and after multiple days the assembled system yields a credible, explainable market read end to end.
 
 ## Boundary Map

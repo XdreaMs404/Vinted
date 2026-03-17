@@ -67,6 +67,28 @@ def _seed_dashboard_db(db_path: Path) -> None:
             detail={"reason": "http_404", "response_status": 404},
             error_message=None,
         )
+        cycle_id = repository.start_runtime_cycle(
+            mode="continuous",
+            phase="starting",
+            interval_seconds=900.0,
+            state_probe_limit=4,
+            config={"state_refresh_limit": 4, "page_limit": 1},
+        )
+        repository.complete_runtime_cycle(
+            cycle_id,
+            status="completed",
+            phase="completed",
+            discovery_run_id="run-3",
+            state_probed_count=2,
+            tracked_listings=4,
+            freshness_counts={
+                "first-pass-only": 2,
+                "fresh-followup": 1,
+                "aging-followup": 0,
+                "stale-followup": 1,
+            },
+            last_error=None,
+        )
         conn.commit()
 
 
@@ -103,6 +125,8 @@ def test_dashboard_payload_keeps_summary_filters_and_detail_separate(tmp_path: P
     assert payload["market_summary"]["performing_segments"] == []
     assert payload["detail"]["listing_id"] == 9002
     assert payload["detail"]["state_code"] == "sold_probable"
+    assert payload["runtime"]["latest_cycle"]["status"] == "completed"
+    assert payload["diagnostics"]["runtime_api"] == "/api/runtime"
     assert any(item["label"] == "Follow-up misses" for item in payload["detail"]["transitions"])
     assert payload["filters"]["available"]["roots"][0]["value"] == "all"
 
@@ -114,6 +138,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
 
     html_status, html_body, html_headers = _call_app(app, "/")
     api_status, api_body, api_headers = _call_app(app, "/api/dashboard", "state=active")
+    runtime_status, runtime_body, runtime_headers = _call_app(app, "/api/runtime")
     detail_status, detail_body, detail_headers = _call_app(app, "/api/listings/9002")
     health_status, health_body, _ = _call_app(app, "/health")
 
@@ -121,12 +146,19 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert html_headers["Content-Type"].startswith("text/html")
     assert b"Market summary first" in html_body
     assert b"Demand proof" in html_body
+    assert b"Runtime payload" in html_body
 
     assert api_status == "200 OK"
     assert api_headers["Content-Type"].startswith("application/json")
     api_payload = json.loads(api_body)
     assert api_payload["results"]["filtered_listings"] == 2
     assert api_payload["rankings"]["demand"][0]["listing_id"] == 9001
+
+    assert runtime_status == "200 OK"
+    assert runtime_headers["Content-Type"].startswith("application/json")
+    runtime_payload = json.loads(runtime_body)
+    assert runtime_payload["latest_cycle"]["status"] == "completed"
+    assert runtime_payload["latest_cycle"]["discovery_run_id"] == "run-3"
 
     assert detail_status == "200 OK"
     assert detail_headers["Content-Type"].startswith("application/json")
@@ -135,4 +167,6 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert detail_payload["state_code"] == "sold_probable"
 
     assert health_status == "200 OK"
-    assert json.loads(health_body)["tracked_listings"] == 4
+    health_payload = json.loads(health_body)
+    assert health_payload["tracked_listings"] == 4
+    assert health_payload["latest_runtime_cycle"]["status"] == "completed"

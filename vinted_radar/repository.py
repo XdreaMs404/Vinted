@@ -339,6 +339,129 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "SELECT * FROM discovery_runs ORDER BY started_at DESC LIMIT 1"
         ).fetchone()
 
+    def start_runtime_cycle(
+        self,
+        *,
+        mode: str,
+        phase: str,
+        interval_seconds: float | None,
+        state_probe_limit: int,
+        config: dict[str, object],
+    ) -> str:
+        cycle_id = datetime.now(UTC).strftime("cycle-%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        started_at = _utc_now()
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO runtime_cycles (
+                    cycle_id, started_at, mode, status, phase, interval_seconds,
+                    state_probe_limit, config_json
+                ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
+                """,
+                (
+                    cycle_id,
+                    started_at,
+                    mode,
+                    phase,
+                    interval_seconds,
+                    state_probe_limit,
+                    json.dumps(config, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+        return cycle_id
+
+    def update_runtime_cycle_phase(self, cycle_id: str, *, phase: str) -> None:
+        with self.connection:
+            self.connection.execute(
+                "UPDATE runtime_cycles SET phase = ? WHERE cycle_id = ?",
+                (phase, cycle_id),
+            )
+
+    def complete_runtime_cycle(
+        self,
+        cycle_id: str,
+        *,
+        status: str,
+        phase: str,
+        discovery_run_id: str | None = None,
+        state_probed_count: int = 0,
+        tracked_listings: int = 0,
+        freshness_counts: dict[str, object] | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        freshness_counts = freshness_counts or {}
+        with self.connection:
+            self.connection.execute(
+                """
+                UPDATE runtime_cycles
+                SET finished_at = ?, status = ?, phase = ?, discovery_run_id = ?,
+                    state_probed_count = ?, tracked_listings = ?,
+                    first_pass_only = ?, fresh_followup = ?, aging_followup = ?, stale_followup = ?,
+                    last_error = ?
+                WHERE cycle_id = ?
+                """,
+                (
+                    _utc_now(),
+                    status,
+                    phase,
+                    discovery_run_id,
+                    state_probed_count,
+                    tracked_listings,
+                    int(freshness_counts.get("first-pass-only", 0) or 0),
+                    int(freshness_counts.get("fresh-followup", 0) or 0),
+                    int(freshness_counts.get("aging-followup", 0) or 0),
+                    int(freshness_counts.get("stale-followup", 0) or 0),
+                    last_error,
+                    cycle_id,
+                ),
+            )
+
+    def runtime_cycle(self, cycle_id: str) -> dict[str, object] | None:
+        row = self.connection.execute(
+            "SELECT * FROM runtime_cycles WHERE cycle_id = ?",
+            (cycle_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._hydrate_runtime_cycle_row(row)
+
+    def runtime_status(self, *, limit: int = 10) -> dict[str, object]:
+        bounded_limit = max(int(limit), 1)
+        recent_cycles = [
+            self._hydrate_runtime_cycle_row(row)
+            for row in self.connection.execute(
+                "SELECT * FROM runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT ?",
+                (bounded_limit,),
+            )
+        ]
+        totals_row = self.connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total_cycles,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_cycles,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_cycles,
+                SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_cycles,
+                SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END) AS interrupted_cycles
+            FROM runtime_cycles
+            """
+        ).fetchone()
+        latest_failure_row = self.connection.execute(
+            "SELECT * FROM runtime_cycles WHERE status = 'failed' ORDER BY started_at DESC, cycle_id DESC LIMIT 1"
+        ).fetchone()
+        totals = dict(totals_row) if totals_row is not None else {}
+        return {
+            "latest_cycle": None if not recent_cycles else recent_cycles[0],
+            "recent_cycles": recent_cycles,
+            "latest_failure": None if latest_failure_row is None else self._hydrate_runtime_cycle_row(latest_failure_row),
+            "totals": {
+                "total_cycles": int(totals.get("total_cycles") or 0),
+                "completed_cycles": int(totals.get("completed_cycles") or 0),
+                "failed_cycles": int(totals.get("failed_cycles") or 0),
+                "running_cycles": int(totals.get("running_cycles") or 0),
+                "interrupted_cycles": int(totals.get("interrupted_cycles") or 0),
+            },
+        }
+
     def count_rows(self, table_name: str) -> int:
         row = self.connection.execute(f"SELECT COUNT(*) AS count FROM {table_name}").fetchone()
         return int(row["count"])
@@ -717,6 +840,18 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             if hydrated.get(field) is None:
                 hydrated[field] = fallback.get(field)
         hydrated["raw_card"] = raw_payload
+        return hydrated
+
+    def _hydrate_runtime_cycle_row(self, row: sqlite3.Row) -> dict[str, object]:
+        hydrated = dict(row)
+        config_json = hydrated.pop("config_json", "{}")
+        hydrated["config"] = json.loads(config_json) if config_json else {}
+        hydrated["freshness_counts"] = {
+            "first-pass-only": int(hydrated.get("first_pass_only") or 0),
+            "fresh-followup": int(hydrated.get("fresh_followup") or 0),
+            "aging-followup": int(hydrated.get("aging_followup") or 0),
+            "stale-followup": int(hydrated.get("stale_followup") or 0),
+        }
         return hydrated
 
     def _resolve_run(self, run_id: str | None) -> sqlite3.Row | None:
