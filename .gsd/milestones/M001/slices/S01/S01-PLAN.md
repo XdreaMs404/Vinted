@@ -38,7 +38,7 @@ This plan is ordered risk-first: bootstrap the blank repo into a testable Python
 
 ## Tasks
 
-- [ ] **T01: Bootstrap the Python collector contracts and pytest harness** `est:1h15m`
+- [x] **T01: Bootstrap the Python collector contracts and pytest harness** `est:1h15m`
   - Why: The repo is still a blank slate. S01 needs a concrete runtime stack, storage contract, and test runner before discovery logic can be implemented safely or handed to later slices.
   - Files: `pyproject.toml`, `.gitignore`, `src/vinted_radar/config.py`, `src/vinted_radar/models.py`, `src/vinted_radar/storage/db.py`, `src/vinted_radar/storage/repository.py`, `tests/conftest.py`, `tests/test_repository.py`
   - Do: Create the Python package and dependencies (`httpx`, `beautifulsoup4`, `typer`, `pytest`), add runtime/test ignores for local state, define typed models for catalogs/listings/observations/raw evidence/coverage, and bootstrap SQLite tables that keep observations append-only and raw evidence separate. The schema must allow nullable public fields, record `extractor_version`, and be ready for later revisit history instead of a one-row-per-listing shortcut.

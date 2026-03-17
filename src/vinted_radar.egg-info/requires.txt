@@ -1,0 +1,7 @@
+beautifulsoup4<5,>=4.12
+httpx<1,>=0.27
+typer<1,>=0.12
+
+[dev]
+pytest<9,>=8.0
+ruff<1,>=0.6
