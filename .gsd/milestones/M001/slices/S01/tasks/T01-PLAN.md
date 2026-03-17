@@ -1,51 +1,52 @@
 ---
-estimated_steps: 4
-estimated_files: 8
+estimated_steps: 6
+estimated_files: 5
 ---
 
-# T01: Bootstrap the Python collector contracts and pytest harness
+# T01: Bootstrap discovery package and verification harness
 
 **Slice:** S01 — Public Discovery + Normalized Ingestion
 **Milestone:** M001
 
 ## Description
 
-Load the `test` skill before implementation so the new pytest setup follows project conventions from the start, and use `lint` on touched Python files before handoff. This task turns the blank repository into a runnable Python collector workspace with explicit storage and model contracts. Use `httpx` for HTTP, `beautifulsoup4` for HTML parsing, `typer` for CLI plumbing, `pytest` for tests, and SQLite for local persistence. The goal is not a placeholder scaffold: the schema and repository layer must already reflect S01’s real data boundary so S02 can extend it without destructive redesign.
+Create the first runnable Python package shape for the radar so S01 has a real CLI entrypoint, SQLite schema bootstrap, and executable smoke tests before the collector logic is added.
 
 ## Steps
 
-1. Create `pyproject.toml` and the base `src/vinted_radar/` package layout with dependencies, pytest configuration, and module wiring; update `.gitignore` to exclude local runtime outputs such as `data/`, `artifacts/`, and `.pytest_cache/`.
-2. Add `src/vinted_radar/config.py` and `src/vinted_radar/models.py` with base URL `https://www.vinted.com`, default headers/timeouts, root aliases (`men` -> `5`, `women` -> `1904`), extractor version plumbing, and typed models for `CatalogNode`, `DiscoveryRun`, `ListingIdentity`, `ListingObservation`, `RawEvidenceFragment`, and coverage counters. Keep public fields nullable where Vinted may omit them.
-3. Implement `src/vinted_radar/storage/db.py` and `src/vinted_radar/storage/repository.py` to bootstrap SQLite tables for `catalog_nodes`, `discovery_runs`, `listing_identities`, `listing_observations`, `raw_evidence_fragments`, and `scan_coverage`. Observations must be append-only, raw evidence must be stored separately from normalized facts, and every record path must carry `observed_at` / extractor metadata needed later.
-4. Add `tests/conftest.py` and `tests/test_repository.py` proving schema creation, append-only observation behavior, nullable field handling, and raw evidence persistence without any live network dependency.
+1. Create `pyproject.toml` with the runtime and test dependencies needed for a Typer + SQLite based collector package.
+2. Add the `vinted_radar` package skeleton, including a CLI entrypoint and database bootstrap module.
+3. Define the initial schema tables for runs, catalogs, listings, discoveries, and scan diagnostics.
+4. Expose `discover` and `coverage` commands that initialize the DB and report placeholder state cleanly.
+5. Add a smoke test that proves the CLI can initialize the schema and report an empty coverage state.
+6. Run the targeted smoke test and fix any environment or packaging issues immediately.
 
 ## Must-Haves
 
-- [ ] The repo has a real Python package/test runner, not loose scripts.
-- [ ] SQLite tables and typed models match the slice boundary: catalog registry, run tracking, listing identities, append-only observations, raw evidence, and scan coverage.
-- [ ] Null public fields are first-class citizens in the schema and repository API rather than treated as errors.
+- [ ] The project has a real Python package and module entrypoint.
+- [ ] The SQLite schema initializes idempotently from the CLI.
+- [ ] Smoke tests exist and pass.
 
 ## Verification
 
-- `python -m pytest tests/test_repository.py`
-- Confirm the test creates a temp DB, bootstraps the required tables, and passes without internet access.
+- `python -m pytest tests/test_cli_smoke.py`
+- `python -m vinted_radar.cli coverage --db data/test-smoke.db`
 
 ## Observability Impact
 
-- Signals added/changed: durable `discovery_runs` / `scan_coverage` tables and extractor-version-bearing observation/evidence records.
-- How a future agent inspects this: open the SQLite DB created in tests or by later runtime tasks and inspect the schema/tables through the repository layer.
-- Failure state exposed: missing tables, incorrect nullability, or non-append observation behavior fail deterministically in `tests/test_repository.py`.
+- Signals added/changed: `discovery_runs`, `catalog_scans`, `listing_discoveries`, `listings`, and `catalogs` schema surfaces.
+- How a future agent inspects this: run `python -m vinted_radar.cli coverage --db <path>` or inspect the SQLite DB directly.
+- Failure state exposed: schema/bootstrap failures become immediate CLI errors instead of silent missing tables.
 
 ## Inputs
 
-- `.gsd/milestones/M001/slices/S01/S01-PLAN.md` — authoritative slice goal, verification targets, and task ordering.
-- `.gsd/DECISIONS.md` — includes `D002`, `D003`, and `D010`, which require public-only collection, observed-vs-inferred separation, and the Python/SQLite delivery stack.
+- `.gsd/milestones/M001/slices/S01/S01-PLAN.md` — the execution contract for the slice.
+- `.gsd/DECISIONS.md` — the collector stack decision already recorded for S01.
 
 ## Expected Output
 
-- `pyproject.toml` — Python package metadata, dependencies, and pytest/tool configuration.
-- `.gitignore` — local runtime/test outputs ignored.
-- `src/vinted_radar/config.py` — base collector configuration and root mappings.
-- `src/vinted_radar/models.py` — typed contracts for catalogs, listings, observations, evidence, and coverage.
-- `src/vinted_radar/storage/db.py` and `src/vinted_radar/storage/repository.py` — SQLite bootstrap and repository operations.
-- `tests/conftest.py` and `tests/test_repository.py` — passing contract tests for the storage boundary.
+- `pyproject.toml` — package metadata and CLI entrypoint.
+- `vinted_radar/cli.py` — runnable discovery/coverage command group.
+- `vinted_radar/db.py` — schema initialization helpers.
+- `tests/test_cli_smoke.py` — executable proof that the bootstrap works.
+ works.

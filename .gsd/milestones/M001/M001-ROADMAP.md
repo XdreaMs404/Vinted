@@ -52,16 +52,16 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Public Discovery + Normalized Ingestion** `risk:high` `depends:[]`
+- [x] **S01: Public Discovery + Normalized Ingestion** `risk:high` `depends:[]`
   > After this: a batch run discovers Homme/Femme listings from seeded public entry points, stores normalized listing records plus useful raw evidence, and shows the observed coverage footprint.
 
-- [ ] **S02: Intelligent Revisits + Observation History** `risk:high` `depends:[S01]`
+- [x] **S02: Intelligent Revisits + Observation History** `risk:high` `depends:[S01]`
   > After this: the radar revisits listings over time, preserves multiple timestamped observations per listing, and exposes first seen, last seen, revisit frequency, and freshness of follow-up.
 
-- [ ] **S03: Prudent State Machine + Confidence Surfaces** `risk:high` `depends:[S02]`
+- [x] **S03: Prudent State Machine + Confidence Surfaces** `risk:high` `depends:[S02]`
   > After this: each listing shows a cautious state (`active`, sold observed/probable, unavailable non-conclusive, deleted when distinct, `unknown`) with visible justification, observed/inferred separation, and confidence.
 
-- [ ] **S04: Market Scores + Lightweight Contextualization** `risk:medium` `depends:[S02,S03]`
+- [x] **S04: Market Scores + Lightweight Contextualization** `risk:medium` `depends:[S02,S03]`
   > After this: the product computes explainable “demande pure” and “premium” rankings plus a market summary of performing and rising segments, all backed by observed data and lightweight contextualization where it is robust.
 
 - [ ] **S05: Mixed Dashboard + Filters + Listing Detail** `risk:medium` `depends:[S03,S04]`

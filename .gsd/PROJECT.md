@@ -10,7 +10,9 @@ Turn imperfect public Vinted listing signals into a credible, evidence-backed ma
 
 ## Current State
 
-The repository is at bootstrap stage. Planning artifacts for the first milestone exist, but no collector, revisit engine, state machine, scoring pipeline, scheduler, or dashboard has been implemented yet.
+S01 through S04 are complete. The repository now has a runnable Python batch collector that syncs the public Homme/Femme catalog tree, scans public catalog pages, persists normalized listing cards in SQLite, records one normalized observation per listing per run, derives cautious current listing states with confidence and explanation surfaces, and computes explainable demand / premium rankings plus market segment summaries.
+
+Repeated runs against the same database now expose first seen, last seen, observation count, average revisit gap, freshness buckets, ranked revisit candidates, item-page probe diagnostics, state detail, per-listing score breakdowns, and performing/rising segment summaries through CLI inspection commands. Dashboard surfaces and continuous mode are still unimplemented.
 
 ## Architecture / Key Patterns
 
@@ -21,6 +23,16 @@ Evidence-first product logic: preserve observed facts, derive inferences explici
 Historical observation storage rather than last-write-wins snapshots, so listing evolution, state transitions, and estimated time-to-sell can be traced over time.
 
 Mixed market surface: market summaries and rankings must always be backed by drill-down into the listing-level evidence that justifies them.
+
+S01 acquisition currently uses public server-rendered HTML only: the full Homme/Femme catalog tree is extracted from the embedded `self.__next_f.push(...)` payload on `/catalog`, and listing discovery comes from SSR item cards rather than browser automation or private APIs.
+
+SQLite is the first durable runtime boundary. Discovery runs, per-catalog scans, listings, and listing sightings are persisted so coverage and failures remain inspectable after each batch run.
+
+S02 adds a second history layer: `listing_observations` stores one normalized observation per listing per run for cadence/freshness queries, while `listing_discoveries` remains the per-sighting diagnostic surface for debugging catalog/page behavior.
+
+S03 adds a cautious state layer over that history: optional `item_page_probes` capture direct public evidence from item pages, and the state engine combines probes plus follow-up-miss history into `active`, `sold_observed`, `sold_probable`, `unavailable_non_conclusive`, `deleted`, and `unknown` surfaces with confidence and reasons.
+
+S04 adds an on-demand scoring layer over the state/history surfaces: `demand` ranks sell-through evidence, `premium` stays demand-led with a modest contextual price boost when peer support is strong enough, and market summaries aggregate performing and rising segments from the same evidence base.
 
 Milestone sequencing is deliberate: build a credible listing-level radar first, enrich the market reading next, then add product-level intelligence plus AI, and only then harden for SaaS commercialization.
 
