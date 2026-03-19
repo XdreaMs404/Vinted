@@ -20,13 +20,16 @@ app = typer.Typer(add_completion=False, help="Local-first Vinted Homme/Femme rad
 @app.command()
 def discover(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
-    page_limit: int = typer.Option(1, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
+    page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in the run."),
     root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
-    request_delay: float = typer.Option(0.5, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
+    request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
+    concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
 ) -> None:
-    service = build_default_service(db_path=str(db), timeout_seconds=timeout_seconds, request_delay=request_delay)
+    proxies = list(proxy) if proxy else None
+    service = build_default_service(db_path=str(db), timeout_seconds=timeout_seconds, request_delay=request_delay, proxies=proxies)
     try:
         report = service.run(
             DiscoveryOptions(
@@ -34,6 +37,7 @@ def discover(
                 max_leaf_categories=max_leaf_categories,
                 root_scope=root_scope,
                 request_delay=request_delay,
+                concurrency=concurrency,
             )
         )
     finally:
@@ -50,12 +54,14 @@ def discover(
 @app.command("batch")
 def batch_run(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
-    page_limit: int = typer.Option(1, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
+    page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in the batch cycle."),
     root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
     state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after discovery."),
-    request_delay: float = typer.Option(0.5, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
+    request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
+    concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
     dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard after the batch cycle completes."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
@@ -68,6 +74,7 @@ def batch_run(
         state_refresh_limit=state_refresh_limit,
         request_delay=request_delay,
         timeout_seconds=timeout_seconds,
+        concurrency=concurrency,
     )
     try:
         report = runtime_service.run_cycle(options, mode="batch")
@@ -92,14 +99,15 @@ def batch_run(
 @app.command("continuous")
 def continuous_run(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
-    page_limit: int = typer.Option(1, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
+    page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in each cycle."),
     root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
     state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after each discovery cycle."),
     interval_seconds: float = typer.Option(1800.0, "--interval-seconds", min=0.1, help="Delay between completed cycles in seconds."),
     max_cycles: int | None = typer.Option(None, "--max-cycles", min=1, help="Optional cycle cap for smoke runs or tests."),
-    request_delay: float = typer.Option(0.5, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
+    request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
+    concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
     dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard alongside the continuous loop."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
@@ -112,6 +120,7 @@ def continuous_run(
         state_refresh_limit=state_refresh_limit,
         request_delay=request_delay,
         timeout_seconds=timeout_seconds,
+        concurrency=concurrency,
     )
     dashboard_server = None
     if dashboard:
@@ -615,6 +624,7 @@ def _build_runtime_options(
     state_refresh_limit: int,
     request_delay: float,
     timeout_seconds: float,
+    concurrency: int,
 ) -> RadarRuntimeOptions:
     return RadarRuntimeOptions(
         page_limit=page_limit,
@@ -623,6 +633,7 @@ def _build_runtime_options(
         request_delay=request_delay,
         timeout_seconds=timeout_seconds,
         state_refresh_limit=state_refresh_limit,
+        concurrency=concurrency,
     )
 
 

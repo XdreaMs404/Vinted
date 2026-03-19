@@ -13,12 +13,13 @@ from vinted_radar.services.state_refresh import StateRefreshReport, build_defaul
 
 @dataclass(frozen=True, slots=True)
 class RadarRuntimeOptions:
-    page_limit: int = 1
+    page_limit: int = 5
     max_leaf_categories: int | None = None
     root_scope: str = "both"
-    request_delay: float = 0.5
+    request_delay: float = 3.0
     timeout_seconds: float = 20.0
     state_refresh_limit: int = 10
+    concurrency: int = 1
 
     def as_config(self) -> dict[str, object]:
         return {
@@ -28,6 +29,7 @@ class RadarRuntimeOptions:
             "request_delay": self.request_delay,
             "timeout_seconds": self.timeout_seconds,
             "state_refresh_limit": self.state_refresh_limit,
+            "concurrency": self.concurrency,
         }
 
 
@@ -102,6 +104,7 @@ class RadarRuntimeService:
                         max_leaf_categories=options.max_leaf_categories,
                         root_scope=options.root_scope,
                         request_delay=options.request_delay,
+                        concurrency=options.concurrency,
                     )
                 )
             finally:

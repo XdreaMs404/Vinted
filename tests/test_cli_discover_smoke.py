@@ -39,7 +39,7 @@ class _FakeDiscoveryService:
 def test_discover_cli_reports_summary_without_touching_live_http(monkeypatch, tmp_path: Path) -> None:
     fake_service = _FakeDiscoveryService()
 
-    def _fake_factory(*, db_path: str, timeout_seconds: float, request_delay: float):
+    def _fake_factory(*, db_path: str, timeout_seconds: float, request_delay: float, proxies=None, max_retries=3):
         assert db_path == str(tmp_path / "smoke.db")
         assert timeout_seconds == 5.0
         assert request_delay == 0.0

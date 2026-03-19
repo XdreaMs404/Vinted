@@ -1,13 +1,62 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from vinted_radar.http import FetchedPage
 from vinted_radar.repository import RadarRepository
-from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryService
+from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryService, _build_api_catalog_url
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+
+# ---------------------------------------------------------------------------
+# Helpers: API JSON builders
+# ---------------------------------------------------------------------------
+
+def _make_api_item(item_id, *, title, brand, size, status_id, price, total_price, image_url):
+    return {
+        "id": item_id,
+        "title": title,
+        "url": f"/items/{item_id}-{title.lower().replace(' ', '-')}",
+        "brand_title": brand,
+        "size_title": size,
+        "status_id": status_id,
+        "price": {"amount": price, "currency_code": "EUR"},
+        "total_item_price": {"amount": total_price, "currency_code": "EUR"},
+        "photo": {"url": image_url},
+    }
+
+
+def _make_api_page(items, *, current_page=1, total_pages=1, per_page=96):
+    return json.dumps({
+        "items": items,
+        "pagination": {
+            "current_page": current_page,
+            "total_pages": total_pages,
+            "per_page": per_page,
+            "total_entries": len(items),
+        },
+    })
+
+
+# Items matching the old HTML fixtures
+WOMEN_ITEMS_RUN1 = [
+    _make_api_item(9001, title="Robe noire", brand="Zara", size="M", status_id=3, price="12.50", total_price="14.13", image_url="https://images1.vinted.net/t/women-9001.webp"),
+    _make_api_item(9002, title="Chemise vintage", brand="Sézane", size="S", status_id=4, price="22.00", total_price="24.20", image_url="https://images1.vinted.net/t/women-9002.webp"),
+]
+WOMEN_ITEMS_RUN2 = [
+    _make_api_item(9001, title="Robe noire", brand="Zara", size="M", status_id=3, price="15.00", total_price="16.50", image_url="https://images1.vinted.net/t/women-9001.webp"),
+    _make_api_item(9999, title="Pull côtelé", brand="Sandro", size="M", status_id=3, price="30.00", total_price="33.00", image_url="https://images1.vinted.net/t/women-9999.webp"),
+]
+MEN_ITEMS = [
+    _make_api_item(9101, title="Pantalon cargo", brand="Carhartt", size="L", status_id=1, price="35.00", total_price="38.15", image_url="https://images1.vinted.net/t/men-9101.webp"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Fake HTTP clients
+# ---------------------------------------------------------------------------
 
 class FakeHttpClient:
     def __init__(self, pages_by_run: list[dict[str, FetchedPage]]) -> None:
@@ -26,6 +75,9 @@ class FakeHttpClient:
         except KeyError as exc:  # pragma: no cover - test setup failure
             raise AssertionError(f"Unexpected URL requested: {url}") from exc
 
+    async def get_text_async(self, url: str) -> FetchedPage:
+        return self.get_text(url)
+
 
 class SequenceClock:
     def __init__(self, timestamps: list[str]) -> None:
@@ -40,28 +92,34 @@ class SequenceClock:
         return value
 
 
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
 def test_history_repository_tracks_repeated_runs_and_freshness(tmp_path: Path) -> None:
     catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
-    women_page_run1 = (FIXTURES / "catalog-page-women.html").read_text(encoding="utf-8")
-    women_page_run2 = (FIXTURES / "catalog-page-women-run2.html").read_text(encoding="utf-8")
-    men_page = (FIXTURES / "catalog-page-men.html").read_text(encoding="utf-8")
+
+    women_api_url = _build_api_catalog_url(2001, 1)
+    men_api_url = _build_api_catalog_url(3001, 1)
 
     run1_pages = {
         "https://www.vinted.fr/catalog": FetchedPage("https://www.vinted.fr/catalog", 200, catalog_root),
-        "https://www.vinted.fr/catalog/2001-womens-dresses": FetchedPage("https://www.vinted.fr/catalog/2001-womens-dresses", 200, women_page_run1),
-        "https://www.vinted.fr/catalog/3001-men-trousers": FetchedPage("https://www.vinted.fr/catalog/3001-men-trousers", 200, men_page),
+        women_api_url: FetchedPage(women_api_url, 200, _make_api_page(WOMEN_ITEMS_RUN1)),
+        men_api_url: FetchedPage(men_api_url, 200, _make_api_page(MEN_ITEMS)),
     }
     run2_pages = {
         "https://www.vinted.fr/catalog": FetchedPage("https://www.vinted.fr/catalog", 200, catalog_root),
-        "https://www.vinted.fr/catalog/2001-womens-dresses": FetchedPage("https://www.vinted.fr/catalog/2001-womens-dresses", 200, women_page_run2),
-        "https://www.vinted.fr/catalog/3001-men-trousers": FetchedPage("https://www.vinted.fr/catalog/3001-men-trousers", 200, men_page),
+        women_api_url: FetchedPage(women_api_url, 200, _make_api_page(WOMEN_ITEMS_RUN2)),
+        men_api_url: FetchedPage(men_api_url, 200, _make_api_page(MEN_ITEMS)),
     }
     http_client = FakeHttpClient([run1_pages, run2_pages])
     clock = SequenceClock(
         [
+            # Run 1: synced_at, women observed_at, men observed_at
             "2026-03-17T10:00:00+00:00",
             "2026-03-17T10:05:00+00:00",
             "2026-03-17T10:06:00+00:00",
+            # Run 2: synced_at, women observed_at, men observed_at
             "2026-03-18T12:00:00+00:00",
             "2026-03-18T12:05:00+00:00",
             "2026-03-18T12:06:00+00:00",
@@ -86,6 +144,8 @@ def test_history_repository_tracks_repeated_runs_and_freshness(tmp_path: Path) -
         assert history["summary"]["last_seen_at"] == "2026-03-18T12:05:00+00:00"
         assert history["summary"]["freshness_bucket"] == "fresh-followup"
         assert history["summary"]["average_revisit_hours"] == 26.0
+        # Run 1: 12.50€ = 1250 cents, Run 2: 15.00€ = 1500 cents
+        # Timeline is ordered most-recent-first.
         assert history["timeline"][0]["price_amount_cents"] == 1500
         assert history["timeline"][1]["price_amount_cents"] == 1250
 

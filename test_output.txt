@@ -1,0 +1,30 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-8.4.2, pluggy-1.6.0
+rootdir: C:\Users\Alexis\Documents\VintedScrap2
+configfile: pyproject.toml
+plugins: anyio-4.11.0, langsmith-0.4.39
+collected 88 items
+
+tests\test_api_catalog_page.py ......................................... [ 46%]
+...                                                                      [ 50%]
+tests\test_catalog_tree.py ..                                            [ 52%]
+tests\test_cli_discover_smoke.py .                                       [ 53%]
+tests\test_cli_smoke.py .                                                [ 54%]
+tests\test_dashboard.py ..                                               [ 56%]
+tests\test_dashboard_cli.py .                                            [ 57%]
+tests\test_discovery_normalization.py .                                  [ 59%]
+tests\test_discovery_service.py ......                                   [ 65%]
+tests\test_flight_extract.py ..                                          [ 68%]
+tests\test_history_cli.py .                                              [ 69%]
+tests\test_history_repository.py ..                                      [ 71%]
+tests\test_item_page_parser.py .....                                     [ 77%]
+tests\test_parsers.py ..                                                 [ 79%]
+tests\test_repository.py ..                                              [ 81%]
+tests\test_runtime_cli.py ...                                            [ 85%]
+tests\test_runtime_service.py ..                                         [ 87%]
+tests\test_scoring.py ...                                                [ 90%]
+tests\test_scoring_cli.py .                                              [ 92%]
+tests\test_state_cli.py .                                                [ 93%]
+tests\test_state_machine.py ......                                       [100%]
+
+============================= 88 passed in 4.04s ==============================
