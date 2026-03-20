@@ -262,10 +262,7 @@ class VintedHttpClient:
 
     def _extract_session_cookie(self) -> str | None:
         """Return the session cookie value, or *None* if absent."""
-        for cookie in self._session.cookies:
-            if cookie.name == SESSION_COOKIE_NAME:
-                return cookie.value
-        return None
+        return self._session.cookies.get(SESSION_COOKIE_NAME)
 
     def get_text(self, url: str) -> FetchedPage:
         """Fetch *url* and return a :class:`FetchedPage`.
@@ -423,10 +420,7 @@ class VintedHttpClient:
         """Return the async session cookie value, or *None* if absent."""
         if self._async_session is None:
             return None
-        for cookie in self._async_session.cookies:
-            if cookie.name == SESSION_COOKIE_NAME:
-                return cookie.value
-        return None
+        return self._async_session.cookies.get(SESSION_COOKIE_NAME)
 
     async def get_text_async(self, url: str) -> FetchedPage:
         """Async variant of :meth:`get_text`.
