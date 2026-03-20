@@ -152,14 +152,12 @@ class VintedHttpClient:
         """Build a fresh sync ``Session`` with the current proxy."""
         proxy = self._current_proxy
         sess = Session(impersonate=self._impersonate, proxy=proxy) if proxy else Session(impersonate=self._impersonate)
-        sess.headers.update(DEFAULT_HEADERS)
         return sess
 
     def _make_async_session(self) -> AsyncSession:
         """Build a fresh async ``AsyncSession`` with the current proxy."""
         proxy = self._current_proxy
         sess = AsyncSession(impersonate=self._impersonate, proxy=proxy) if proxy else AsyncSession(impersonate=self._impersonate)
-        sess.headers.update(DEFAULT_HEADERS)
         return sess
 
     def _rebuild_sync_session(self) -> None:
