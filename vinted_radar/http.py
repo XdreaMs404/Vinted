@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ------------------------------------------------------------------
 VINTED_HOME = "https://www.vinted.fr/"
-SESSION_COOKIE_NAME = "_vinted_fr_session"
+# Vinted uses various session cookies. We check for these to confirm warmup success.
+SESSION_COOKIE_NAMES = ("access_token_web", "_vinted_fr_session")
 
 # We only force the locale; all other headers (User-Agent, Accept,
 # sec-ch-ua, …) are injected by curl_cffi's impersonation engine.
@@ -92,9 +93,9 @@ class VintedHttpClient:
     def __init__(
         self,
         *,
-        request_delay: float = 0.5,
+        request_delay: float = 3.0,
         timeout_seconds: float = 20.0,
-        impersonate: str = "chrome116",
+        impersonate: str = "chrome120",
         warmup_retries: int = _WARMUP_MAX_RETRIES,
         proxies: list[str] | None = None,
         max_retries: int = _DEFAULT_MAX_RETRIES,
@@ -234,9 +235,9 @@ class VintedHttpClient:
                     )
                 else:
                     logger.warning(
-                        "No '%s' cookie in response (status %s) – "
+                        "No session cookies (%s) in response (status %s) – "
                         "subsequent requests may be rejected",
-                        SESSION_COOKIE_NAME,
+                        ", ".join(SESSION_COOKIE_NAMES),
                         resp.status_code,
                     )
                 self._warmed_up = True
@@ -261,8 +262,12 @@ class VintedHttpClient:
         ) from last_exc
 
     def _extract_session_cookie(self) -> str | None:
-        """Return the session cookie value, or *None* if absent."""
-        return self._session.cookies.get(SESSION_COOKIE_NAME)
+        """Return a valid session cookie value, or *None* if absent."""
+        for name in SESSION_COOKIE_NAMES:
+            val = self._session.cookies.get(name)
+            if val:
+                return val
+        return None
 
     def get_text(self, url: str) -> FetchedPage:
         """Fetch *url* and return a :class:`FetchedPage`.
@@ -391,9 +396,9 @@ class VintedHttpClient:
                     )
                 else:
                     logger.warning(
-                        "No '%s' cookie in async response (status %s) – "
+                        "No session cookies (%s) in async response (status %s) – "
                         "subsequent requests may be rejected",
-                        SESSION_COOKIE_NAME,
+                        ", ".join(SESSION_COOKIE_NAMES),
                         resp.status_code,
                     )
                 self._async_warmed_up = True
@@ -417,10 +422,14 @@ class VintedHttpClient:
         ) from last_exc
 
     def _extract_async_session_cookie(self) -> str | None:
-        """Return the async session cookie value, or *None* if absent."""
+        """Return a valid async session cookie value, or *None* if absent."""
         if self._async_session is None:
             return None
-        return self._async_session.cookies.get(SESSION_COOKIE_NAME)
+        for name in SESSION_COOKIE_NAMES:
+            val = self._async_session.cookies.get(name)
+            if val:
+                return val
+        return None
 
     async def get_text_async(self, url: str) -> FetchedPage:
         """Async variant of :meth:`get_text`.
