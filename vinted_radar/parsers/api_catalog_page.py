@@ -169,6 +169,25 @@ def _parse_api_item(
     # -- Image ----------------------------------------------------------------
     image_url = _extract_image_url(item)
 
+    # -- Extended metadata ----------------------------------------------------
+    favourite_count = _safe_int(item.get("favourite_count"))
+    view_count = _safe_int(item.get("view_count"))
+    
+    user = item.get("user")
+    if not isinstance(user, dict):
+        user = {}
+    user_id = _safe_int(user.get("id"))
+    user_login = _safe_str(user.get("login"))
+    user_profile_url = _safe_str(user.get("profile_url"))
+    
+    photo = item.get("photo")
+    if not isinstance(photo, dict):
+        photo = {}
+    high_res = photo.get("high_resolution")
+    if not isinstance(high_res, dict):
+        high_res = {}
+    created_at_ts = _safe_int(high_res.get("timestamp"))
+
     return ListingCard(
         listing_id=listing_id,
         source_url=source_url,
@@ -182,6 +201,12 @@ def _parse_api_item(
         total_price_amount_cents=total_cents,
         total_price_currency=total_currency,
         image_url=image_url,
+        favourite_count=favourite_count,
+        view_count=view_count,
+        user_id=user_id,
+        user_login=user_login,
+        user_profile_url=user_profile_url,
+        created_at_ts=created_at_ts,
         source_catalog_id=source_catalog_id,
         source_root_catalog_id=source_root_catalog_id,
         raw_card=dict(item),

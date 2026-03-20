@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS listings (
     total_price_amount_cents INTEGER,
     total_price_currency TEXT,
     image_url TEXT,
+    favourite_count INTEGER,
+    view_count INTEGER,
+    user_id INTEGER,
+    user_login TEXT,
+    user_profile_url TEXT,
+    created_at_ts INTEGER,
     primary_catalog_id INTEGER,
     primary_root_catalog_id INTEGER,
     first_discovered_at TEXT NOT NULL,
@@ -177,6 +183,21 @@ def connect_database(db_path: str | Path) -> sqlite3.Connection:
 
 
 def _apply_migrations(connection: sqlite3.Connection) -> None:
+    # --- Extended Metadata Migration ---
+    for col in (
+        "favourite_count INTEGER",
+        "view_count INTEGER",
+        "user_id INTEGER",
+        "user_login TEXT",
+        "user_profile_url TEXT",
+        "created_at_ts INTEGER",
+    ):
+        try:
+            connection.execute(f"ALTER TABLE listings ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
+    # -----------------------------------
+
     if not _table_exists(connection, "listing_discoveries") or not _table_exists(connection, "listings"):
         return
 

@@ -38,6 +38,12 @@ class ListingCard:
     total_price_amount_cents: int | None
     total_price_currency: str | None
     image_url: str | None
+    favourite_count: int | None = None
+    view_count: int | None = None
+    user_id: int | None = None
+    user_login: str | None = None
+    user_profile_url: str | None = None
+    created_at_ts: int | None = None
     source_catalog_id: int | None = None
     source_root_catalog_id: int | None = None
     raw_card: dict[str, Any] = field(default_factory=dict)

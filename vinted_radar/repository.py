@@ -188,10 +188,11 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     listing_id, canonical_url, source_url, title, brand, size_label,
                     condition_label, price_amount_cents, price_currency,
                     total_price_amount_cents, total_price_currency, image_url,
+                    favourite_count, view_count, user_id, user_login, user_profile_url, created_at_ts,
                     primary_catalog_id, primary_root_catalog_id,
                     first_discovered_at, last_discovered_at, last_seen_run_id,
                     last_card_payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(listing_id) DO UPDATE SET
                     canonical_url = excluded.canonical_url,
                     source_url = excluded.source_url,
@@ -204,6 +205,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     total_price_amount_cents = COALESCE(excluded.total_price_amount_cents, listings.total_price_amount_cents),
                     total_price_currency = COALESCE(excluded.total_price_currency, listings.total_price_currency),
                     image_url = COALESCE(excluded.image_url, listings.image_url),
+                    favourite_count = COALESCE(excluded.favourite_count, listings.favourite_count),
+                    view_count = COALESCE(excluded.view_count, listings.view_count),
+                    user_id = COALESCE(excluded.user_id, listings.user_id),
+                    user_login = COALESCE(excluded.user_login, listings.user_login),
+                    user_profile_url = COALESCE(excluded.user_profile_url, listings.user_profile_url),
+                    created_at_ts = COALESCE(excluded.created_at_ts, listings.created_at_ts),
                     primary_catalog_id = COALESCE(excluded.primary_catalog_id, listings.primary_catalog_id),
                     primary_root_catalog_id = COALESCE(excluded.primary_root_catalog_id, listings.primary_root_catalog_id),
                     last_discovered_at = excluded.last_discovered_at,
@@ -223,6 +230,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     listing.total_price_amount_cents,
                     listing.total_price_currency,
                     listing.image_url,
+                    listing.favourite_count,
+                    listing.view_count,
+                    listing.user_id,
+                    listing.user_login,
+                    listing.user_profile_url,
+                    listing.created_at_ts,
                     primary_catalog_id,
                     primary_root_catalog_id,
                     discovered_at,
