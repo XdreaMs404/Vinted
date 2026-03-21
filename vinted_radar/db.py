@@ -173,9 +173,11 @@ def connect_database(db_path: str | Path) -> sqlite3.Connection:
     db_str = str(db_path)
     if db_str != ":memory:":
         Path(db_str).parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(db_str)
+    connection = sqlite3.connect(db_str, timeout=30.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA synchronous = NORMAL")
     connection.executescript(SCHEMA)
     _apply_migrations(connection)
     connection.commit()
@@ -199,6 +201,10 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     # -----------------------------------
 
     if not _table_exists(connection, "listing_discoveries") or not _table_exists(connection, "listings"):
+        return
+
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if version >= 1:
         return
 
     connection.execute(
@@ -268,6 +274,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             image_url = COALESCE(image_url, (SELECT image_url FROM listings WHERE listings.listing_id = listing_observations.listing_id))
         """
     )
+    
+    connection.execute("PRAGMA user_version = 1")
 
 
 def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:

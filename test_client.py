@@ -7,7 +7,7 @@ async def main():
     await client.warm_up_async()
     print("Warm-up complete.")
     
-    url = "https://www.vinted.fr/catalog?search_text=&catalog[]=1439&page=1&per_page=96"
+    url = "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1439&page=1&per_page=96"
     print(f"Requesting {url}")
     page = await client.get_text_async(url)
     
