@@ -1,0 +1,228 @@
+{
+  "id": 8439013135,
+  "title": "Brassi\u00e8re",
+  "price": {
+    "amount": "1.0",
+    "currency_code": "EUR"
+  },
+  "is_visible": true,
+  "brand_title": "Shein",
+  "path": "/items/8439013135-brassiere",
+  "user": {
+    "id": 41147279,
+    "login": "sadly_moon",
+    "profile_url": "https://www.vinted.fr/member/41147279-sadlymoon",
+    "photo": {
+      "id": 292743602,
+      "width": 370,
+      "height": 800,
+      "temp_uuid": null,
+      "url": "https://images1.vinted.net/t/05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8/f800/1768824041.webp?s=2d4723284d1eac949f1d8b81de06663f7f48f584",
+      "dominant_color": "#31abc2",
+      "dominant_color_opaque": "#C1E6ED",
+      "thumbnails": [
+        {
+          "type": "thumb310",
+          "url": "https://images1.vinted.net/t/05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8/310x310/1768824041.webp?s=9c3bf4ab00cba5e4448726adb86387048cf52380",
+          "width": 310,
+          "height": 310,
+          "original_size": null
+        },
+        {
+          "type": "thumb150",
+          "url": "https://images1.vinted.net/t/05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8/150x150/1768824041.webp?s=6926fae80caefa37c3f02969fd69d0accf6b4b9b",
+          "width": 150,
+          "height": 150,
+          "original_size": null
+        },
+        {
+          "type": "thumb100",
+          "url": "https://images1.vinted.net/t/05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8/100x100/1768824041.webp?s=e1a58880a96b93caa0bdc0a74b819a694b90ac59",
+          "width": 100,
+          "height": 100,
+          "original_size": null
+        },
+        {
+          "type": "thumb50",
+          "url": "https://images1.vinted.net/t/05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8/50x50/1768824041.webp?s=a3285f656fa94deae977d7004321792fb39e1b06",
+          "width": 50,
+          "height": 50,
+          "original_size": null
+        },
+        {
+          "type": "thumb20",
+          "url": "https://images1.vinted.net/t/05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8/20x20/1768824041.webp?s=a85dad4de8d4964c67214f9db4e769fe17a9c9b2",
+          "width": 20,
+          "height": 20,
+          "original_size": null
+        }
+      ],
+      "is_suspicious": false,
+      "orientation": null,
+      "high_resolution": {
+        "id": "05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8",
+        "timestamp": 1768824041,
+        "orientation": null
+      },
+      "full_size_url": "https://images1.vinted.net/tc/05_01a5d_14EtZNF4u1b3jkjt5V6XMCV8/1768824041.webp?s=c55a9c4ad0ed83f18286c4ea7936172a7bb66ccd",
+      "is_hidden": false,
+      "extra": {}
+    },
+    "business": false
+  },
+  "conversion": null,
+  "url": "https://www.vinted.fr/items/8439013135-brassiere",
+  "promoted": false,
+  "photos": [
+    {
+      "id": 35504148896,
+      "image_no": 1,
+      "width": 600,
+      "height": 800,
+      "dominant_color": "#757375",
+      "dominant_color_opaque": "#D6D5D6",
+      "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+      "is_main": true,
+      "thumbnails": [
+        {
+          "type": "thumb70x100",
+          "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/70x100/1774006447.webp?s=ffbf8cf589f863b045a8ee1a134e843e8716de6a",
+          "width": 70,
+          "height": 100,
+          "original_size": null
+        },
+        {
+          "type": "thumb150x210",
+          "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/150x210/1774006447.webp?s=5dd3e08690a377f5e46443e6b98d8bf0a1258b18",
+          "width": 150,
+          "height": 210,
+          "original_size": null
+        },
+        {
+          "type": "thumb310x430",
+          "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/310x430/1774006447.webp?s=ad37f1fef71eb04b8287f2717c833b8c74e14229",
+          "width": 310,
+          "height": 430,
+          "original_size": null
+        },
+        {
+          "type": "thumb428x624",
+          "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+          "width": 321,
+          "height": 428,
+          "original_size": true
+        },
+        {
+          "type": "thumb624x428",
+          "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+          "width": 468,
+          "height": 624,
+          "original_size": true
+        },
+        {
+          "type": "thumb364x428",
+          "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+          "width": 273,
+          "height": 364,
+          "original_size": true
+        }
+      ],
+      "high_resolution": {
+        "id": "06_01191_YH8boeFqENKyhPLv8qYNNVja",
+        "timestamp": 1774006447,
+        "orientation": null
+      },
+      "is_suspicious": false,
+      "full_size_url": "https://images1.vinted.net/tc/06_01191_YH8boeFqENKyhPLv8qYNNVja/1774006447.webp?s=b686d3dfd8e26649c7671a1a00dacfb21281154d",
+      "is_hidden": false,
+      "extra": {}
+    }
+  ],
+  "photo": {
+    "id": 35504148896,
+    "image_no": 1,
+    "width": 600,
+    "height": 800,
+    "dominant_color": "#757375",
+    "dominant_color_opaque": "#D6D5D6",
+    "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+    "is_main": true,
+    "thumbnails": [
+      {
+        "type": "thumb70x100",
+        "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/70x100/1774006447.webp?s=ffbf8cf589f863b045a8ee1a134e843e8716de6a",
+        "width": 70,
+        "height": 100,
+        "original_size": null
+      },
+      {
+        "type": "thumb150x210",
+        "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/150x210/1774006447.webp?s=5dd3e08690a377f5e46443e6b98d8bf0a1258b18",
+        "width": 150,
+        "height": 210,
+        "original_size": null
+      },
+      {
+        "type": "thumb310x430",
+        "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/310x430/1774006447.webp?s=ad37f1fef71eb04b8287f2717c833b8c74e14229",
+        "width": 310,
+        "height": 430,
+        "original_size": null
+      },
+      {
+        "type": "thumb428x624",
+        "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+        "width": 321,
+        "height": 428,
+        "original_size": true
+      },
+      {
+        "type": "thumb624x428",
+        "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+        "width": 468,
+        "height": 624,
+        "original_size": true
+      },
+      {
+        "type": "thumb364x428",
+        "url": "https://images1.vinted.net/t/06_01191_YH8boeFqENKyhPLv8qYNNVja/f800/1774006447.webp?s=5a248e4cf71af6bea413d075efab74ab8fe4f1d8",
+        "width": 273,
+        "height": 364,
+        "original_size": true
+      }
+    ],
+    "high_resolution": {
+      "id": "06_01191_YH8boeFqENKyhPLv8qYNNVja",
+      "timestamp": 1774006447,
+      "orientation": null
+    },
+    "is_suspicious": false,
+    "full_size_url": "https://images1.vinted.net/tc/06_01191_YH8boeFqENKyhPLv8qYNNVja/1774006447.webp?s=b686d3dfd8e26649c7671a1a00dacfb21281154d",
+    "is_hidden": false,
+    "extra": {}
+  },
+  "favourite_count": 0,
+  "is_favourite": false,
+  "service_fee": {
+    "amount": "0.75",
+    "currency_code": "EUR"
+  },
+  "total_item_price": {
+    "amount": "1.75",
+    "currency_code": "EUR"
+  },
+  "view_count": 0,
+  "size_title": "S",
+  "content_source": "catalog",
+  "status": "Tr\u00e8s bon \u00e9tat",
+  "item_box": {
+    "first_line": "Shein",
+    "second_line": "S \u00b7 Tr\u00e8s bon \u00e9tat",
+    "exposures": [],
+    "accessibility_label": "Brassi\u00e8re, marque: Shein, \u00e9tat: Tr\u00e8s bon \u00e9tat, taille: S, 1,00 \u20ac, 1,75 \u20ac Protection acheteurs incluse",
+    "item_id": 8439013135
+  },
+  "search_tracking_params": {
+    "score": null
+  }
+}
