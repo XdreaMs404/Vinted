@@ -207,76 +207,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     if version >= 1:
         return
 
-    connection.execute(
-        """
-        INSERT OR IGNORE INTO listing_observations (
-            run_id, listing_id, observed_at, canonical_url, source_url,
-            source_catalog_id, source_page_number, first_card_position, sighting_count,
-            title, brand, size_label, condition_label,
-            price_amount_cents, price_currency,
-            total_price_amount_cents, total_price_currency,
-            image_url, raw_card_payload_json
-        )
-        SELECT
-            discoveries.run_id,
-            discoveries.listing_id,
-            discoveries.observed_at,
-            listings.canonical_url,
-            discoveries.source_url,
-            discoveries.source_catalog_id,
-            discoveries.source_page_number,
-            discoveries.card_position,
-            1,
-            listings.title,
-            listings.brand,
-            listings.size_label,
-            listings.condition_label,
-            listings.price_amount_cents,
-            listings.price_currency,
-            listings.total_price_amount_cents,
-            listings.total_price_currency,
-            listings.image_url,
-            discoveries.raw_card_payload_json
-        FROM listing_discoveries AS discoveries
-        JOIN listings ON listings.listing_id = discoveries.listing_id
-        """
-    )
-    connection.execute(
-        """
-        UPDATE listing_observations
-        SET sighting_count = (
-            SELECT COUNT(*)
-            FROM listing_discoveries AS discoveries
-            WHERE discoveries.run_id = listing_observations.run_id
-              AND discoveries.listing_id = listing_observations.listing_id
-        )
-        WHERE EXISTS (
-            SELECT 1
-            FROM listing_discoveries AS discoveries
-            WHERE discoveries.run_id = listing_observations.run_id
-              AND discoveries.listing_id = listing_observations.listing_id
-        )
-        """
-    )
-    connection.execute(
-        """
-        UPDATE listing_observations
-        SET
-            canonical_url = COALESCE(NULLIF(canonical_url, ''), (SELECT canonical_url FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            title = COALESCE(title, (SELECT title FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            brand = COALESCE(brand, (SELECT brand FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            size_label = COALESCE(size_label, (SELECT size_label FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            condition_label = COALESCE(condition_label, (SELECT condition_label FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            price_amount_cents = COALESCE(price_amount_cents, (SELECT price_amount_cents FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            price_currency = COALESCE(price_currency, (SELECT price_currency FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            total_price_amount_cents = COALESCE(total_price_amount_cents, (SELECT total_price_amount_cents FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            total_price_currency = COALESCE(total_price_currency, (SELECT total_price_currency FROM listings WHERE listings.listing_id = listing_observations.listing_id)),
-            image_url = COALESCE(image_url, (SELECT image_url FROM listings WHERE listings.listing_id = listing_observations.listing_id))
-        """
-    )
-    
+    # Mark as migrated so we never attempt massive blocking startup queries again
     connection.execute("PRAGMA user_version = 1")
-
 
 def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
     row = connection.execute(
