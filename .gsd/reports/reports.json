@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "projectName": "VintedScrap2",
+  "projectPath": "C:\\Users\\Alexis\\Documents\\VintedScrap2",
+  "gsdVersion": "2.41.0",
+  "entries": [
+    {
+      "filename": "M001-2026-03-22T15-32-21.html",
+      "generatedAt": "2026-03-22T15:32:21.762Z",
+      "milestoneId": "M001",
+      "milestoneTitle": "Listing-Level Market Radar",
+      "label": "M001: Listing-Level Market Radar",
+      "kind": "milestone",
+      "totalCost": 1.4970255000000001,
+      "totalTokens": 2952645,
+      "totalDuration": 827273,
+      "doneSlices": 6,
+      "totalSlices": 6,
+      "doneMilestones": 1,
+      "totalMilestones": 4,
+      "phase": "needs-discussion"
+    }
+  ]
+}
