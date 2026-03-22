@@ -37,7 +37,7 @@
 
 ## Tasks
 
-- [ ] **T01: Bootstrap discovery package and verification harness** `est:45m`
+- [x] **T01: Bootstrap discovery package and verification harness** `est:45m`
   - Why: The repo is empty; S01 needs a runnable Python package, a stable CLI entrypoint, SQLite initialization, and tests before the collector logic lands.
   - Files: `pyproject.toml`, `src/vinted_radar/cli.py`, `src/vinted_radar/db.py`, `tests/test_cli_smoke.py`
   - Do: Create the package layout, define the SQLite schema/bootstrap path, expose a Typer CLI with placeholder `discover` and `coverage` commands wired to the database, and add the first tests so the slice has executable verification from the start.

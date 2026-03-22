@@ -38,19 +38,19 @@
 
 ## Tasks
 
-- [x] **T01: Add item-page probe persistence and parser contracts** `est:1h`
+- [ ] **T01: Add item-page probe persistence and parser contracts** `est:1h`
   - Why: S03 needs direct public-page evidence for distinct deletion and observed active/sold signals, and those probes must stay inspectable.
   - Files: `vinted_radar/db.py`, `vinted_radar/repository.py`, `vinted_radar/parsers/item_page.py`, `tests/test_item_page_parser.py`
   - Do: Add probe persistence, implement item-page outcome parsing for active/sold/unavailable/deleted/unknown signals, and cover the parser with explicit fixtures.
   - Verify: `python -m pytest tests/test_item_page_parser.py`
   - Done when: probe rows persist and parser contracts cover the supported outcome shapes plus a 404 path.
-- [x] **T02: Implement the cautious state engine on top of history and probes** `est:1h15m`
+- [ ] **T02: Implement the cautious state engine on top of history and probes** `est:1h15m`
   - Why: The slice exists to turn history and probe evidence into a prudent current-state surface with confidence and reasons.
   - Files: `vinted_radar/state_machine.py`, `vinted_radar/repository.py`, `tests/test_state_machine.py`
   - Do: Combine latest observations, follow-up misses, freshness, and latest probe evidence into the S03 state taxonomy with explicit basis kind and confidence labels.
   - Verify: `python -m pytest tests/test_state_machine.py`
   - Done when: active, sold observed/probable, unavailable non-conclusive, deleted, and unknown cases are all covered by tests with traceable explanations.
-- [x] **T03: Expose state refresh and inspection CLI surfaces** `est:1h`
+- [ ] **T03: Expose state refresh and inspection CLI surfaces** `est:1h`
   - Why: S03 is only useful once the operator can refresh probes and inspect current state summaries through the real entrypoints.
   - Files: `vinted_radar/services/state_refresh.py`, `vinted_radar/cli.py`, `tests/test_state_cli.py`, `README.md`
   - Do: Add state-refresh, state-summary, and state detail commands; probe a bounded candidate set; and make live CLI output safe on real terminal encodings.

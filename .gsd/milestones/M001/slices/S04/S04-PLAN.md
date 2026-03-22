@@ -39,19 +39,19 @@
 
 ## Tasks
 
-- [x] **T01: Implement explainable listing scoring and contextual price baselines** `est:1h15m`
+- [ ] **T01: Implement explainable listing scoring and contextual price baselines** `est:1h15m`
   - Why: S04 depends on ranking individual listings by real demand and premium behavior with visible factor breakdowns.
   - Files: `vinted_radar/scoring.py`, `tests/test_scoring.py`, `vinted_radar/state_machine.py`
   - Do: Compute demand and premium scores from state/history evidence, choose the richest supported peer context, and expose explanation payloads including context sample size and factor contributions.
   - Verify: `python -m pytest tests/test_scoring.py`
   - Done when: demand and premium scores are separate, explained, and context-aware only when support thresholds are met.
-- [x] **T02: Add market summary and ranking CLI surfaces** `est:1h`
+- [ ] **T02: Add market summary and ranking CLI surfaces** `est:1h`
   - Why: The slice only becomes usable when the operator can inspect ranked listings and segment summaries from the real CLI entrypoint.
   - Files: `vinted_radar/cli.py`, `tests/test_scoring_cli.py`, `README.md`
   - Do: Add `rankings`, `score`, and `market-summary` commands with both table and JSON output and safe terminal rendering.
   - Verify: `python -m pytest tests/test_scoring_cli.py`
   - Done when: the CLI exposes listing rankings, per-listing score detail, and segment summaries with explanation data.
-- [x] **T03: Verify live scoring outputs and persist slice handoff context** `est:45m`
+- [ ] **T03: Verify live scoring outputs and persist slice handoff context** `est:45m`
   - Why: S04 needs proof that the scoring surfaces work against the live repeated-run DB, not just crafted test fixtures.
   - Files: `.gsd/milestones/M001/slices/S04/tasks/T01-PLAN.md`, `.gsd/milestones/M001/slices/S04/S04-PLAN.md`, `.gsd/KNOWLEDGE.md`
   - Do: Run the live ranking and market-summary commands on the current DB, inspect a score detail payload, and record any scoring/context lessons learned that S05 will depend on.

@@ -38,19 +38,19 @@
 
 ## Tasks
 
-- [x] **T01: Build dashboard payloads and restore a truthful test harness** `est:1h15m`
+- [ ] **T01: Build dashboard payloads and restore a truthful test harness** `est:1h15m`
   - Why: S05 needs stable server-side payload assembly and working tests before adding a UI shell.
   - Files: `vinted_radar/dashboard.py`, `vinted_radar/repository.py`, `tests/test_dashboard.py`, `tests/conftest.py`, `tests/test_repository.py`
   - Do: add dashboard-focused payload builders and filter parsing on top of the existing state/scoring surfaces, expose listing-detail payload assembly, and remove or quarantine legacy prototype-only pytest wiring that no longer matches the active package.
   - Verify: `python -m pytest tests/test_dashboard.py tests/test_scoring.py tests/test_state_machine.py tests/test_history_repository.py`
   - Done when: dashboard payloads cover summary, rankings, filters, and detail drill-down, and pytest no longer fails during collection on legacy imports.
-- [x] **T02: Serve the mixed dashboard and wire the CLI entrypoint** `est:1h30m`
+- [ ] **T02: Serve the mixed dashboard and wire the CLI entrypoint** `est:1h30m`
   - Why: the slice is only real once the local operator can open the product surface in a browser.
   - Files: `vinted_radar/dashboard.py`, `vinted_radar/cli.py`, `README.md`, `tests/test_dashboard_cli.py`
   - Do: implement a local HTTP server and server-rendered dashboard page with a strong visual hierarchy, filter controls, ranking tables, drill-down links, and JSON diagnostic endpoints; add a `dashboard` CLI command that serves the app without introducing new business logic paths.
   - Verify: `python -m pytest tests/test_dashboard_cli.py tests/test_dashboard.py tests/test_cli_smoke.py`
   - Done when: the dashboard server starts from the CLI, renders the mixed market view, and exposes JSON diagnostics for the same server-side payload.
-- [x] **T03: Run live browser verification and persist the S05 handoff** `est:45m`
+- [ ] **T03: Run live browser verification and persist the S05 handoff** `est:45m`
   - Why: S05 is an integration slice with a UI promise; it needs live proof and a clean downstream handoff.
   - Files: `.gsd/milestones/M001/slices/S05/S05-PLAN.md`, `.gsd/milestones/M001/slices/S05/S05-SUMMARY.md`, `.gsd/milestones/M001/M001-ROADMAP.md`, `.gsd/PROJECT.md`, `.gsd/STATE.md`, `.gsd/KNOWLEDGE.md`
   - Do: verify the real dashboard against the current local DB in a browser, record any UI/data lessons that matter for S06, mark the slice complete, and refresh the global GSD state/docs.

@@ -39,19 +39,19 @@
 
 ## Tasks
 
-- [x] **T01: Extend persistence for observation history and migrations** `est:1h`
+- [ ] **T01: Extend persistence for observation history and migrations** `est:1h`
   - Why: S02 needs a durable per-observation model and must preserve S01 data instead of forcing a fresh database.
   - Files: `vinted_radar/db.py`, `vinted_radar/repository.py`, `tests/test_history_repository.py`
   - Do: Add the normalized observation storage and forward-only schema migration path, keep existing discovery diagnostics intact, and expose repository queries for listing history, freshness, and revisit candidates.
   - Verify: `python -m pytest tests/test_history_repository.py`
   - Done when: existing databases migrate cleanly and repeated observations can be queried into per-listing history summaries.
-- [x] **T02: Record repeated observations and expose history/freshness CLI surfaces** `est:1h15m`
+- [ ] **T02: Record repeated observations and expose history/freshness CLI surfaces** `est:1h15m`
   - Why: The slice only becomes real when repeated `discover` runs produce inspectable history and revisit planning outputs through the actual entrypoint.
   - Files: `vinted_radar/services/discovery.py`, `vinted_radar/cli.py`, `tests/test_history_cli.py`
   - Do: Persist normalized observation rows during discovery, add freshness / revisit-plan / history CLI commands, and make the outputs explicit about observation count, freshness bucket, and cadence.
   - Verify: `python -m pytest tests/test_history_cli.py`
   - Done when: the CLI can show a listing timeline, aggregate freshness, and ranked revisit candidates from a database with repeated runs.
-- [x] **T03: Verify multi-run history against fixture and live data** `est:1h`
+- [ ] **T03: Verify multi-run history against fixture and live data** `est:1h`
   - Why: S02 depends on repeated runs over the same database, so it needs both deterministic tests and a real two-run smoke check.
   - Files: `tests/test_discovery_service.py`, `README.md`, `.gsd/milestones/M001/slices/S02/tasks/T01-PLAN.md`
   - Do: Add repeated-run integration coverage, document the history/freshness entrypoints, and verify the real CLI flow with two runs against the same SQLite file.
