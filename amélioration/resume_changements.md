@@ -30,6 +30,7 @@ Ce document récapitule l'ensemble des modifications architecturales, techniques
   * Rédaction d'un guide complet d'installation spécifique aux VPS Linux (Ubuntu 24.04).
   * Ajout des instructions pour la gestion des paquets PPA (ex: `deadsnakes` pour Python 3.13) afin de pallier l'absence de versions récentes de Python dans les dépôts par défaut d'Ubuntu.
 
-## 5. Résolution de Bugs en cours (HTTP Client)
-* **Status :** Investigation sur la gestion des cookies asynchrones.
-* **Contexte :** Une erreur a été identifiée (`AttributeError: 'str' object has no attribute 'name'`) lors de la phase de *warm-up* asynchrone. L'itération sur les cookies de la session asynchrone de `curl_cffi` renvoie des chaînes de caractères brutes (Morsels) au lieu d'objets `Cookie`. Un correctif est en cours d'élaboration sur le fichier `vinted_radar/http.py`.
+## 5. Correctif HTTP Client (Cookies Async)
+* **Status :** Corrigé dans `vinted_radar/http.py`.
+* **Contexte :** Une erreur avait été identifiée (`AttributeError: 'str' object has no attribute 'name'`) lors de la phase de *warm-up* asynchrone. L'itération brute sur les cookies de la session asynchrone de `curl_cffi` renvoyait des chaînes / morsels au lieu d'objets homogènes.
+* **Résolution :** Le client utilise désormais l'accès direct `cookies.get(...)` sur les noms de cookie attendus au lieu d'itérer le jar, ce qui garde le warm-up sync/async cohérent et évite ce crash.

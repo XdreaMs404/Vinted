@@ -1,6 +1,11 @@
 import asyncio
 import json
+from pathlib import Path
+
 from vinted_radar.http import VintedHttpClient
+
+OUTPUT_PATH = Path(__file__).resolve().parent / "output" / "item.json"
+
 
 async def main():
     client = VintedHttpClient(impersonate="chrome120")
@@ -15,9 +20,10 @@ async def main():
         data = json.loads(page.text)
         items = data.get("items", [])
         if items:
-            with open("item.json", "w", encoding="utf-8") as f:
+            OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with OUTPUT_PATH.open("w", encoding="utf-8") as f:
                 json.dump(items[0], f, indent=2)
-            print("Wrote first item to item.json")
+            print(f"Wrote first item to {OUTPUT_PATH}")
         else:
             print("No items found in 200 OK response.")
     else:

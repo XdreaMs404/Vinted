@@ -1,6 +1,6 @@
 # Vinted Radar
 
-Local-first batch collector and analysis stack for public Vinted Homme/Femme market signals.
+Local-first batch collector and analysis stack for Vinted Homme/Femme market signals, using Vinted's web catalog API for discovery and public item-page probes for state evidence.
 
 ## Quick start
 
@@ -16,7 +16,7 @@ python -m vinted_radar.cli batch \
 
 This runs one coherent radar cycle:
 
-1. public catalog discovery
+1. catalog discovery through the Vinted web API
 2. listing persistence / observation updates
 3. item-page probe refresh for selected listings
 4. persisted runtime-cycle diagnostics in SQLite
@@ -45,10 +45,12 @@ This keeps the radar alive locally and serves the dashboard from the same DB whi
 - `python -m vinted_radar.cli continuous --db data/vinted-radar.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --interval-seconds 1800 --dashboard --host 127.0.0.1 --port 8765`
 - `python -m vinted_radar.cli runtime-status --db data/vinted-radar.db`
 - `python -m vinted_radar.cli dashboard --db data/vinted-radar.db --host 127.0.0.1 --port 8765`
+- SQL-backed listing explorer: `http://127.0.0.1:8765/explorer`
 
 ### Focused diagnostics
 
 - `python -m vinted_radar.cli discover --db data/vinted-radar.db --page-limit 1 --max-leaf-categories 6`
+- `python -m vinted_radar.cli db-health --db data/vinted-radar.db --integrity`
 - `python -m vinted_radar.cli coverage --db data/vinted-radar.db`
 - `python -m vinted_radar.cli freshness --db data/vinted-radar.db`
 - `python -m vinted_radar.cli revisit-plan --db data/vinted-radar.db --limit 10`
@@ -64,7 +66,9 @@ This keeps the radar alive locally and serves the dashboard from the same DB whi
 ## Dashboard diagnostics
 
 - HTML dashboard: `http://127.0.0.1:8765/`
+- SQL-backed explorer: `http://127.0.0.1:8765/explorer`
 - JSON dashboard payload: `http://127.0.0.1:8765/api/dashboard`
+- JSON explorer payload: `http://127.0.0.1:8765/api/explorer`
 - JSON runtime payload: `http://127.0.0.1:8765/api/runtime`
 - JSON listing detail payload: `http://127.0.0.1:8765/api/listings/<id>`
 - Health check: `http://127.0.0.1:8765/health`
@@ -82,3 +86,73 @@ Each batch or continuous cycle is persisted into `runtime_cycles` inside the SQL
 - last error when a cycle fails
 
 Use `runtime-status --format json` or `/api/runtime` to inspect the current local operator truth without reading raw tables by hand.
+
+## Database safety
+
+Check whether a copied database is actually healthy before trusting dashboard or coverage output:
+
+```bash
+python -m vinted_radar.cli db-health --db data/vinted-radar.db --integrity
+```
+
+Safely synchronize a VPS database by creating a consistent SQLite snapshot remotely, copying it locally to a temporary file, health-checking it, then promoting it atomically:
+
+```bash
+python scripts/sync_db_safe.py \
+  --remote-host root@46.225.113.129 \
+  --remote-db /root/Vinted/data/vinted-radar.db \
+  --destination data/vinted-radar.db \
+  --integrity
+```
+
+Recover a structurally healthy partial emergency copy when the source database is already corrupted:
+
+```bash
+python scripts/recover_partial_db.py \
+  --source data/vinted-radar.db \
+  --destination data/vinted-radar.recovered.db \
+  --report data/vinted-radar.recovered.report.json \
+  --force
+```
+
+This avoids exposing a half-copied or WAL-incomplete file as the live local database.
+
+## Clean restart after corruption
+
+Use three distinct database roles after a corruption event:
+
+- `data/vinted-radar.db` → keep as the corrupted source artifact; do not trust it for market output.
+- `data/vinted-radar.recovered.db` → keep as the healthy partial operator rescue copy.
+- `data/vinted-radar.clean.db` → use as the new working database for fresh discovery runs.
+
+Recommended restart sequence:
+
+```bash
+python -m vinted_radar.cli db-health --db data/vinted-radar.recovered.db
+python -m vinted_radar.cli batch \
+  --db data/vinted-radar.clean.db \
+  --page-limit 1 \
+  --max-leaf-categories 6 \
+  --state-refresh-limit 10
+python -m vinted_radar.cli db-health --db data/vinted-radar.clean.db
+```
+
+For a local always-on loop with the separated explorer surface:
+
+```bash
+python -m vinted_radar.cli continuous \
+  --db data/vinted-radar.clean.db \
+  --page-limit 1 \
+  --max-leaf-categories 4 \
+  --state-refresh-limit 6 \
+  --interval-seconds 1800 \
+  --dashboard \
+  --host 127.0.0.1 \
+  --port 8765
+```
+
+Then use:
+
+- summary dashboard → `http://127.0.0.1:8765/`
+- explorer → `http://127.0.0.1:8765/explorer`
+- runtime truth → `http://127.0.0.1:8765/api/runtime`

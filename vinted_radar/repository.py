@@ -651,6 +651,236 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             summaries.append(summary)
         return summaries
 
+    def explorer_filter_options(self) -> dict[str, list[dict[str, object]] | int]:
+        tracked_listings_row = self.connection.execute(
+            "SELECT COUNT(DISTINCT listing_id) AS tracked_listings FROM listing_observations"
+        ).fetchone()
+        tracked_listings = 0 if tracked_listings_row is None else int(tracked_listings_row["tracked_listings"] or 0)
+
+        roots = [
+            {
+                "value": str(row["root_title"]),
+                "label": f"{row['root_title']} ({row['count']})",
+                "count": int(row["count"]),
+            }
+            for row in self.connection.execute(
+                """
+                WITH tracked AS (
+                    SELECT DISTINCT listing_id
+                    FROM listing_observations
+                )
+                SELECT COALESCE(roots.title, 'Unknown') AS root_title, COUNT(*) AS count
+                FROM tracked
+                JOIN listings ON listings.listing_id = tracked.listing_id
+                LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+                GROUP BY COALESCE(roots.title, 'Unknown')
+                ORDER BY COALESCE(roots.title, 'Unknown')
+                """
+            )
+        ]
+        catalogs = [
+            {
+                "value": str(row["catalog_id"]),
+                "catalog_id": int(row["catalog_id"]),
+                "label": f"{row['catalog_path']} ({row['count']})",
+                "count": int(row["count"]),
+            }
+            for row in self.connection.execute(
+                """
+                WITH tracked AS (
+                    SELECT DISTINCT listing_id
+                    FROM listing_observations
+                )
+                SELECT
+                    listings.primary_catalog_id AS catalog_id,
+                    COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS catalog_path,
+                    COUNT(*) AS count
+                FROM tracked
+                JOIN listings ON listings.listing_id = tracked.listing_id
+                LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
+                LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+                WHERE listings.primary_catalog_id IS NOT NULL
+                GROUP BY listings.primary_catalog_id, COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown'))
+                ORDER BY COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown'))
+                """
+            )
+        ]
+        return {
+            "tracked_listings": tracked_listings,
+            "roots": [{"value": "all", "label": "All roots"}] + roots,
+            "catalogs": [{"value": "", "label": "All catalogs"}] + catalogs,
+        }
+
+    def listing_explorer_page(
+        self,
+        *,
+        root: str | None = None,
+        catalog_id: int | None = None,
+        query: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        now: str | None = None,
+    ) -> dict[str, object]:
+        now_dt = _coerce_now(now)
+        bounded_page = max(int(page), 1)
+        bounded_page_size = max(1, min(int(page_size), 100))
+        offset = (bounded_page - 1) * bounded_page_size
+
+        where_clauses: list[str] = []
+        params: list[object] = []
+        if root:
+            where_clauses.append("COALESCE(roots.title, 'Unknown') = ?")
+            params.append(root)
+        if catalog_id is not None:
+            where_clauses.append("listings.primary_catalog_id = ?")
+            params.append(catalog_id)
+        cleaned_query = _clean_query_text(query)
+        if cleaned_query:
+            like_query = f"%{cleaned_query}%"
+            where_clauses.append(
+                "(" 
+                "CAST(summary.listing_id AS TEXT) LIKE ? "
+                "OR LOWER(COALESCE(listings.title, '')) LIKE ? "
+                "OR LOWER(COALESCE(listings.brand, '')) LIKE ? "
+                "OR LOWER(COALESCE(primary_catalog.path, '')) LIKE ?"
+                ")"
+            )
+            params.extend([like_query, like_query, like_query, like_query])
+        where_sql = "" if not where_clauses else "WHERE " + " AND ".join(where_clauses)
+
+        cte_sql = """
+            WITH summary AS (
+                SELECT
+                    observations.listing_id AS listing_id,
+                    COUNT(*) AS observation_count,
+                    SUM(observations.sighting_count) AS total_sightings,
+                    MIN(observations.observed_at) AS first_seen_at,
+                    MAX(observations.observed_at) AS last_seen_at,
+                    AVG(CASE
+                        WHEN previous_observed_at IS NULL THEN NULL
+                        ELSE (julianday(observed_at) - julianday(previous_observed_at)) * 24.0
+                    END) AS average_revisit_hours
+                FROM (
+                    SELECT
+                        listing_observations.*,
+                        LAG(listing_observations.observed_at) OVER (
+                            PARTITION BY listing_observations.listing_id
+                            ORDER BY listing_observations.observed_at
+                        ) AS previous_observed_at
+                    FROM listing_observations
+                ) AS observations
+                GROUP BY observations.listing_id
+            ),
+            latest_probe AS (
+                SELECT
+                    probe_id,
+                    listing_id,
+                    probed_at,
+                    requested_url,
+                    final_url,
+                    response_status,
+                    probe_outcome,
+                    detail_json,
+                    error_message
+                FROM (
+                    SELECT
+                        item_page_probes.probe_id,
+                        item_page_probes.listing_id,
+                        item_page_probes.probed_at,
+                        item_page_probes.requested_url,
+                        item_page_probes.final_url,
+                        item_page_probes.response_status,
+                        item_page_probes.probe_outcome,
+                        item_page_probes.detail_json,
+                        item_page_probes.error_message,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY item_page_probes.listing_id
+                            ORDER BY item_page_probes.probed_at DESC, item_page_probes.probe_id DESC
+                        ) AS probe_rank
+                    FROM item_page_probes
+                )
+                WHERE probe_rank = 1
+            )
+        """
+
+        total_row = self.connection.execute(
+            f"""
+            {cte_sql}
+            SELECT COUNT(*) AS total
+            FROM summary
+            JOIN listings ON listings.listing_id = summary.listing_id
+            LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+            LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
+            {where_sql}
+            """,
+            params,
+        ).fetchone()
+        total_listings = 0 if total_row is None else int(total_row["total"] or 0)
+
+        rows = self.connection.execute(
+            f"""
+            {cte_sql}
+            SELECT
+                summary.listing_id,
+                summary.observation_count,
+                summary.total_sightings,
+                summary.first_seen_at,
+                summary.last_seen_at,
+                summary.average_revisit_hours,
+                listings.canonical_url,
+                listings.title,
+                listings.brand,
+                listings.size_label,
+                listings.condition_label,
+                listings.price_amount_cents,
+                listings.price_currency,
+                listings.total_price_amount_cents,
+                listings.total_price_currency,
+                listings.image_url,
+                listings.favourite_count,
+                listings.view_count,
+                listings.user_login,
+                listings.user_profile_url,
+                listings.created_at_ts,
+                roots.title AS root_title,
+                listings.primary_catalog_id,
+                COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS primary_catalog_path,
+                latest_probe.probed_at AS latest_probe_at,
+                latest_probe.response_status AS latest_probe_response_status,
+                latest_probe.probe_outcome AS latest_probe_outcome
+            FROM summary
+            JOIN listings ON listings.listing_id = summary.listing_id
+            LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+            LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
+            LEFT JOIN latest_probe ON latest_probe.listing_id = listings.listing_id
+            {where_sql}
+            ORDER BY summary.last_seen_at DESC, summary.listing_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            [*params, bounded_page_size, offset],
+        ).fetchall()
+
+        items: list[dict[str, object]] = []
+        for row in rows:
+            item = dict(row)
+            age_hours = _hours_between(str(item["last_seen_at"]), now_dt)
+            item["last_seen_age_hours"] = round(age_hours, 2)
+            item["freshness_bucket"] = _freshness_bucket(int(item["observation_count"]), age_hours)
+            item["signal_completeness"] = _signal_completeness(item)
+            item["average_revisit_hours"] = None if item["average_revisit_hours"] is None else round(float(item["average_revisit_hours"]), 2)
+            items.append(item)
+
+        total_pages = 0 if total_listings == 0 else ((total_listings - 1) // bounded_page_size) + 1
+        return {
+            "page": bounded_page,
+            "page_size": bounded_page_size,
+            "total_listings": total_listings,
+            "total_pages": total_pages,
+            "has_previous_page": bounded_page > 1,
+            "has_next_page": offset + len(items) < total_listings,
+            "items": items,
+        }
+
     def freshness_summary(self, *, now: str | None = None) -> dict[str, object]:
         summaries = self.listing_history_summaries(now=now)
         generated_at = _coerce_now(now).replace(microsecond=0).isoformat()
@@ -754,74 +984,190 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         return probe
 
     def listing_state_inputs(self, *, now: str | None = None, listing_id: int | None = None) -> list[dict[str, object]]:
-        summaries = self.listing_history_summaries(now=now, listing_id=listing_id)
-        inputs: list[dict[str, object]] = []
-        for summary in summaries:
-            context = self.connection.execute(
-                """
+        now_dt = _coerce_now(now)
+        observation_filter = ""
+        probe_filter = ""
+        params: list[object] = []
+        if listing_id is not None:
+            observation_filter = "WHERE listing_observations.listing_id = ?"
+            probe_filter = "WHERE item_page_probes.listing_id = ?"
+            params = [listing_id, listing_id]
+
+        rows = self.connection.execute(
+            f"""
+            WITH ordered_observations AS (
                 SELECT
-                    listings.primary_catalog_id,
-                    listings.primary_root_catalog_id,
-                    primary_catalog.path AS primary_catalog_path,
-                    primary_catalog.root_title AS primary_catalog_root_title,
-                    (
-                        SELECT observations.run_id
-                        FROM listing_observations AS observations
-                        WHERE observations.listing_id = listings.listing_id
-                        ORDER BY observations.observed_at DESC, observations.run_id DESC
-                        LIMIT 1
-                    ) AS last_observed_run_id,
-                    (
-                        SELECT scans.run_id
-                        FROM catalog_scans AS scans
-                        WHERE scans.catalog_id = listings.primary_catalog_id AND scans.success = 1
-                        ORDER BY scans.fetched_at DESC, scans.run_id DESC
-                        LIMIT 1
-                    ) AS latest_primary_scan_run_id,
-                    (
-                        SELECT scans.fetched_at
-                        FROM catalog_scans AS scans
-                        WHERE scans.catalog_id = listings.primary_catalog_id AND scans.success = 1
-                        ORDER BY scans.fetched_at DESC, scans.run_id DESC
-                        LIMIT 1
-                    ) AS latest_primary_scan_at,
-                    (
-                        SELECT COUNT(DISTINCT scans.run_id)
-                        FROM catalog_scans AS scans
-                        WHERE scans.catalog_id = listings.primary_catalog_id
-                          AND scans.success = 1
-                          AND scans.fetched_at > ?
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM listing_observations AS observations
-                              WHERE observations.listing_id = listings.listing_id
-                                AND observations.run_id = scans.run_id
-                          )
-                    ) AS follow_up_miss_count,
-                    (
-                        SELECT MAX(scans.fetched_at)
-                        FROM catalog_scans AS scans
-                        WHERE scans.catalog_id = listings.primary_catalog_id
-                          AND scans.success = 1
-                          AND scans.fetched_at > ?
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM listing_observations AS observations
-                              WHERE observations.listing_id = listings.listing_id
-                                AND observations.run_id = scans.run_id
-                          )
-                    ) AS latest_follow_up_miss_at
-                FROM listings
-                LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
-                WHERE listings.listing_id = ?
-                """,
-                (summary["last_seen_at"], summary["last_seen_at"], summary["listing_id"]),
-            ).fetchone()
-            enriched = dict(summary)
-            if context is not None:
-                enriched.update(dict(context))
-            latest_probe = self.latest_item_page_probe(int(summary["listing_id"]))
-            enriched["latest_probe"] = latest_probe
+                    listing_observations.*,
+                    LAG(listing_observations.observed_at) OVER (
+                        PARTITION BY listing_observations.listing_id
+                        ORDER BY listing_observations.observed_at
+                    ) AS previous_observed_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY listing_observations.listing_id
+                        ORDER BY listing_observations.observed_at DESC, listing_observations.run_id DESC
+                    ) AS observation_recency_rank
+                FROM listing_observations
+                {observation_filter}
+            ),
+            summary AS (
+                SELECT
+                    ordered_observations.listing_id AS listing_id,
+                    COUNT(*) AS observation_count,
+                    SUM(ordered_observations.sighting_count) AS total_sightings,
+                    MIN(ordered_observations.observed_at) AS first_seen_at,
+                    MAX(ordered_observations.observed_at) AS last_seen_at,
+                    AVG(CASE
+                        WHEN ordered_observations.previous_observed_at IS NULL THEN NULL
+                        ELSE (julianday(ordered_observations.observed_at) - julianday(ordered_observations.previous_observed_at)) * 24.0
+                    END) AS average_revisit_hours,
+                    MAX(CASE WHEN ordered_observations.observation_recency_rank = 1 THEN ordered_observations.run_id END) AS last_observed_run_id
+                FROM ordered_observations
+                GROUP BY ordered_observations.listing_id
+            ),
+            latest_primary_scan AS (
+                SELECT catalog_id, run_id, fetched_at
+                FROM (
+                    SELECT
+                        catalog_scans.catalog_id,
+                        catalog_scans.run_id,
+                        catalog_scans.fetched_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY catalog_scans.catalog_id
+                            ORDER BY catalog_scans.fetched_at DESC, catalog_scans.run_id DESC
+                        ) AS scan_rank
+                    FROM catalog_scans
+                    WHERE catalog_scans.success = 1
+                )
+                WHERE scan_rank = 1
+            ),
+            follow_up_miss AS (
+                SELECT
+                    listings.listing_id AS listing_id,
+                    COUNT(DISTINCT scans.run_id) AS follow_up_miss_count,
+                    MAX(scans.fetched_at) AS latest_follow_up_miss_at
+                FROM summary
+                JOIN listings ON listings.listing_id = summary.listing_id
+                LEFT JOIN catalog_scans AS scans
+                  ON scans.catalog_id = listings.primary_catalog_id
+                 AND scans.success = 1
+                 AND scans.fetched_at > summary.last_seen_at
+                LEFT JOIN listing_observations AS observations
+                  ON observations.listing_id = summary.listing_id
+                 AND observations.run_id = scans.run_id
+                WHERE observations.run_id IS NULL
+                GROUP BY listings.listing_id
+            ),
+            latest_probe AS (
+                SELECT
+                    probe_id,
+                    listing_id,
+                    probed_at,
+                    requested_url,
+                    final_url,
+                    response_status,
+                    probe_outcome,
+                    detail_json,
+                    error_message
+                FROM (
+                    SELECT
+                        item_page_probes.probe_id,
+                        item_page_probes.listing_id,
+                        item_page_probes.probed_at,
+                        item_page_probes.requested_url,
+                        item_page_probes.final_url,
+                        item_page_probes.response_status,
+                        item_page_probes.probe_outcome,
+                        item_page_probes.detail_json,
+                        item_page_probes.error_message,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY item_page_probes.listing_id
+                            ORDER BY item_page_probes.probed_at DESC, item_page_probes.probe_id DESC
+                        ) AS probe_rank
+                    FROM item_page_probes
+                    {probe_filter}
+                )
+                WHERE probe_rank = 1
+            )
+            SELECT
+                summary.listing_id,
+                summary.observation_count,
+                summary.total_sightings,
+                summary.first_seen_at,
+                summary.last_seen_at,
+                summary.average_revisit_hours,
+                listings.canonical_url,
+                listings.title,
+                listings.brand,
+                listings.size_label,
+                listings.condition_label,
+                listings.price_amount_cents,
+                listings.price_currency,
+                listings.total_price_amount_cents,
+                listings.total_price_currency,
+                listings.image_url,
+                roots.title AS root_title,
+                listings.primary_catalog_id,
+                listings.primary_root_catalog_id,
+                primary_catalog.path AS primary_catalog_path,
+                primary_catalog.root_title AS primary_catalog_root_title,
+                summary.last_observed_run_id,
+                latest_primary_scan.run_id AS latest_primary_scan_run_id,
+                latest_primary_scan.fetched_at AS latest_primary_scan_at,
+                COALESCE(follow_up_miss.follow_up_miss_count, 0) AS follow_up_miss_count,
+                follow_up_miss.latest_follow_up_miss_at,
+                latest_probe.probe_id AS latest_probe_id,
+                latest_probe.probed_at AS latest_probe_probed_at,
+                latest_probe.requested_url AS latest_probe_requested_url,
+                latest_probe.final_url AS latest_probe_final_url,
+                latest_probe.response_status AS latest_probe_response_status,
+                latest_probe.probe_outcome AS latest_probe_outcome,
+                latest_probe.detail_json AS latest_probe_detail_json,
+                latest_probe.error_message AS latest_probe_error_message
+            FROM summary
+            JOIN listings ON listings.listing_id = summary.listing_id
+            LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+            LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
+            LEFT JOIN latest_primary_scan ON latest_primary_scan.catalog_id = listings.primary_catalog_id
+            LEFT JOIN follow_up_miss ON follow_up_miss.listing_id = listings.listing_id
+            LEFT JOIN latest_probe ON latest_probe.listing_id = listings.listing_id
+            ORDER BY summary.last_seen_at DESC, summary.listing_id DESC
+            """,
+            params,
+        ).fetchall()
+
+        inputs: list[dict[str, object]] = []
+        for row in rows:
+            enriched = dict(row)
+            age_hours = _hours_between(str(enriched["last_seen_at"]), now_dt)
+            enriched["last_seen_age_hours"] = round(age_hours, 2)
+            enriched["freshness_bucket"] = _freshness_bucket(int(enriched["observation_count"]), age_hours)
+            enriched["signal_completeness"] = _signal_completeness(enriched)
+            enriched["average_revisit_hours"] = None if enriched["average_revisit_hours"] is None else round(float(enriched["average_revisit_hours"]), 2)
+            if enriched.get("latest_probe_id") is None:
+                enriched["latest_probe"] = None
+            else:
+                enriched["latest_probe"] = {
+                    "probe_id": enriched.pop("latest_probe_id"),
+                    "listing_id": enriched["listing_id"],
+                    "probed_at": enriched.pop("latest_probe_probed_at"),
+                    "requested_url": enriched.pop("latest_probe_requested_url"),
+                    "final_url": enriched.pop("latest_probe_final_url"),
+                    "response_status": enriched.pop("latest_probe_response_status"),
+                    "probe_outcome": enriched.pop("latest_probe_outcome"),
+                    "detail": json.loads(enriched.pop("latest_probe_detail_json") or "{}"),
+                    "error_message": enriched.pop("latest_probe_error_message"),
+                }
+            for transient_field in (
+                "latest_probe_id",
+                "latest_probe_probed_at",
+                "latest_probe_requested_url",
+                "latest_probe_final_url",
+                "latest_probe_response_status",
+                "latest_probe_outcome",
+                "latest_probe_detail_json",
+                "latest_probe_error_message",
+            ):
+                enriched.pop(transient_field, None)
             enriched["seen_in_latest_primary_scan"] = (
                 enriched.get("latest_primary_scan_run_id") is not None
                 and enriched.get("latest_primary_scan_run_id") == enriched.get("last_observed_run_id")
@@ -913,6 +1259,13 @@ def _signal_completeness(row: dict[str, object]) -> int:
         )
         if row.get(field) is not None
     )
+
+
+def _clean_query_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip().lower()
+    return cleaned or None
 
 
 def _coerce_now(now: str | None) -> datetime:

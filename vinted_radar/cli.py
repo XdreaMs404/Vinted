@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 import sys
 
 import typer
 
 from vinted_radar.dashboard import serve_dashboard, start_dashboard_server
+from vinted_radar.db_health import inspect_sqlite_database
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
@@ -22,7 +24,7 @@ def discover(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
     page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in the run."),
-    root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
+    root_scope: str = typer.Option("both", "--root-scope", help="Which root catalogs to scan: both, women, or men."),
     request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
     concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
@@ -56,7 +58,7 @@ def batch_run(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
     page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in the batch cycle."),
-    root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
+    root_scope: str = typer.Option("both", "--root-scope", help="Which root catalogs to scan: both, women, or men."),
     state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after discovery."),
     request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
@@ -66,6 +68,7 @@ def batch_run(
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
 ) -> None:
+    proxies = tuple(proxy) if proxy else ()
     runtime_service = RadarRuntimeService(db)
     options = _build_runtime_options(
         page_limit=page_limit,
@@ -75,6 +78,7 @@ def batch_run(
         request_delay=request_delay,
         timeout_seconds=timeout_seconds,
         concurrency=concurrency,
+        proxies=proxies,
     )
     try:
         report = runtime_service.run_cycle(options, mode="batch")
@@ -101,17 +105,19 @@ def continuous_run(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
     page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in each cycle."),
-    root_scope: str = typer.Option("both", "--root-scope", help="Which public root catalogs to scan: both, women, or men."),
+    root_scope: str = typer.Option("both", "--root-scope", help="Which root catalogs to scan: both, women, or men."),
     state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after each discovery cycle."),
     interval_seconds: float = typer.Option(1800.0, "--interval-seconds", min=0.1, help="Delay between completed cycles in seconds."),
     max_cycles: int | None = typer.Option(None, "--max-cycles", min=1, help="Optional cycle cap for smoke runs or tests."),
     request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
     concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
     dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard alongside the continuous loop."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
 ) -> None:
+    proxies = tuple(proxy) if proxy else ()
     runtime_service = RadarRuntimeService(db)
     options = _build_runtime_options(
         page_limit=page_limit,
@@ -121,6 +127,7 @@ def continuous_run(
         request_delay=request_delay,
         timeout_seconds=timeout_seconds,
         concurrency=concurrency,
+        proxies=proxies,
     )
     dashboard_server = None
     if dashboard:
@@ -199,14 +206,39 @@ def runtime_status(
         )
 
 
+@app.command("db-health")
+def db_health(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+    integrity: bool = typer.Option(False, "--integrity/--quick", help="Run full integrity_check in addition to quick_check."),
+) -> None:
+    report = inspect_sqlite_database(db, include_integrity_check=integrity, probe_tables=True)
+
+    if output_format == "json":
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    elif output_format == "table":
+        _render_db_health_report(report)
+    else:
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    if not report["healthy"]:
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def coverage(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
     run_id: str | None = typer.Option(None, "--run-id", help="Inspect a specific run instead of the latest one."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
 ) -> None:
-    with RadarRepository(db) as repository:
-        summary = repository.coverage_summary(run_id)
+    try:
+        with RadarRepository(db) as repository:
+            summary = repository.coverage_summary(run_id)
+    except sqlite3.DatabaseError as exc:
+        typer.echo(f"Database: {db}")
+        typer.echo(f"Coverage query failed: {type(exc).__name__}: {exc}")
+        typer.echo(f"Inspect DB health with: python -m vinted_radar.cli db-health --db {db} --integrity")
+        raise typer.Exit(code=1) from exc
 
     if summary is None:
         typer.echo(f"Database: {db}")
@@ -625,6 +657,7 @@ def _build_runtime_options(
     request_delay: float,
     timeout_seconds: float,
     concurrency: int,
+    proxies: tuple[str, ...] = (),
 ) -> RadarRuntimeOptions:
     return RadarRuntimeOptions(
         page_limit=page_limit,
@@ -634,6 +667,7 @@ def _build_runtime_options(
         timeout_seconds=timeout_seconds,
         state_refresh_limit=state_refresh_limit,
         concurrency=concurrency,
+        proxies=proxies,
     )
 
 
@@ -700,6 +734,51 @@ def _render_state_summary(summary: dict[str, object]) -> None:
                 **row
             )
         )
+
+
+def _render_db_health_report(report: dict[str, object]) -> None:
+    typer.echo(f"Database: {report['db_path']}")
+    typer.echo(f"Exists: {'yes' if report['exists'] else 'no'}")
+    if not report["exists"]:
+        typer.echo("Database file was not found.")
+        return
+
+    typer.echo(f"Size: {report['size_bytes']} bytes")
+    if report.get("open_error"):
+        typer.echo(f"Open error: {report['open_error']}")
+        return
+    if report.get("schema_error"):
+        typer.echo(f"Schema error: {report['schema_error']}")
+
+    typer.echo(f"Schema tables: {report.get('schema_table_count')}")
+    typer.echo("Checks:")
+    for name, check in dict(report.get("checks") or {}).items():
+        if check.get("ok"):
+            typer.echo(f"- {name}: ok")
+            continue
+        if check.get("error"):
+            typer.echo(f"- {name}: {check['error']}")
+            continue
+        messages = "; ".join(str(item) for item in list(check.get("messages") or [])[:3]) or "check failed"
+        typer.echo(f"- {name}: {messages}")
+
+    typer.echo("Critical tables:")
+    for table in list(report.get("tables") or []):
+        if not table.get("exists"):
+            typer.echo(f"- {table['table']}: missing")
+            continue
+        parts: list[str] = []
+        if table.get("count_ok"):
+            parts.append(f"count ok ({table['row_count']} rows)")
+        else:
+            parts.append(f"count error {table['count_error']}")
+        if table.get("sample_ok"):
+            parts.append("sample ok")
+        else:
+            parts.append(f"sample error {table['sample_error']}")
+        typer.echo(f"- {table['table']}: {', '.join(parts)}")
+
+    typer.echo(f"Healthy: {'yes' if report['healthy'] else 'no'}")
 
 
 def _format_money(amount_cents: object, currency: object) -> str:

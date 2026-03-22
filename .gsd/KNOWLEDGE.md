@@ -9,6 +9,7 @@ Agents read this before every unit. Add entries when you discover something wort
 |---|-------|------|-----|-------|
 | 1 | acquisition | Keep raw evidence at the card-fragment level by default (`overlay_title`, visible subtitle/price texts, canonical URL, image alt) rather than archiving full pages. | It preserves explainability for listing normalization without ballooning local storage or diff noise. | 2026-03-17 |
 | 2 | product-ui | Future dashboard work must default to a French, broad-audience product surface that separates market overview, full listing exploration, listing detail, and runtime administration instead of one compact technical page. | The user explicitly rejected the current dense dashboard and wants a usable market intelligence product, not a payload viewer. | 2026-03-18 |
+| 3 | operations | Never promote a synchronized SQLite file straight into `data/vinted-radar.db`; create a remote snapshot, copy to a temporary local path, run DB health checks, then rename atomically. | The app uses WAL and large live files; direct copies can expose partial or unhealthy transfers as if they were usable local truth. | 2026-03-22 |
 
 ## Patterns
 
@@ -23,6 +24,8 @@ Agents read this before every unit. Add entries when you discover something wort
 | 7 | Treat catalog-first acquisition as the preferred scaling posture and use listing detail pages only as a targeted fallback, not as the default per-item path. | acquisition strategy / future M002+ planning | The target volume makes detail-page-per-item collection too expensive even before anti-bot friction; future work should maximize confirmed catalog fields and derived signals first. |
 | 8 | Treat the primary image URL timestamp as `published_at_estimated`, never as an exact publication timestamp. | future listing model / dashboard | Fresh items can align within minutes, but long-tail drift is too large to present as exact truth. |
 | 9 | Treat Cloudflare / Turnstile challenge rate as a first-class acquisition signal rather than assuming that a successful live run means the current HTTP path scales cleanly. | acquisition / runtime planning | Live access from this environment fell into challenge pages under raw HTTP, Chrome, Selenium, and Playwright even while earlier runs had partially succeeded. |
+| 10 | Use `https://www.vinted.fr/api/v2/catalog/items` as the primary catalog discovery surface, and keep public item pages as a separate targeted evidence path for state resolution. | `vinted_radar/services/discovery.py`, `vinted_radar/services/state_refresh.py` | The project now explicitly accepts the private API tradeoff for discovery throughput while preserving page-level state evidence as an independently inspectable layer. |
+| 11 | Keep the market-summary dashboard and the broad listing explorer as separate surfaces; the explorer should page directly from SQL instead of loading the full scored corpus just to browse listings. | `vinted_radar/dashboard.py`, `vinted_radar/repository.py` | This keeps the summary view evidence-rich while giving M002 a scalable listing-browsing path over large corpora. |
 
 ## Lessons Learned
 

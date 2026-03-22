@@ -11,13 +11,17 @@ Ce document retrace les implémentations et corrections effectuées pour stabili
 * **Modifications Parser** : Analyse native du flux JSON de réponse (`item.get("favourite_count")`, extraction dans `photo.high_resolution.timestamp`, et l'objet `user`).
 
 ## 2. Déploiement Professionnel 24/7 via Systemd
-**Fichiers affectés :** `install_services.sh` (Nouveau)
+**Fichiers affectés :** `install_services.sh`
 
 * **Objectif** : Garantir l'exécution autonome du scraper et du dashboard sur le serveur (VPS Linux), même après déconnexion du terminal SSH et sans passer par `screen`/`tmux`.
-* **Fonctionnalité** : Le script crée deux processus "Daemons" Linux :
-  1. `vinted-scraper.service` : Boucle infinie d'aspiration Vinted (`python -m vinted_radar.cli batch ...`).
-  2. `vinted-dashboard.service` : Établit un micro-serveur web autonome (`python -m vinted_radar.cli dashboard --host 0.0.0.0 --port 8765`).
-* **Avantages** : Redémarrage automatique en cas de crash Python (`Restart=always`). Exposition publique native avec `--host 0.0.0.0` (accessible via navigateur sur port 8765 en ouvrant UFW).
+* **Fonctionnalité** : Le script génère deux services systemd paramétrables :
+  1. `vinted-scraper.service` : boucle locale durable via `python -m vinted_radar.cli continuous ... --interval-seconds ...`
+  2. `vinted-dashboard.service` : serveur dashboard dédié via `python -m vinted_radar.cli dashboard ...`
+* **Choix d'exploitation** :
+  * exécution sous l'utilisateur propriétaire du projet par défaut (override possible via `SERVICE_USER`)
+  * dashboard lié à `127.0.0.1` par défaut (override possible via `DASHBOARD_HOST`)
+  * redémarrage `on-failure` plutôt que boucle implicite sur sortie normale
+  * variables d'environnement pour ajuster l'intervalle scraper, le port dashboard, et le chemin DB sans rééditer le script
 
 ## 3. Crashs VPS et "Database is locked" (SQLite Deadlock)
 **Fichiers affectés :** `vinted_radar/db.py`, `tests/test_history_repository.py`

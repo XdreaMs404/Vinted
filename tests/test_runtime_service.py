@@ -158,7 +158,7 @@ class DiscoveryFactorySequence:
         self.db_path = db_path
         self.call_count = 0
 
-    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float):
+    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
         self.call_count += 1
         if self.call_count == 1:
             return FailingDiscoveryService(self.db_path)
@@ -171,6 +171,23 @@ class StateFactory:
 
     def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float):
         return FakeStateRefreshService(self.db_path)
+
+
+class CapturingDiscoveryFactory:
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
+        self.calls.append(
+            {
+                "db_path": db_path,
+                "timeout_seconds": timeout_seconds,
+                "request_delay": request_delay,
+                "proxies": proxies,
+            }
+        )
+        return PersistingDiscoveryService(self.db_path)
 
 
 def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: Path) -> None:
@@ -213,6 +230,39 @@ def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: P
     assert latest["state_probe_limit"] == 3
     assert status["totals"]["completed_cycles"] == 1
     assert status["latest_failure"] is None
+
+
+def test_runtime_service_passes_proxy_pool_to_discovery_factory(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    discovery_factory = CapturingDiscoveryFactory(db_path)
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+    )
+
+    report = runtime.run_cycle(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=3,
+            proxies=("http://proxy-a:8080", "http://proxy-b:8080"),
+        ),
+        mode="batch",
+    )
+
+    assert report.status == "completed"
+    assert discovery_factory.calls == [
+        {
+            "db_path": str(db_path),
+            "timeout_seconds": 5.0,
+            "request_delay": 0.0,
+            "proxies": ["http://proxy-a:8080", "http://proxy-b:8080"],
+        }
+    ]
 
 
 def test_runtime_service_continuous_mode_keeps_failed_cycle_visible_and_continues(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from wsgiref.util import setup_testing_defaults
 
-from vinted_radar.dashboard import DashboardApplication, DashboardFilters, build_dashboard_payload
+from vinted_radar.dashboard import DashboardApplication, DashboardFilters, ExplorerFilters, build_dashboard_payload, build_explorer_payload
 from vinted_radar.repository import RadarRepository
 
 
@@ -127,8 +127,31 @@ def test_dashboard_payload_keeps_summary_filters_and_detail_separate(tmp_path: P
     assert payload["detail"]["state_code"] == "sold_probable"
     assert payload["runtime"]["latest_cycle"]["status"] == "completed"
     assert payload["diagnostics"]["runtime_api"] == "/api/runtime"
+    assert payload["diagnostics"]["explorer_api"] == "/api/explorer"
     assert any(item["label"] == "Follow-up misses" for item in payload["detail"]["transitions"])
     assert payload["filters"]["available"]["roots"][0]["value"] == "all"
+
+
+def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        payload = build_explorer_payload(
+            repository,
+            filters=ExplorerFilters(root="Femmes", query="robe", page=1, page_size=2),
+            now="2026-03-19T12:00:00+00:00",
+        )
+
+    assert payload["results"]["total_listings"] == 4
+    assert payload["results"]["page"] == 1
+    assert payload["results"]["page_size"] == 2
+    assert payload["results"]["has_next_page"] is True
+    assert len(payload["items"]) == 2
+    assert [item["listing_id"] for item in payload["items"]] == [9003, 9001]
+    assert payload["items"][0]["freshness_bucket"] == "first-pass-only"
+    assert payload["items"][1]["freshness_bucket"] == "fresh-followup"
+    assert payload["filters"]["available"]["catalogs"][1]["catalog_id"] == 2001
 
 
 def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> None:
@@ -138,6 +161,8 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
 
     html_status, html_body, html_headers = _call_app(app, "/")
     api_status, api_body, api_headers = _call_app(app, "/api/dashboard", "state=active")
+    explorer_status, explorer_body, explorer_headers = _call_app(app, "/explorer", "q=robe&page_size=2")
+    explorer_api_status, explorer_api_body, explorer_api_headers = _call_app(app, "/api/explorer", "q=robe&page_size=2")
     runtime_status, runtime_body, runtime_headers = _call_app(app, "/api/runtime")
     detail_status, detail_body, detail_headers = _call_app(app, "/api/listings/9002")
     health_status, health_body, _ = _call_app(app, "/health")
@@ -147,12 +172,26 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert b"Market summary first" in html_body
     assert b"Demand proof" in html_body
     assert b"Runtime payload" in html_body
+    assert b"Explorer payload" in html_body
 
     assert api_status == "200 OK"
     assert api_headers["Content-Type"].startswith("application/json")
     api_payload = json.loads(api_body)
     assert api_payload["results"]["filtered_listings"] == 2
     assert api_payload["rankings"]["demand"][0]["listing_id"] == 9001
+
+    assert explorer_status == "200 OK"
+    assert explorer_headers["Content-Type"].startswith("text/html")
+    assert b"Listing explorer separated from the dashboard summary" in explorer_body
+    assert b"Back to dashboard" in explorer_body
+
+    assert explorer_api_status == "200 OK"
+    assert explorer_api_headers["Content-Type"].startswith("application/json")
+    explorer_payload = json.loads(explorer_api_body)
+    assert explorer_payload["results"]["total_listings"] == 4
+    assert explorer_payload["results"]["page_size"] == 2
+    assert len(explorer_payload["items"]) == 2
+    assert [item["listing_id"] for item in explorer_payload["items"]] == [9003, 9001]
 
     assert runtime_status == "200 OK"
     assert runtime_headers["Content-Type"].startswith("application/json")

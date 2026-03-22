@@ -23,7 +23,7 @@ Pour que la suite de tests (88 tests) reste 100% verte, les bouchons (`FakeHttpC
 
 ## 4. Améliorations Qualité post-Refacto
 Une fois la base en place, 4 améliorations structurelles ont été appliquées suite à un audit :
-1. **Suppression du Throttle Async global** : Maintenir un `last_request_at` global entre 15 coroutines ne fonctionnait pas. Le `Semaphore(15)` est le seul mécanisme pertinent et suffisant pour limiter le taux de requêtes.
+1. **Contrôle de concurrence principal + délai coopératif** : le `Semaphore(15)` borne le nombre de requêtes en vol, tandis que le client HTTP conserve un espacement asynchrone via `request_delay` pour éviter les rafales trop serrées. Ce n'est donc pas une suppression totale du throttling async, mais un partage plus propre des responsabilités.
 2. **Nettoyage des ressources** : Appel de `await self.http_client.close_async()` dans un bloc `finally` pour garantir la libération des *file descriptors*. Un fallback `getattr` est utilisé pour que les tests sans vraie session HTTP n'échouent pas.
 3. **Optimisation des Dataclasses** : Remplacement d'un hack `__post_init__` sur un field `Optional[set]` par un constructeur natif `field(default_factory=set)` dans le `_CatalogScanResult`.
 4. **Clean Code** : Réorganisation propre des imports et de l'instanciation des loggers Python.

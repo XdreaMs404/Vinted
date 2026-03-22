@@ -6,7 +6,6 @@ import time
 from typing import Callable
 
 from vinted_radar.repository import RadarRepository
-from vinted_radar.scoring import load_listing_scores
 from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryRunReport, build_default_service
 from vinted_radar.services.state_refresh import StateRefreshReport, build_default_state_refresh_service
 
@@ -20,6 +19,7 @@ class RadarRuntimeOptions:
     timeout_seconds: float = 20.0
     state_refresh_limit: int = 10
     concurrency: int = 1
+    proxies: tuple[str, ...] = ()
 
     def as_config(self) -> dict[str, object]:
         return {
@@ -96,6 +96,7 @@ class RadarRuntimeService:
                 db_path=str(self.db_path),
                 timeout_seconds=options.timeout_seconds,
                 request_delay=options.request_delay,
+                proxies=list(options.proxies) or None,
             )
             try:
                 discovery_report = discovery_service.run(
@@ -255,7 +256,7 @@ class RadarRuntimeService:
         try:
             with RadarRepository(self.db_path) as repository:
                 freshness = repository.freshness_summary()
-                tracked_listings = len(load_listing_scores(repository))
+                tracked_listings = int(freshness["overall"].get("tracked_listings") or 0)
         except Exception:  # noqa: BLE001
             return 0, {
                 "first-pass-only": 0,

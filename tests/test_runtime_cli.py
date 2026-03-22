@@ -61,6 +61,10 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
             "4",
             "--request-delay",
             "0.0",
+            "--proxy",
+            "http://proxy-a:8080",
+            "--proxy",
+            "http://proxy-b:8080",
             "--dashboard",
             "--host",
             "127.0.0.1",
@@ -76,6 +80,7 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
     assert "Runtime API: http://127.0.0.1:8766/api/runtime" in result.stdout
     assert captured["db_path"] == tmp_path / "runtime.db"
     assert captured["mode"] == "batch"
+    assert tuple(captured["options"].proxies) == ("http://proxy-a:8080", "http://proxy-b:8080")
     assert captured["dashboard"] == {
         "db_path": tmp_path / "runtime.db",
         "host": "127.0.0.1",
@@ -96,6 +101,7 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
             captured["db_path"] = db_path
 
         def run_continuous(self, options, *, interval_seconds: float, max_cycles: int | None, continue_on_error: bool, on_cycle_complete):
+            captured["options"] = options
             captured["interval_seconds"] = interval_seconds
             captured["max_cycles"] = max_cycles
             captured["continue_on_error"] = continue_on_error
@@ -159,6 +165,8 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
             "2",
             "--state-refresh-limit",
             "3",
+            "--proxy",
+            "http://proxy-c:8080",
             "--dashboard",
             "--host",
             "127.0.0.1",
@@ -174,6 +182,7 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
     assert "Cycle: cycle-2" in result.stdout
     assert captured["interval_seconds"] == 1.0
     assert captured["max_cycles"] == 2
+    assert tuple(captured["options"].proxies) == ("http://proxy-c:8080",)
     assert captured["continue_on_error"] is True
     assert captured["stopped"] is True
 

@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS runtime_cycles (
 
 CREATE INDEX IF NOT EXISTS idx_catalogs_root_leaf ON catalogs(root_title, is_leaf);
 CREATE INDEX IF NOT EXISTS idx_catalog_scans_run_success ON catalog_scans(run_id, success);
+CREATE INDEX IF NOT EXISTS idx_catalog_scans_catalog_success_time ON catalog_scans(catalog_id, success, fetched_at DESC, run_id DESC);
 CREATE INDEX IF NOT EXISTS idx_listing_discoveries_run_catalog ON listing_discoveries(run_id, source_catalog_id);
 CREATE INDEX IF NOT EXISTS idx_listing_observations_listing_time ON listing_observations(listing_id, observed_at);
 CREATE INDEX IF NOT EXISTS idx_item_page_probes_listing_time ON item_page_probes(listing_id, probed_at);

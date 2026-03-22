@@ -17,6 +17,8 @@ from vinted_radar.state_machine import STATE_ORDER, summarize_state_evaluations
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 24
 SEGMENT_LIMIT = 6
+DEFAULT_EXPLORER_PAGE_SIZE = 50
+MAX_EXPLORER_PAGE_SIZE = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +61,44 @@ class DashboardFilters:
         return payload
 
 
+@dataclass(frozen=True, slots=True)
+class ExplorerFilters:
+    root: str | None = None
+    catalog_id: int | None = None
+    query: str | None = None
+    page: int = 1
+    page_size: int = DEFAULT_EXPLORER_PAGE_SIZE
+
+    @classmethod
+    def from_query_params(cls, params: dict[str, list[str]]) -> ExplorerFilters:
+        return cls(
+            root=_normalized_filter_value(_first_value(params, "root")),
+            catalog_id=_parse_int(_first_value(params, "catalog_id")),
+            query=_clean_text(_first_value(params, "q")),
+            page=_bounded_page(_parse_int(_first_value(params, "page"))),
+            page_size=_bounded_page_size(_parse_int(_first_value(params, "page_size"))),
+        )
+
+    def to_query_dict(self, *, overrides: dict[str, Any] | None = None) -> dict[str, str]:
+        payload: dict[str, str] = {}
+        if self.root:
+            payload["root"] = self.root
+        if self.catalog_id is not None:
+            payload["catalog_id"] = str(self.catalog_id)
+        if self.query:
+            payload["q"] = self.query
+        if self.page != 1:
+            payload["page"] = str(self.page)
+        if self.page_size != DEFAULT_EXPLORER_PAGE_SIZE:
+            payload["page_size"] = str(self.page_size)
+        for key, value in (overrides or {}).items():
+            if value in {None, "", "all"}:
+                payload.pop(key, None)
+            else:
+                payload[key] = str(value)
+        return payload
+
+
 @dataclass(slots=True)
 class DashboardServerHandle:
     host: str
@@ -80,17 +120,32 @@ class DashboardApplication:
     def __call__(self, environ: dict[str, Any], start_response) -> list[bytes]:
         path = environ.get("PATH_INFO") or "/"
         params = parse_qs(environ.get("QUERY_STRING", ""), keep_blank_values=False)
-        filters = DashboardFilters.from_query_params(params)
 
         if path in {"", "/"}:
+            filters = DashboardFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
                 payload = build_dashboard_payload(repository, filters=filters, now=self.now)
             body = render_dashboard_html(payload)
             return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
 
         if path == "/api/dashboard":
+            filters = DashboardFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
                 payload = build_dashboard_payload(repository, filters=filters, now=self.now)
+            body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+            return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
+
+        if path == "/explorer":
+            filters = ExplorerFilters.from_query_params(params)
+            with RadarRepository(self.db_path) as repository:
+                payload = build_explorer_payload(repository, filters=filters, now=self.now)
+            body = render_explorer_html(payload)
+            return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
+
+        if path == "/api/explorer":
+            filters = ExplorerFilters.from_query_params(params)
+            with RadarRepository(self.db_path) as repository:
+                payload = build_explorer_payload(repository, filters=filters, now=self.now)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
@@ -116,14 +171,14 @@ class DashboardApplication:
         if path == "/health":
             with RadarRepository(self.db_path) as repository:
                 coverage = repository.coverage_summary()
-                listing_scores = load_listing_scores(repository, now=self.now)
+                freshness = repository.freshness_summary(now=self.now)
                 runtime_status = repository.runtime_status(limit=1)
             body = json.dumps(
                 {
                     "status": "ok",
                     "db_path": str(self.db_path),
                     "has_run": coverage is not None,
-                    "tracked_listings": len(listing_scores),
+                    "tracked_listings": int(freshness["overall"].get("tracked_listings") or 0),
                     "latest_runtime_cycle": runtime_status["latest_cycle"],
                 },
                 ensure_ascii=False,
@@ -223,10 +278,60 @@ def build_dashboard_payload(
             "dashboard_api": "/api/dashboard",
             "runtime_api": "/api/runtime",
             "listing_api": None if selected_listing is None else f"/api/listings/{selected_listing['listing_id']}",
+            "explorer": "/explorer",
+            "explorer_api": "/api/explorer",
             "health": "/health",
             "latest_failures": [] if coverage is None else coverage["failures"],
         },
     }
+
+
+def build_explorer_payload(
+    repository: RadarRepository,
+    *,
+    filters: ExplorerFilters,
+    now: str | None = None,
+) -> dict[str, Any]:
+    generated_at = _generated_at(now)
+    options = repository.explorer_filter_options()
+    page = repository.listing_explorer_page(
+        root=filters.root,
+        catalog_id=filters.catalog_id,
+        query=filters.query,
+        page=filters.page,
+        page_size=filters.page_size,
+        now=now,
+    )
+    return {
+        "generated_at": generated_at,
+        "db_path": str(repository.db_path),
+        "filters": {
+            "selected": {
+                "root": filters.root or "all",
+                "catalog_id": filters.catalog_id,
+                "q": filters.query or "",
+                "page": page["page"],
+                "page_size": page["page_size"],
+            },
+            "available": options,
+        },
+        "results": {
+            "total_listings": page["total_listings"],
+            "total_pages": page["total_pages"],
+            "page": page["page"],
+            "page_size": page["page_size"],
+            "has_previous_page": page["has_previous_page"],
+            "has_next_page": page["has_next_page"],
+            "has_results": bool(page["items"]),
+            "empty_reason": None if page["items"] else "No tracked listings match the current explorer filters.",
+        },
+        "items": page["items"],
+        "diagnostics": {
+            "explorer_api": "/api/explorer",
+            "dashboard": "/",
+        },
+    }
+
 
 
 def build_listing_detail_payload(
@@ -572,8 +677,168 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       <div class=\"api-links\">
         <a class=\"button secondary\" href=\"{_escape(diagnostics['dashboard_api'] + _suffix_query(filters, include_listing=True))}\">Dashboard payload</a>
         <a class=\"button secondary\" href=\"{_escape(diagnostics['runtime_api'])}\">Runtime payload</a>
+        <a class=\"button secondary\" href=\"{_escape(diagnostics['explorer'])}\">Explorer</a>
+        <a class=\"button secondary\" href=\"{_escape(diagnostics['explorer_api'])}\">Explorer payload</a>
         <a class=\"button secondary\" href=\"{_escape(diagnostics['health'])}\">Health</a>
         {'' if diagnostics['listing_api'] is None else f'<a class="button secondary" href="{_escape(diagnostics["listing_api"])}">Selected listing payload</a>'}
+      </div>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
+def render_explorer_html(payload: dict[str, Any]) -> str:
+    selected = payload["filters"]["selected"]
+    available = payload["filters"]["available"]
+    results = payload["results"]
+    diagnostics = payload["diagnostics"]
+    items = payload["items"]
+    filters = ExplorerFilters(
+        root=None if selected["root"] == "all" else selected["root"],
+        catalog_id=selected["catalog_id"],
+        query=selected["q"] or None,
+        page=int(selected["page"]),
+        page_size=int(selected["page_size"]),
+    )
+
+    root_options = "".join(_option_html(item["value"], item["label"], selected["root"]) for item in available["roots"])
+    catalog_options = "".join(_option_html(item["value"], item["label"], selected["catalog_id"]) for item in available["catalogs"])
+    page_size_options = "".join(_option_html(str(value), str(value), selected["page_size"]) for value in (25, 50, 100))
+
+    if items:
+        rows_html = "".join(
+            f"""
+            <tr>
+              <td><strong>{int(item['listing_id'])}</strong></td>
+              <td>
+                <div><strong>{_escape(str(item.get('title') or '(untitled)'))}</strong></div>
+                <div class=\"link-muted\">{_escape(str(item.get('brand') or 'Unknown brand'))}</div>
+              </td>
+              <td>{_escape(str(item.get('primary_catalog_path') or item.get('root_title') or 'Unknown'))}</td>
+              <td>{_escape(str(item.get('freshness_bucket') or 'unknown'))}</td>
+              <td>{_escape(_format_money(item.get('price_amount_cents'), item.get('price_currency')))}</td>
+              <td>{_escape(str(item.get('observation_count') or 0))}</td>
+              <td>{_escape(str(item.get('last_seen_at') or 'unknown'))}</td>
+              <td>
+                <a class=\"button secondary\" href=\"{_escape('/' + _suffix_query(DashboardFilters(listing_id=int(item['listing_id'])), include_listing=True))}\">Inspect</a>
+              </td>
+            </tr>
+            """
+            for item in items
+        )
+    else:
+        rows_html = "<tr><td colspan='8'>No tracked listings match the current explorer filters.</td></tr>"
+
+    previous_href = _explorer_query(filters, overrides={"page": max(filters.page - 1, 1)})
+    next_href = _explorer_query(filters, overrides={"page": filters.page + 1})
+
+    return f"""<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+  <title>Vinted Radar explorer</title>
+  <style>
+    :root {{
+      --bg: #11100d;
+      --panel: rgba(29, 25, 20, 0.92);
+      --ink: #f3ece0;
+      --muted: #c9baa4;
+      --accent: #d5a15b;
+      --line: rgba(255,255,255,0.08);
+      --shadow: 0 24px 70px rgba(0,0,0,0.42);
+      --radius: 22px;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; color: var(--ink); background: linear-gradient(180deg, #15120f 0%, #0f0d0b 100%); font-family: \"Avenir Next\", \"Segoe UI\", sans-serif; min-height: 100vh; }}
+    .shell {{ max-width: 1480px; margin: 0 auto; padding: 32px; }}
+    .panel {{ background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; margin-bottom: 22px; }}
+    h1, h2 {{ font-family: \"Iowan Old Style\", \"Palatino Linotype\", Georgia, serif; margin: 0; }}
+    .eyebrow {{ text-transform: uppercase; letter-spacing: 0.22em; font-size: 12px; color: var(--accent); }}
+    .subhead, .link-muted {{ color: var(--muted); }}
+    .filters {{ display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; }}
+    label {{ display: grid; gap: 8px; color: var(--muted); font-size: 0.92rem; }}
+    input, select {{ width: 100%; border: 1px solid rgba(255,255,255,0.09); border-radius: 14px; background: rgba(255,255,255,0.04); color: var(--ink); padding: 12px 14px; font: inherit; }}
+    .actions, .api-links, .pagination {{ display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
+    .button {{ appearance: none; border: 1px solid rgba(213,161,91,0.35); border-radius: 999px; padding: 12px 16px; background: linear-gradient(135deg, rgba(213,161,91,0.26), rgba(213,161,91,0.08)); color: var(--ink); cursor: pointer; text-decoration: none; font-weight: 600; }}
+    .button.secondary {{ background: rgba(255,255,255,0.03); border-color: var(--line); color: var(--muted); }}
+    .button.disabled {{ opacity: 0.45; pointer-events: none; }}
+    .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 16px; }}
+    .stat {{ padding: 16px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); }}
+    .table-wrap {{ overflow: auto; border: 1px solid var(--line); border-radius: 18px; }}
+    table {{ width: 100%; border-collapse: collapse; min-width: 980px; }}
+    th, td {{ padding: 13px 14px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }}
+    th {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); background: rgba(255,255,255,0.02); }}
+  </style>
+</head>
+<body>
+  <main class=\"shell\">
+    <section class=\"panel\">
+      <span class=\"eyebrow\">SQL-backed explorer</span>
+      <h1>Listing explorer separated from the dashboard summary.</h1>
+      <p class=\"subhead\">This surface pages tracked listings directly from SQLite instead of loading the full scored corpus into memory. Use the main dashboard for summary and ranking proof; use this explorer for broad listing browsing.</p>
+      <div class=\"api-links\" style=\"margin-top:16px;\">
+        <a class=\"button secondary\" href=\"/\">Back to dashboard</a>
+        <a class=\"button secondary\" href=\"{_escape(diagnostics['explorer_api'] + _explorer_suffix_query(filters))}\">Explorer payload</a>
+      </div>
+    </section>
+
+    <section class=\"panel\">
+      <form method=\"get\" class=\"filters\">
+        <label>
+          Root
+          <select name=\"root\">{root_options}</select>
+        </label>
+        <label>
+          Catalog
+          <select name=\"catalog_id\">{catalog_options}</select>
+        </label>
+        <label>
+          Search
+          <input type=\"search\" name=\"q\" value=\"{_escape(selected['q'])}\" placeholder=\"Title, brand, listing ID\">
+        </label>
+        <label>
+          Page size
+          <select name=\"page_size\">{page_size_options}</select>
+        </label>
+        <input type=\"hidden\" name=\"page\" value=\"1\">
+        <div class=\"actions\">
+          <button class=\"button\" type=\"submit\">Apply filters</button>
+          <a class=\"button secondary\" href=\"/explorer\">Reset</a>
+        </div>
+      </form>
+      <div class=\"stats\">
+        <div class=\"stat\"><strong>{results['total_listings']}</strong><br><span class=\"link-muted\">matching tracked listings</span></div>
+        <div class=\"stat\"><strong>{results['page']}</strong><br><span class=\"link-muted\">current page / {results['total_pages'] or 0}</span></div>
+        <div class=\"stat\"><strong>{available['tracked_listings']}</strong><br><span class=\"link-muted\">tracked listings in DB</span></div>
+      </div>
+    </section>
+
+    <section class=\"panel\">
+      <div class=\"table-wrap\">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Listing</th>
+              <th>Catalog</th>
+              <th>Freshness</th>
+              <th>Price</th>
+              <th>Obs</th>
+              <th>Last seen</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows_html}
+          </tbody>
+        </table>
+      </div>
+      <div class=\"pagination\" style=\"margin-top:16px;\">
+        <a class=\"button secondary{' disabled' if not results['has_previous_page'] else ''}\" href=\"{_escape(previous_href)}\">Previous</a>
+        <span class=\"link-muted\">Page {results['page']} of {results['total_pages'] or 1}</span>
+        <a class=\"button secondary{' disabled' if not results['has_next_page'] else ''}\" href=\"{_escape(next_href)}\">Next</a>
       </div>
     </section>
   </main>
@@ -949,6 +1214,20 @@ def _suffix_query(
     return "?" + urlencode(params)
 
 
+def _explorer_query(filters: ExplorerFilters, *, overrides: dict[str, Any] | None = None) -> str:
+    params = filters.to_query_dict(overrides=overrides)
+    if not params:
+        return "/explorer"
+    return "/explorer?" + urlencode(params)
+
+
+def _explorer_suffix_query(filters: ExplorerFilters, *, overrides: dict[str, Any] | None = None) -> str:
+    params = filters.to_query_dict(overrides=overrides)
+    if not params:
+        return ""
+    return "?" + urlencode(params)
+
+
 def _respond(start_response, status: str, body: str, *, content_type: str) -> list[bytes]:
     encoded = body.encode("utf-8")
     start_response(status, [("Content-Type", content_type), ("Content-Length", str(len(encoded)))])
@@ -975,6 +1254,18 @@ def _bounded_limit(value: int | None) -> int:
     if value is None:
         return DEFAULT_LIMIT
     return max(1, min(value, MAX_LIMIT))
+
+
+def _bounded_page(value: int | None) -> int:
+    if value is None:
+        return 1
+    return max(1, value)
+
+
+def _bounded_page_size(value: int | None) -> int:
+    if value is None:
+        return DEFAULT_EXPLORER_PAGE_SIZE
+    return max(1, min(value, MAX_EXPLORER_PAGE_SIZE))
 
 
 def _normalized_filter_value(value: str | None) -> str | None:

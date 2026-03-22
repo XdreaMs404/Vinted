@@ -10,6 +10,8 @@
 .gsd/completed-units.json
 .gsd/STATE.md
 .gsd/gsd.db
+.gsd/gsd.db-shm
+.gsd/gsd.db-wal
 .gsd/DISCUSSION-MANIFEST.json
 .gsd/milestones/**/*-CONTINUE.md
 .gsd/milestones/**/continue.md
@@ -43,3 +45,4 @@ coverage/
 .cache/
 tmp/
 data/
+scripts/diagnostics/output/
