@@ -19,6 +19,9 @@ class RadarRuntimeOptions:
     timeout_seconds: float = 20.0
     state_refresh_limit: int = 10
     concurrency: int = 1
+    min_price: float = 30.0
+    target_catalogs: tuple[int, ...] = ()
+    target_brands: tuple[str, ...] = ()
     proxies: tuple[str, ...] = ()
 
     def as_config(self) -> dict[str, object]:
@@ -30,6 +33,9 @@ class RadarRuntimeOptions:
             "timeout_seconds": self.timeout_seconds,
             "state_refresh_limit": self.state_refresh_limit,
             "concurrency": self.concurrency,
+            "min_price": self.min_price,
+            "target_catalogs": list(self.target_catalogs),
+            "target_brands": list(self.target_brands),
         }
 
 
@@ -106,6 +112,9 @@ class RadarRuntimeService:
                         root_scope=options.root_scope,
                         request_delay=options.request_delay,
                         concurrency=options.concurrency,
+                        min_price=options.min_price,
+                        target_catalogs=options.target_catalogs,
+                        target_brands=options.target_brands,
                     )
                 )
             finally:

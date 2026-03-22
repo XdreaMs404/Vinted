@@ -2,43 +2,50 @@
 
 ## What This Is
 
-A local-first Vinted market intelligence radar focused strictly on the Homme and Femme categories and all of their sub-categories. It tracks public listings over time, separates what was observed from what was inferred, and turns imperfect public signals into a credible market read about what is actually selling now.
+A local-first Vinted market intelligence radar focused strictly on the Homme and Femme categories and their sub-categories. It tracks public listings over time, separates what was observed from what was inferred, and turns imperfect public signals into a cautious market read about what appears to be moving now.
 
 ## Core Value
 
-Turn imperfect public Vinted listing signals into a credible, evidence-backed market read that shows what is really moving now.
+Turn imperfect public Vinted listing signals into an evidence-backed market read that stays explicit about coverage, freshness, confidence, and uncertainty.
 
 ## Current State
 
-S01 through S06 are complete. The repository now has a runnable Python batch collector that syncs the public Homme/Femme catalog tree, scans public catalog pages, persists normalized listing cards in SQLite, records one normalized observation per listing per run, derives cautious current listing states with confidence and explanation surfaces, computes explainable demand / premium rankings plus market segment summaries, and serves a local dashboard over the same repository-backed payloads.
+M001 implementation is complete and integrated across S01 through S06, and its closeout summary now exists at `.gsd/milestones/M001/M001-SUMMARY.md`.
 
-The operator loop is now real instead of manual glue. `batch` runs one coherent discovery + state-refresh cycle, `continuous` repeats that cycle on an interval while optionally serving the dashboard, and `runtime-status` plus `/api/runtime` expose persisted runtime phase/status/error truth from the same SQLite database. Live S06 verification against `data/vinted-radar-s06.db` proved both a fresh batch cycle and repeated continuous cycles, with the dashboard reflecting current runtime state and accumulated history from the same DB.
+Current closeout verification result: **needs-attention**.
+
+What is verified today:
+- the codebase passes `python -m pytest` with 100 passing tests
+- a fresh live `batch` cycle still succeeds against public Vinted data
+- the resulting SQLite DB supports coverage, state, runtime, and market-summary diagnostics
+- the local dashboard still renders market summary, ranking proof, runtime state, and listing detail without console or network errors
+
+What is still blocking a passing M001 closeout:
+- the milestone roadmap requires several days of healthy, readable runtime evidence proving that the market read is already useful after multi-day operation
+- `data/vinted-radar.db` contains multi-day runtime metadata across three distinct days, but its listing-history tables are malformed and cannot serve as trustworthy closeout proof
+- `data/m001-closeout.db` remains a same-day corpus and currently fails to open through the repository bootstrap path because older DB compatibility regressed around `listings.created_at_ts`
+
+So the product is operational, but the milestone is not yet verified as fully complete in the roadmap sense.
 
 ## Architecture / Key Patterns
 
-Local-first execution with both batch and continuous operation modes.
+Local-first execution with both batch and continuous operator modes.
 
 Evidence-first product logic: preserve observed facts, derive inferences explicitly, and surface uncertainty instead of hiding it.
 
-Historical observation storage rather than last-write-wins snapshots, so listing evolution, state transitions, and estimated time-to-sell can be traced over time.
+Historical observation storage rather than last-write-wins snapshots, so listing evolution, freshness, and revisit cadence can be traced over time.
 
-Mixed market surface: market summaries and rankings must always be backed by drill-down into the listing-level evidence that justifies them.
+Mixed market surface: market summaries and rankings must always be backed by listing-level drill-down.
 
-S01 acquisition currently uses public server-rendered HTML only: the full Homme/Femme catalog tree is extracted from the embedded `self.__next_f.push(...)` payload on `/catalog`, and listing discovery comes from SSR item cards rather than browser automation or private APIs.
+Discovery currently uses the Vinted web catalog API for throughput, while public item pages remain a separate direct-evidence path for cautious state resolution.
 
-SQLite is the first durable runtime boundary. Discovery runs, per-catalog scans, listings, and listing sightings are persisted so coverage and failures remain inspectable after each batch run.
+SQLite is the durable runtime boundary. Discovery runs, catalog scans, listings, discoveries, observations, item-page probes, and runtime cycles are all persisted so coverage, failures, and operator state remain inspectable after each run.
 
-S02 adds a second history layer: `listing_observations` stores one normalized observation per listing per run for cadence/freshness queries, while `listing_discoveries` remains the per-sighting diagnostic surface for debugging catalog/page behavior.
+The dashboard is server-rendered and shares one repository-backed payload with its JSON diagnostics so the browser surface and debug surface stay truthful.
 
-S03 adds a cautious state layer over that history: optional `item_page_probes` capture direct public evidence from item pages, and the state engine combines probes plus follow-up-miss history into `active`, `sold_observed`, `sold_probable`, `unavailable_non_conclusive`, `deleted`, and `unknown` surfaces with confidence and reasons.
+`runtime_cycles` is the operator truth for batch/continuous phase, counts, and last-error state, surfaced through the CLI, `/api/runtime`, `/health`, and the dashboard runtime card.
 
-S04 adds an on-demand scoring layer over the state/history surfaces: `demand` ranks sell-through evidence, `premium` stays demand-led with a modest contextual price boost when peer support is strong enough, and market summaries aggregate performing and rising segments from the same evidence base.
-
-S05 adds a local product surface: a server-rendered dashboard plus matching JSON diagnostics built directly from the repository/state/scoring payloads, so filters, ranking tables, and listing detail views stay aligned with the CLI truth surfaces instead of drifting into separate client logic.
-
-S06 closes the local operator loop: `runtime_cycles` persists batch/continuous phase, counts, and last-error state in SQLite; the `batch` and `continuous` commands orchestrate discovery plus state refresh end to end; and the dashboard now surfaces the same runtime truth through a dedicated runtime card plus `/api/runtime`.
-
-Milestone sequencing is deliberate: build a credible listing-level radar first, enrich the market reading next, then add product-level intelligence plus AI, and only then harden for SaaS commercialization.
+Current fragility exposed during M001 closeout: schema/index bootstrap ordering can outrun migrations on older SQLite files, so backward compatibility for pre-existing DBs is weaker than intended.
 
 ## Capability Contract
 
@@ -46,7 +53,7 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
-- [ ] M001: Listing-Level Market Radar — Build a credible local radar that discovers, revisits, scores, and explains what is moving now on Vinted Homme/Femme.
-- [ ] M002: Enriched Market Intelligence Experience — Deepen market reading, contextual analysis, UX richness, and user-facing utility features.
-- [ ] M003: Product-Level Intelligence + Grounded AI Layer — Group listings into product-level signals and add grounded AI insights, summaries, and analytical exploration.
-- [ ] M004: SaaS Hardening and Commercialization — Industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.
+- [x] M001: Listing-Level Market Radar — implementation complete; closeout summary written, verification result `needs-attention` pending healthy multi-day runtime proof.
+- [ ] M002: Enriched Market Intelligence Experience — deepen market reading, contextual analysis, UX richness, and user-facing utility features.
+- [ ] M003: Product-Level Intelligence + Grounded AI Layer — group listings into product-level signals and add grounded AI insights, summaries, and analytical exploration.
+- [ ] M004: SaaS Hardening and Commercialization — industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.

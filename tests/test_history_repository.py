@@ -130,9 +130,9 @@ def test_history_repository_tracks_repeated_runs_and_freshness(tmp_path: Path) -
         service = DiscoveryService(repository=repository, http_client=http_client, now_provider=clock)
 
         http_client.start_next_run()
-        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0))
+        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0, min_price=0.0))
         http_client.start_next_run()
-        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0))
+        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0, min_price=0.0))
 
         history = repository.listing_history(9001, now="2026-03-18T18:00:00+00:00")
         freshness = repository.freshness_summary(now="2026-03-18T18:00:00+00:00")

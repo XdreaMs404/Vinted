@@ -13,8 +13,10 @@ class PersistingDiscoveryService:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.repository = RadarRepository(db_path)
+        self.last_options = None
 
     def run(self, options) -> DiscoveryRunReport:
+        self.last_options = options
         run_id = self.repository.start_run(
             root_scope=options.root_scope,
             page_limit=options.page_limit,
@@ -177,6 +179,7 @@ class CapturingDiscoveryFactory:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.calls: list[dict[str, object]] = []
+        self.services: list[PersistingDiscoveryService] = []
 
     def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
         self.calls.append(
@@ -187,7 +190,9 @@ class CapturingDiscoveryFactory:
                 "proxies": proxies,
             }
         )
-        return PersistingDiscoveryService(self.db_path)
+        service = PersistingDiscoveryService(self.db_path)
+        self.services.append(service)
+        return service
 
 
 def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: Path) -> None:
@@ -263,6 +268,39 @@ def test_runtime_service_passes_proxy_pool_to_discovery_factory(tmp_path: Path) 
             "proxies": ["http://proxy-a:8080", "http://proxy-b:8080"],
         }
     ]
+
+
+def test_runtime_service_passes_high_value_filters_to_discovery_service(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    discovery_factory = CapturingDiscoveryFactory(db_path)
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+    )
+
+    report = runtime.run_cycle(
+        RadarRuntimeOptions(
+            page_limit=2,
+            max_leaf_categories=4,
+            root_scope="both",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=3,
+            min_price=85.0,
+            target_catalogs=(2001, 3001),
+            target_brands=("Chanel", "Hermès"),
+        ),
+        mode="batch",
+    )
+
+    assert report.status == "completed"
+    assert len(discovery_factory.services) == 1
+    forwarded_options = discovery_factory.services[0].last_options
+    assert forwarded_options is not None
+    assert forwarded_options.min_price == 85.0
+    assert forwarded_options.target_catalogs == (2001, 3001)
+    assert forwarded_options.target_brands == ("Chanel", "Hermès")
 
 
 def test_runtime_service_continuous_mode_keeps_failed_cycle_visible_and_continues(tmp_path: Path) -> None:

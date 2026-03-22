@@ -652,8 +652,9 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         return summaries
 
     def explorer_filter_options(self) -> dict[str, list[dict[str, object]] | int]:
+        tracked_predicate = "EXISTS (SELECT 1 FROM listing_observations WHERE listing_observations.listing_id = listings.listing_id)"
         tracked_listings_row = self.connection.execute(
-            "SELECT COUNT(DISTINCT listing_id) AS tracked_listings FROM listing_observations"
+            f"SELECT COUNT(*) AS tracked_listings FROM listings WHERE {tracked_predicate}"
         ).fetchone()
         tracked_listings = 0 if tracked_listings_row is None else int(tracked_listings_row["tracked_listings"] or 0)
 
@@ -664,15 +665,11 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 "count": int(row["count"]),
             }
             for row in self.connection.execute(
-                """
-                WITH tracked AS (
-                    SELECT DISTINCT listing_id
-                    FROM listing_observations
-                )
+                f"""
                 SELECT COALESCE(roots.title, 'Unknown') AS root_title, COUNT(*) AS count
-                FROM tracked
-                JOIN listings ON listings.listing_id = tracked.listing_id
+                FROM listings
                 LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+                WHERE {tracked_predicate}
                 GROUP BY COALESCE(roots.title, 'Unknown')
                 ORDER BY COALESCE(roots.title, 'Unknown')
                 """
@@ -686,22 +683,52 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 "count": int(row["count"]),
             }
             for row in self.connection.execute(
-                """
-                WITH tracked AS (
-                    SELECT DISTINCT listing_id
-                    FROM listing_observations
-                )
+                f"""
                 SELECT
                     listings.primary_catalog_id AS catalog_id,
                     COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS catalog_path,
                     COUNT(*) AS count
-                FROM tracked
-                JOIN listings ON listings.listing_id = tracked.listing_id
+                FROM listings
                 LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
                 LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
                 WHERE listings.primary_catalog_id IS NOT NULL
+                  AND {tracked_predicate}
                 GROUP BY listings.primary_catalog_id, COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown'))
                 ORDER BY COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown'))
+                """
+            )
+        ]
+        brands = [
+            {
+                "value": str(row["brand_label"]),
+                "label": f"{row['brand_label']} ({row['count']})",
+                "count": int(row["count"]),
+            }
+            for row in self.connection.execute(
+                f"""
+                SELECT COALESCE(listings.brand, 'Unknown brand') AS brand_label, COUNT(*) AS count
+                FROM listings
+                WHERE {tracked_predicate}
+                GROUP BY COALESCE(listings.brand, 'Unknown brand')
+                ORDER BY count DESC, brand_label ASC
+                LIMIT 80
+                """
+            )
+        ]
+        conditions = [
+            {
+                "value": str(row["condition_label"]),
+                "label": f"{row['condition_label']} ({row['count']})",
+                "count": int(row["count"]),
+            }
+            for row in self.connection.execute(
+                f"""
+                SELECT COALESCE(listings.condition_label, 'Unknown condition') AS condition_label, COUNT(*) AS count
+                FROM listings
+                WHERE {tracked_predicate}
+                GROUP BY COALESCE(listings.condition_label, 'Unknown condition')
+                ORDER BY count DESC, condition_label ASC
+                LIMIT 40
                 """
             )
         ]
@@ -709,6 +736,17 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "tracked_listings": tracked_listings,
             "roots": [{"value": "all", "label": "All roots"}] + roots,
             "catalogs": [{"value": "", "label": "All catalogs"}] + catalogs,
+            "brands": [{"value": "all", "label": "All brands"}] + brands,
+            "conditions": [{"value": "all", "label": "All conditions"}] + conditions,
+            "sorts": [
+                {"value": "last_seen_desc", "label": "Recently seen"},
+                {"value": "price_desc", "label": "Price ↓"},
+                {"value": "price_asc", "label": "Price ↑"},
+                {"value": "favourite_desc", "label": "Visible likes ↓"},
+                {"value": "view_desc", "label": "Visible views ↓"},
+                {"value": "created_at_desc", "label": "Estimated publication ↓"},
+                {"value": "first_seen_desc", "label": "Radar first seen ↓"},
+            ],
         }
 
     def listing_explorer_page(
@@ -716,7 +754,10 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         *,
         root: str | None = None,
         catalog_id: int | None = None,
+        brand: str | None = None,
+        condition: str | None = None,
         query: str | None = None,
+        sort: str = "last_seen_desc",
         page: int = 1,
         page_size: int = 50,
         now: str | None = None,
@@ -726,7 +767,28 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         bounded_page_size = max(1, min(int(page_size), 100))
         offset = (bounded_page - 1) * bounded_page_size
 
-        where_clauses: list[str] = []
+        order_by = {
+            "last_seen_desc": "listings.last_discovered_at DESC, listings.listing_id DESC",
+            "price_desc": "listings.price_amount_cents IS NULL, listings.price_amount_cents DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
+            "price_asc": "listings.price_amount_cents IS NULL, listings.price_amount_cents ASC, listings.last_discovered_at DESC, listings.listing_id DESC",
+            "favourite_desc": "listings.favourite_count IS NULL, listings.favourite_count DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
+            "view_desc": "listings.view_count IS NULL, listings.view_count DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
+            "created_at_desc": "listings.created_at_ts IS NULL, listings.created_at_ts DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
+            "first_seen_desc": "listings.first_discovered_at DESC, listings.listing_id DESC",
+        }.get(sort, "listings.last_discovered_at DESC, listings.listing_id DESC")
+        sort_key = sort if sort in {
+            "last_seen_desc",
+            "price_desc",
+            "price_asc",
+            "favourite_desc",
+            "view_desc",
+            "created_at_desc",
+            "first_seen_desc",
+        } else "last_seen_desc"
+
+        where_clauses = [
+            "EXISTS (SELECT 1 FROM listing_observations WHERE listing_observations.listing_id = listings.listing_id)"
+        ]
         params: list[object] = []
         if root:
             where_clauses.append("COALESCE(roots.title, 'Unknown') = ?")
@@ -734,81 +796,31 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         if catalog_id is not None:
             where_clauses.append("listings.primary_catalog_id = ?")
             params.append(catalog_id)
+        if brand:
+            where_clauses.append("COALESCE(listings.brand, 'Unknown brand') = ?")
+            params.append(brand)
+        if condition:
+            where_clauses.append("COALESCE(listings.condition_label, 'Unknown condition') = ?")
+            params.append(condition)
         cleaned_query = _clean_query_text(query)
         if cleaned_query:
             like_query = f"%{cleaned_query}%"
             where_clauses.append(
-                "(" 
-                "CAST(summary.listing_id AS TEXT) LIKE ? "
+                "("
+                "CAST(listings.listing_id AS TEXT) LIKE ? "
                 "OR LOWER(COALESCE(listings.title, '')) LIKE ? "
                 "OR LOWER(COALESCE(listings.brand, '')) LIKE ? "
-                "OR LOWER(COALESCE(primary_catalog.path, '')) LIKE ?"
+                "OR LOWER(COALESCE(primary_catalog.path, '')) LIKE ? "
+                "OR LOWER(COALESCE(listings.user_login, '')) LIKE ?"
                 ")"
             )
-            params.extend([like_query, like_query, like_query, like_query])
-        where_sql = "" if not where_clauses else "WHERE " + " AND ".join(where_clauses)
-
-        cte_sql = """
-            WITH summary AS (
-                SELECT
-                    observations.listing_id AS listing_id,
-                    COUNT(*) AS observation_count,
-                    SUM(observations.sighting_count) AS total_sightings,
-                    MIN(observations.observed_at) AS first_seen_at,
-                    MAX(observations.observed_at) AS last_seen_at,
-                    AVG(CASE
-                        WHEN previous_observed_at IS NULL THEN NULL
-                        ELSE (julianday(observed_at) - julianday(previous_observed_at)) * 24.0
-                    END) AS average_revisit_hours
-                FROM (
-                    SELECT
-                        listing_observations.*,
-                        LAG(listing_observations.observed_at) OVER (
-                            PARTITION BY listing_observations.listing_id
-                            ORDER BY listing_observations.observed_at
-                        ) AS previous_observed_at
-                    FROM listing_observations
-                ) AS observations
-                GROUP BY observations.listing_id
-            ),
-            latest_probe AS (
-                SELECT
-                    probe_id,
-                    listing_id,
-                    probed_at,
-                    requested_url,
-                    final_url,
-                    response_status,
-                    probe_outcome,
-                    detail_json,
-                    error_message
-                FROM (
-                    SELECT
-                        item_page_probes.probe_id,
-                        item_page_probes.listing_id,
-                        item_page_probes.probed_at,
-                        item_page_probes.requested_url,
-                        item_page_probes.final_url,
-                        item_page_probes.response_status,
-                        item_page_probes.probe_outcome,
-                        item_page_probes.detail_json,
-                        item_page_probes.error_message,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY item_page_probes.listing_id
-                            ORDER BY item_page_probes.probed_at DESC, item_page_probes.probe_id DESC
-                        ) AS probe_rank
-                    FROM item_page_probes
-                )
-                WHERE probe_rank = 1
-            )
-        """
+            params.extend([like_query, like_query, like_query, like_query, like_query])
+        where_sql = "WHERE " + " AND ".join(where_clauses)
 
         total_row = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT COUNT(*) AS total
-            FROM summary
-            JOIN listings ON listings.listing_id = summary.listing_id
+            FROM listings
             LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
             LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
             {where_sql}
@@ -819,15 +831,10 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
 
         rows = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT
-                summary.listing_id,
-                summary.observation_count,
-                summary.total_sightings,
-                summary.first_seen_at,
-                summary.last_seen_at,
-                summary.average_revisit_hours,
+                listings.listing_id,
                 listings.canonical_url,
+                listings.source_url,
                 listings.title,
                 listings.brand,
                 listings.size_label,
@@ -839,35 +846,115 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 listings.image_url,
                 listings.favourite_count,
                 listings.view_count,
+                listings.user_id,
                 listings.user_login,
                 listings.user_profile_url,
                 listings.created_at_ts,
+                listings.first_discovered_at,
+                listings.last_discovered_at,
                 roots.title AS root_title,
                 listings.primary_catalog_id,
-                COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS primary_catalog_path,
-                latest_probe.probed_at AS latest_probe_at,
-                latest_probe.response_status AS latest_probe_response_status,
-                latest_probe.probe_outcome AS latest_probe_outcome
-            FROM summary
-            JOIN listings ON listings.listing_id = summary.listing_id
+                COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS primary_catalog_path
+            FROM listings
             LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
             LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
-            LEFT JOIN latest_probe ON latest_probe.listing_id = listings.listing_id
             {where_sql}
-            ORDER BY summary.last_seen_at DESC, summary.listing_id DESC
+            ORDER BY {order_by}
             LIMIT ? OFFSET ?
             """,
             [*params, bounded_page_size, offset],
         ).fetchall()
 
+        page_listing_ids = [int(row["listing_id"]) for row in rows]
+        summaries_by_listing_id: dict[int, dict[str, object]] = {}
+        probes_by_listing_id: dict[int, dict[str, object]] = {}
+        if page_listing_ids:
+            placeholders = ", ".join("?" for _ in page_listing_ids)
+            summary_rows = self.connection.execute(
+                f"""
+                WITH ordered_observations AS (
+                    SELECT
+                        listing_observations.listing_id,
+                        listing_observations.observed_at,
+                        listing_observations.sighting_count,
+                        LAG(listing_observations.observed_at) OVER (
+                            PARTITION BY listing_observations.listing_id
+                            ORDER BY listing_observations.observed_at
+                        ) AS previous_observed_at
+                    FROM listing_observations
+                    WHERE listing_observations.listing_id IN ({placeholders})
+                )
+                SELECT
+                    ordered_observations.listing_id,
+                    COUNT(*) AS observation_count,
+                    SUM(ordered_observations.sighting_count) AS total_sightings,
+                    MIN(ordered_observations.observed_at) AS first_seen_at,
+                    MAX(ordered_observations.observed_at) AS last_seen_at,
+                    AVG(CASE
+                        WHEN ordered_observations.previous_observed_at IS NULL THEN NULL
+                        ELSE (julianday(ordered_observations.observed_at) - julianday(ordered_observations.previous_observed_at)) * 24.0
+                    END) AS average_revisit_hours
+                FROM ordered_observations
+                GROUP BY ordered_observations.listing_id
+                """,
+                page_listing_ids,
+            ).fetchall()
+            summaries_by_listing_id = {
+                int(row["listing_id"]): dict(row)
+                for row in summary_rows
+            }
+
+            probe_rows = self.connection.execute(
+                f"""
+                SELECT
+                    ranked.listing_id,
+                    ranked.probed_at,
+                    ranked.response_status,
+                    ranked.probe_outcome
+                FROM (
+                    SELECT
+                        item_page_probes.listing_id,
+                        item_page_probes.probed_at,
+                        item_page_probes.response_status,
+                        item_page_probes.probe_outcome,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY item_page_probes.listing_id
+                            ORDER BY item_page_probes.probed_at DESC, item_page_probes.probe_id DESC
+                        ) AS probe_rank
+                    FROM item_page_probes
+                    WHERE item_page_probes.listing_id IN ({placeholders})
+                ) AS ranked
+                WHERE ranked.probe_rank = 1
+                """,
+                page_listing_ids,
+            ).fetchall()
+            probes_by_listing_id = {
+                int(row["listing_id"]): dict(row)
+                for row in probe_rows
+            }
+
         items: list[dict[str, object]] = []
         for row in rows:
             item = dict(row)
+            listing_id = int(item["listing_id"])
+            summary = summaries_by_listing_id.get(listing_id, {})
+            latest_probe = probes_by_listing_id.get(listing_id, {})
+            item["observation_count"] = int(summary.get("observation_count") or 0)
+            item["total_sightings"] = int(summary.get("total_sightings") or 0)
+            item["first_seen_at"] = summary.get("first_seen_at") or item.get("first_discovered_at")
+            item["last_seen_at"] = summary.get("last_seen_at") or item.get("last_discovered_at")
+            item["average_revisit_hours"] = (
+                None
+                if summary.get("average_revisit_hours") is None
+                else round(float(summary["average_revisit_hours"]), 2)
+            )
+            item["latest_probe_at"] = latest_probe.get("probed_at")
+            item["latest_probe_response_status"] = latest_probe.get("response_status")
+            item["latest_probe_outcome"] = latest_probe.get("probe_outcome")
             age_hours = _hours_between(str(item["last_seen_at"]), now_dt)
             item["last_seen_age_hours"] = round(age_hours, 2)
             item["freshness_bucket"] = _freshness_bucket(int(item["observation_count"]), age_hours)
             item["signal_completeness"] = _signal_completeness(item)
-            item["average_revisit_hours"] = None if item["average_revisit_hours"] is None else round(float(item["average_revisit_hours"]), 2)
             items.append(item)
 
         total_pages = 0 if total_listings == 0 else ((total_listings - 1) // bounded_page_size) + 1
@@ -878,6 +965,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "total_pages": total_pages,
             "has_previous_page": bounded_page > 1,
             "has_next_page": offset + len(items) < total_listings,
+            "sort": sort_key,
             "items": items,
         }
 
@@ -1105,6 +1193,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 listings.total_price_amount_cents,
                 listings.total_price_currency,
                 listings.image_url,
+                listings.favourite_count,
+                listings.view_count,
+                listings.user_id,
+                listings.user_login,
+                listings.user_profile_url,
+                listings.created_at_ts,
                 roots.title AS root_title,
                 listings.primary_catalog_id,
                 listings.primary_root_catalog_id,

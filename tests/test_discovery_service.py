@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from vinted_radar.http import FetchedPage
 from vinted_radar.repository import RadarRepository
 from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryService, _build_api_catalog_url
@@ -87,7 +85,7 @@ def test_discovery_service_persists_catalogs_listings_and_coverage(tmp_path: Pat
 
     with RadarRepository(tmp_path / "radar.db") as repository:
         service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
-        report = service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0))
+        report = service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0, min_price=0.0))
         summary = repository.coverage_summary(report.run_id)
 
         assert report.total_seed_catalogs == 6
@@ -119,7 +117,7 @@ def test_discovery_service_records_scan_failures_without_losing_successful_work(
 
     with RadarRepository(tmp_path / "radar.db") as repository:
         service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
-        report = service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0))
+        report = service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0, min_price=0.0))
         summary = repository.coverage_summary(report.run_id)
 
         assert report.successful_scans == 1
@@ -144,7 +142,7 @@ def test_discovery_service_pagination_stops_at_last_page(tmp_path: Path) -> None
 
     with RadarRepository(tmp_path / "radar.db") as repository:
         service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
-        report = service.run(DiscoveryOptions(page_limit=5, max_leaf_categories=1, root_scope="women", request_delay=0.0))
+        report = service.run(DiscoveryOptions(page_limit=5, max_leaf_categories=1, root_scope="women", request_delay=0.0, min_price=0.0))
 
         assert report.successful_scans == 1
         assert report.raw_listing_hits == 2
@@ -168,7 +166,7 @@ def test_discovery_service_multi_page_pagination(tmp_path: Path) -> None:
 
     with RadarRepository(tmp_path / "radar.db") as repository:
         service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
-        report = service.run(DiscoveryOptions(page_limit=3, max_leaf_categories=1, root_scope="women", request_delay=0.0))
+        report = service.run(DiscoveryOptions(page_limit=3, max_leaf_categories=1, root_scope="women", request_delay=0.0, min_price=0.0))
 
         assert report.successful_scans == 2
         assert report.raw_listing_hits == 3
@@ -188,7 +186,7 @@ def test_discovery_service_invalid_json_recorded_as_failed_scan(tmp_path: Path) 
 
     with RadarRepository(tmp_path / "radar.db") as repository:
         service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
-        report = service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=1, root_scope="women", request_delay=0.0))
+        report = service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=1, root_scope="women", request_delay=0.0, min_price=0.0))
 
         assert report.successful_scans == 0
         assert report.failed_scans == 1
@@ -212,9 +210,74 @@ def test_discovery_service_empty_page_stops_pagination(tmp_path: Path) -> None:
 
     with RadarRepository(tmp_path / "radar.db") as repository:
         service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
-        report = service.run(DiscoveryOptions(page_limit=5, max_leaf_categories=1, root_scope="women", request_delay=0.0))
+        report = service.run(DiscoveryOptions(page_limit=5, max_leaf_categories=1, root_scope="women", request_delay=0.0, min_price=0.0))
 
         # 2 successful scans (page 1 with items + page 2 empty), page 3 never fetched.
         assert report.successful_scans == 2
         assert report.raw_listing_hits == 2  # Only from page 1
         assert report.unique_listing_hits == 2
+
+
+def test_discovery_service_filters_out_low_value_and_non_target_brands(tmp_path: Path) -> None:
+    catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
+
+    women_api_url = _build_api_catalog_url(2001, 1)
+    filtered_items = [
+        _make_api_item(9201, title="Sac premium", brand="Louis Vuitton", size="TU", status_id=3, price="125.00", total_price="130.00", image_url="https://images1.vinted.net/t/women-9201.webp"),
+        _make_api_item(9202, title="Top rapide", brand="Louis Vuitton", size="S", status_id=3, price="25.00", total_price="27.00", image_url="https://images1.vinted.net/t/women-9202.webp"),
+        _make_api_item(9203, title="Veste mode", brand="Zara", size="M", status_id=3, price="95.00", total_price="99.00", image_url="https://images1.vinted.net/t/women-9203.webp"),
+    ]
+
+    pages = {
+        "https://www.vinted.fr/catalog": FetchedPage("https://www.vinted.fr/catalog", 200, catalog_root),
+        women_api_url: FetchedPage(women_api_url, 200, _make_api_page(filtered_items, current_page=1, total_pages=1)),
+    }
+
+    with RadarRepository(tmp_path / "radar.db") as repository:
+        service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
+        report = service.run(
+            DiscoveryOptions(
+                page_limit=1,
+                max_leaf_categories=1,
+                root_scope="women",
+                request_delay=0.0,
+                min_price=30.0,
+                target_brands=("louis vuitton",),
+            )
+        )
+
+        assert report.successful_scans == 1
+        assert report.raw_listing_hits == 3
+        assert report.unique_listing_hits == 1
+        assert repository.count_rows("listings") == 1
+        assert repository.count_rows("listing_discoveries") == 1
+        assert repository.count_rows("listing_observations") == 1
+
+
+def test_discovery_service_restricts_scans_to_target_catalog_ids(tmp_path: Path) -> None:
+    catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
+
+    men_api_url = _build_api_catalog_url(3001, 1)
+    pages = {
+        "https://www.vinted.fr/catalog": FetchedPage("https://www.vinted.fr/catalog", 200, catalog_root),
+        men_api_url: FetchedPage(men_api_url, 200, _make_api_page(MEN_ITEMS, current_page=1, total_pages=1)),
+    }
+
+    with RadarRepository(tmp_path / "radar.db") as repository:
+        service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
+        report = service.run(
+            DiscoveryOptions(
+                page_limit=1,
+                root_scope="both",
+                request_delay=0.0,
+                target_catalogs=(3001,),
+                min_price=0.0,
+            )
+        )
+
+        assert report.total_leaf_catalogs == 2
+        assert report.scanned_leaf_catalogs == 1
+        assert report.successful_scans == 1
+        assert report.raw_listing_hits == 1
+        assert report.unique_listing_hits == 1
+        assert repository.count_rows("listings") == 1

@@ -57,6 +57,16 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
             "2",
             "--max-leaf-categories",
             "4",
+            "--min-price",
+            "75",
+            "--target-catalogs",
+            "2001",
+            "--target-catalogs",
+            "3001",
+            "--target-brands",
+            "Chanel",
+            "--target-brands",
+            "Dior",
             "--state-refresh-limit",
             "4",
             "--request-delay",
@@ -80,6 +90,9 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
     assert "Runtime API: http://127.0.0.1:8766/api/runtime" in result.stdout
     assert captured["db_path"] == tmp_path / "runtime.db"
     assert captured["mode"] == "batch"
+    assert captured["options"].min_price == 75.0
+    assert captured["options"].target_catalogs == (2001, 3001)
+    assert captured["options"].target_brands == ("Chanel", "Dior")
     assert tuple(captured["options"].proxies) == ("http://proxy-a:8080", "http://proxy-b:8080")
     assert captured["dashboard"] == {
         "db_path": tmp_path / "runtime.db",
@@ -163,6 +176,12 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
             "1",
             "--max-cycles",
             "2",
+            "--min-price",
+            "120",
+            "--target-catalogs",
+            "4001",
+            "--target-brands",
+            "Hermès",
             "--state-refresh-limit",
             "3",
             "--proxy",
@@ -182,6 +201,9 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
     assert "Cycle: cycle-2" in result.stdout
     assert captured["interval_seconds"] == 1.0
     assert captured["max_cycles"] == 2
+    assert captured["options"].min_price == 120.0
+    assert captured["options"].target_catalogs == (4001,)
+    assert captured["options"].target_brands == ("Hermès",)
     assert tuple(captured["options"].proxies) == ("http://proxy-c:8080",)
     assert captured["continue_on_error"] is True
     assert captured["stopped"] is True

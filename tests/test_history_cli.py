@@ -127,9 +127,9 @@ def test_history_cli_surfaces_json_views_for_history_freshness_and_revisit_plan(
     with RadarRepository(db_path) as repository:
         service = DiscoveryService(repository=repository, http_client=http_client, now_provider=clock)
         http_client.start_next_run()
-        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0))
+        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0, min_price=0.0))
         http_client.start_next_run()
-        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0))
+        service.run(DiscoveryOptions(page_limit=1, max_leaf_categories=2, root_scope="both", request_delay=0.0, min_price=0.0))
 
     runner = CliRunner()
 

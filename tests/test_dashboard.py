@@ -24,12 +24,12 @@ def _seed_dashboard_db(db_path: Path) -> None:
               (1904, 1904, 'Femmes', NULL, 'Femmes', 'WOMEN_ROOT', 'https://www.vinted.fr/catalog/1904-women', 'Femmes', 0, 0, 1, 0, '2026-03-17T10:00:00+00:00'),
               (2001, 1904, 'Femmes', 1904, 'Robes', 'WOMEN_DRESSES', 'https://www.vinted.fr/catalog/2001-womens-dresses', 'Femmes > Robes', 1, 1, 1, 10, '2026-03-17T10:00:00+00:00');
 
-            INSERT INTO listings (listing_id, canonical_url, source_url, title, brand, size_label, condition_label, price_amount_cents, price_currency, total_price_amount_cents, total_price_currency, image_url, primary_catalog_id, primary_root_catalog_id, first_discovered_at, last_discovered_at, last_seen_run_id, last_card_payload_json)
+            INSERT INTO listings (listing_id, canonical_url, source_url, title, brand, size_label, condition_label, price_amount_cents, price_currency, total_price_amount_cents, total_price_currency, image_url, favourite_count, view_count, user_id, user_login, user_profile_url, created_at_ts, primary_catalog_id, primary_root_catalog_id, first_discovered_at, last_discovered_at, last_seen_run_id, last_card_payload_json)
             VALUES
-              (9001, 'https://www.vinted.fr/items/9001-active', 'https://www.vinted.fr/items/9001-active?referrer=catalog', 'Active robe', 'Zara', 'M', 'Très bon état', 1500, '€', 1650, '€', 'https://images/9001.webp', 2001, 1904, '2026-03-17T10:05:00+00:00', '2026-03-19T10:05:00+00:00', 'run-3', '{"description_title": "Zara"}'),
-              (9002, 'https://www.vinted.fr/items/9002-sold-probable', 'https://www.vinted.fr/items/9002-sold-probable?referrer=catalog', 'Sold probable robe', 'Sandro', 'S', 'Bon état', 3000, '€', 3300, '€', 'https://images/9002.webp', 2001, 1904, '2026-03-17T10:06:00+00:00', '2026-03-17T10:06:00+00:00', 'run-1', '{"description_title": "Sandro"}'),
-              (9003, 'https://www.vinted.fr/items/9003-new', 'https://www.vinted.fr/items/9003-new?referrer=catalog', 'New robe', 'Maje', 'L', 'Neuf', 4200, '€', 4550, '€', 'https://images/9003.webp', 2001, 1904, '2026-03-19T10:05:00+00:00', '2026-03-19T10:05:00+00:00', 'run-3', '{"description_title": "Maje"}'),
-              (9004, 'https://www.vinted.fr/items/9004-deleted', 'https://www.vinted.fr/items/9004-deleted?referrer=catalog', 'Deleted robe', 'Mango', 'L', 'Neuf', 2000, '€', 2200, '€', 'https://images/9004.webp', 2001, 1904, '2026-03-18T10:05:00+00:00', '2026-03-18T10:05:00+00:00', 'run-2', '{"description_title": "Mango"}');
+              (9001, 'https://www.vinted.fr/items/9001-active', 'https://www.vinted.fr/items/9001-active?referrer=catalog', 'Active robe', 'Zara', 'M', 'Très bon état', 1500, '€', 1650, '€', 'https://images/9001.webp', 11, 120, 41, 'alice', 'https://www.vinted.fr/member/41', 1711101600, 2001, 1904, '2026-03-17T10:05:00+00:00', '2026-03-19T10:05:00+00:00', 'run-3', '{"description_title": "Zara"}'),
+              (9002, 'https://www.vinted.fr/items/9002-sold-probable', 'https://www.vinted.fr/items/9002-sold-probable?referrer=catalog', 'Sold probable robe', 'Sandro', 'S', 'Bon état', 3000, '€', 3300, '€', 'https://images/9002.webp', 2, 35, 42, 'bruno', 'https://www.vinted.fr/member/42', 1711015200, 2001, 1904, '2026-03-17T10:06:00+00:00', '2026-03-17T10:06:00+00:00', 'run-1', '{"description_title": "Sandro"}'),
+              (9003, 'https://www.vinted.fr/items/9003-new', 'https://www.vinted.fr/items/9003-new?referrer=catalog', 'New robe', 'Maje', 'L', 'Neuf', 4200, '€', 4550, '€', 'https://images/9003.webp', 41, 650, 43, 'claire', 'https://www.vinted.fr/member/43', 1711188000, 2001, 1904, '2026-03-19T10:05:00+00:00', '2026-03-19T10:05:00+00:00', 'run-3', '{"description_title": "Maje"}'),
+              (9004, 'https://www.vinted.fr/items/9004-deleted', 'https://www.vinted.fr/items/9004-deleted?referrer=catalog', 'Deleted robe', 'Mango', 'L', 'Neuf', 2000, '€', 2200, '€', 'https://images/9004.webp', NULL, NULL, NULL, NULL, NULL, NULL, 2001, 1904, '2026-03-18T10:05:00+00:00', '2026-03-18T10:05:00+00:00', 'run-2', '{"description_title": "Mango"}');
 
             INSERT INTO listing_observations (run_id, listing_id, observed_at, canonical_url, source_url, source_catalog_id, source_page_number, first_card_position, sighting_count, title, brand, size_label, condition_label, price_amount_cents, price_currency, total_price_amount_cents, total_price_currency, image_url, raw_card_payload_json)
             VALUES
@@ -125,10 +125,14 @@ def test_dashboard_payload_keeps_summary_filters_and_detail_separate(tmp_path: P
     assert payload["market_summary"]["performing_segments"] == []
     assert payload["detail"]["listing_id"] == 9002
     assert payload["detail"]["state_code"] == "sold_probable"
+    assert payload["detail"]["engagement"]["visible_likes"] == 2
+    assert payload["detail"]["engagement"]["visible_views"] == 35
+    assert payload["detail"]["seller"]["login"] == "bruno"
+    assert payload["detail"]["timing"]["publication_estimated_at"] == "2024-03-21T10:00:00+00:00"
     assert payload["runtime"]["latest_cycle"]["status"] == "completed"
     assert payload["diagnostics"]["runtime_api"] == "/api/runtime"
     assert payload["diagnostics"]["explorer_api"] == "/api/explorer"
-    assert any(item["label"] == "Follow-up misses" for item in payload["detail"]["transitions"])
+    assert any(item["label"] == "Follow-up misses" for item in payload["detail"]["signals"])
     assert payload["filters"]["available"]["roots"][0]["value"] == "all"
 
 
@@ -151,7 +155,37 @@ def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> Non
     assert [item["listing_id"] for item in payload["items"]] == [9003, 9001]
     assert payload["items"][0]["freshness_bucket"] == "first-pass-only"
     assert payload["items"][1]["freshness_bucket"] == "fresh-followup"
+    assert payload["items"][0]["visible_likes_display"] == "41"
+    assert payload["items"][0]["seller_display"] == "claire"
+    assert payload["items"][0]["estimated_publication_at"] == "2024-03-23T10:00:00+00:00"
     assert payload["filters"]["available"]["catalogs"][1]["catalog_id"] == 2001
+    assert payload["filters"]["available"]["brands"][1]["value"] == "Maje"
+
+
+def test_explorer_payload_applies_sql_brand_condition_and_sort_filters(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        payload = build_explorer_payload(
+            repository,
+            filters=ExplorerFilters(
+                root="Femmes",
+                brand="Zara",
+                condition="Très bon état",
+                sort="price_asc",
+                page=1,
+                page_size=5,
+            ),
+            now="2026-03-19T12:00:00+00:00",
+        )
+
+    assert payload["results"]["total_listings"] == 1
+    assert payload["results"]["sort"] == "price_asc"
+    assert [item["listing_id"] for item in payload["items"]] == [9001]
+    assert payload["items"][0]["seller_display"] == "alice"
+    assert payload["items"][0]["visible_views_display"] == "120"
+    assert payload["notes"]["estimated_publication"].startswith("Estimated publication uses the main image timestamp")
 
 
 def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> None:
@@ -161,8 +195,8 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
 
     html_status, html_body, html_headers = _call_app(app, "/")
     api_status, api_body, api_headers = _call_app(app, "/api/dashboard", "state=active")
-    explorer_status, explorer_body, explorer_headers = _call_app(app, "/explorer", "q=robe&page_size=2")
-    explorer_api_status, explorer_api_body, explorer_api_headers = _call_app(app, "/api/explorer", "q=robe&page_size=2")
+    explorer_status, explorer_body, explorer_headers = _call_app(app, "/explorer", "q=robe&page_size=2&sort=favourite_desc")
+    explorer_api_status, explorer_api_body, explorer_api_headers = _call_app(app, "/api/explorer", "q=robe&page_size=2&sort=favourite_desc")
     runtime_status, runtime_body, runtime_headers = _call_app(app, "/api/runtime")
     detail_status, detail_body, detail_headers = _call_app(app, "/api/listings/9002")
     health_status, health_body, _ = _call_app(app, "/health")
@@ -183,6 +217,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert explorer_status == "200 OK"
     assert explorer_headers["Content-Type"].startswith("text/html")
     assert b"Listing explorer separated from the dashboard summary" in explorer_body
+    assert b"Estimated publication" in explorer_body
     assert b"Back to dashboard" in explorer_body
 
     assert explorer_api_status == "200 OK"
@@ -190,8 +225,10 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     explorer_payload = json.loads(explorer_api_body)
     assert explorer_payload["results"]["total_listings"] == 4
     assert explorer_payload["results"]["page_size"] == 2
+    assert explorer_payload["results"]["sort"] == "favourite_desc"
     assert len(explorer_payload["items"]) == 2
     assert [item["listing_id"] for item in explorer_payload["items"]] == [9003, 9001]
+    assert explorer_payload["items"][0]["visible_likes_display"] == "41"
 
     assert runtime_status == "200 OK"
     assert runtime_headers["Content-Type"].startswith("application/json")
@@ -204,6 +241,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     detail_payload = json.loads(detail_body)
     assert detail_payload["listing_id"] == 9002
     assert detail_payload["state_code"] == "sold_probable"
+    assert detail_payload["seller"]["login"] == "bruno"
 
     assert health_status == "200 OK"
     health_payload = json.loads(health_body)

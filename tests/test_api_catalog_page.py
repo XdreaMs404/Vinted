@@ -119,6 +119,27 @@ class TestParseApiCatalogPageFull:
         assert page.listings[0].raw_card == item
         assert page.listings[0].raw_card is not item  # defensive copy
 
+    def test_extended_metadata_fields_are_mapped(self) -> None:
+        item = _make_item(
+            id=9010,
+            favourite_count=17,
+            view_count=223,
+            user={"id": 41, "login": "alice", "profile_url": "https://www.vinted.fr/member/41"},
+            photo={
+                "url": "https://img.vinted.fr/9010.jpg",
+                "high_resolution": {"timestamp": 1711092000},
+            },
+        )
+        page = parse_api_catalog_page(_make_payload(items=[item]))
+        listing = page.listings[0]
+
+        assert listing.favourite_count == 17
+        assert listing.view_count == 223
+        assert listing.user_id == 41
+        assert listing.user_login == "alice"
+        assert listing.user_profile_url == "https://www.vinted.fr/member/41"
+        assert listing.created_at_ts == 1711092000
+
 
 # ------------------------------------------------------------------
 # Price conversion

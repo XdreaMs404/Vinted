@@ -165,6 +165,13 @@ CREATE INDEX IF NOT EXISTS idx_catalog_scans_run_success ON catalog_scans(run_id
 CREATE INDEX IF NOT EXISTS idx_catalog_scans_catalog_success_time ON catalog_scans(catalog_id, success, fetched_at DESC, run_id DESC);
 CREATE INDEX IF NOT EXISTS idx_listing_discoveries_run_catalog ON listing_discoveries(run_id, source_catalog_id);
 CREATE INDEX IF NOT EXISTS idx_listing_observations_listing_time ON listing_observations(listing_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_listings_last_discovered_at ON listings(last_discovered_at DESC, listing_id DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_primary_catalog_last_seen ON listings(primary_catalog_id, last_discovered_at DESC, listing_id DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_brand ON listings(brand, listing_id);
+CREATE INDEX IF NOT EXISTS idx_listings_condition ON listings(condition_label, listing_id);
+CREATE INDEX IF NOT EXISTS idx_listings_created_at_ts ON listings(created_at_ts DESC, listing_id DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_favourite_count ON listings(favourite_count DESC, listing_id DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_view_count ON listings(view_count DESC, listing_id DESC);
 CREATE INDEX IF NOT EXISTS idx_item_page_probes_listing_time ON item_page_probes(listing_id, probed_at);
 CREATE INDEX IF NOT EXISTS idx_runtime_cycles_started_at ON runtime_cycles(started_at DESC);
 """

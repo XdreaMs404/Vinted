@@ -65,7 +65,10 @@ class DashboardFilters:
 class ExplorerFilters:
     root: str | None = None
     catalog_id: int | None = None
+    brand: str | None = None
+    condition: str | None = None
     query: str | None = None
+    sort: str = "last_seen_desc"
     page: int = 1
     page_size: int = DEFAULT_EXPLORER_PAGE_SIZE
 
@@ -74,7 +77,10 @@ class ExplorerFilters:
         return cls(
             root=_normalized_filter_value(_first_value(params, "root")),
             catalog_id=_parse_int(_first_value(params, "catalog_id")),
+            brand=_normalized_filter_value(_first_value(params, "brand")),
+            condition=_normalized_filter_value(_first_value(params, "condition")),
             query=_clean_text(_first_value(params, "q")),
+            sort=_bounded_explorer_sort(_first_value(params, "sort")),
             page=_bounded_page(_parse_int(_first_value(params, "page"))),
             page_size=_bounded_page_size(_parse_int(_first_value(params, "page_size"))),
         )
@@ -85,8 +91,14 @@ class ExplorerFilters:
             payload["root"] = self.root
         if self.catalog_id is not None:
             payload["catalog_id"] = str(self.catalog_id)
+        if self.brand:
+            payload["brand"] = self.brand
+        if self.condition:
+            payload["condition"] = self.condition
         if self.query:
             payload["q"] = self.query
+        if self.sort != "last_seen_desc":
+            payload["sort"] = self.sort
         if self.page != 1:
             payload["page"] = str(self.page)
         if self.page_size != DEFAULT_EXPLORER_PAGE_SIZE:
@@ -297,11 +309,15 @@ def build_explorer_payload(
     page = repository.listing_explorer_page(
         root=filters.root,
         catalog_id=filters.catalog_id,
+        brand=filters.brand,
+        condition=filters.condition,
         query=filters.query,
+        sort=filters.sort,
         page=filters.page,
         page_size=filters.page_size,
         now=now,
     )
+    items = [_serialize_explorer_item(item) for item in page["items"]]
     return {
         "generated_at": generated_at,
         "db_path": str(repository.db_path),
@@ -309,7 +325,10 @@ def build_explorer_payload(
             "selected": {
                 "root": filters.root or "all",
                 "catalog_id": filters.catalog_id,
+                "brand": filters.brand or "all",
+                "condition": filters.condition or "all",
                 "q": filters.query or "",
+                "sort": page["sort"],
                 "page": page["page"],
                 "page_size": page["page_size"],
             },
@@ -320,12 +339,17 @@ def build_explorer_payload(
             "total_pages": page["total_pages"],
             "page": page["page"],
             "page_size": page["page_size"],
+            "sort": page["sort"],
             "has_previous_page": page["has_previous_page"],
             "has_next_page": page["has_next_page"],
-            "has_results": bool(page["items"]),
-            "empty_reason": None if page["items"] else "No tracked listings match the current explorer filters.",
+            "has_results": bool(items),
+            "empty_reason": None if items else "No tracked listings match the current explorer filters.",
         },
-        "items": page["items"],
+        "items": items,
+        "notes": {
+            "estimated_publication": "Estimated publication uses the main image timestamp as a temporal signal. It is useful, but it is not an exact publication date.",
+            "scalability": "Explorer results are filtered, sorted, and paged in SQL before only the current page receives observation/probe aggregation.",
+        },
         "diagnostics": {
             "explorer_api": "/api/explorer",
             "dashboard": "/",
@@ -348,6 +372,11 @@ def build_listing_detail_payload(
     summary = None if history is None else history["summary"]
     latest_probe = listing.get("latest_probe")
     transitions = _build_transition_events(listing, summary, latest_probe)
+    estimated_publication_at = _format_unix_timestamp(listing.get("created_at_ts"))
+    seller_login = listing.get("user_login")
+    seller_profile_url = listing.get("user_profile_url")
+    radar_first_seen_at = None if summary is None else summary.get("first_seen_at")
+    radar_last_seen_at = None if summary is None else summary.get("last_seen_at")
 
     return {
         "listing_id": listing_id,
@@ -375,15 +404,70 @@ def build_listing_detail_payload(
         "score_explanation": listing.get("score_explanation"),
         "latest_probe": latest_probe,
         "history": history,
+        "engagement": {
+            "visible_likes": listing.get("favourite_count"),
+            "visible_views": listing.get("view_count"),
+        },
+        "seller": {
+            "user_id": listing.get("user_id"),
+            "login": seller_login,
+            "profile_url": seller_profile_url,
+            "display": seller_login or "Seller not exposed on the current card payload",
+        },
+        "timing": {
+            "publication_estimated_at": estimated_publication_at,
+            "publication_signal_label": None if estimated_publication_at is None else "Main image timestamp estimate",
+            "radar_first_seen_at": radar_first_seen_at,
+            "radar_last_seen_at": radar_last_seen_at,
+        },
         "signals": [
             {"label": "Observation runs", "value": str(listing.get("observation_count") or 0)},
             {"label": "Freshness", "value": str(listing.get("freshness_bucket") or "unknown")},
             {"label": "Follow-up misses", "value": str(listing.get("follow_up_miss_count") or 0)},
+            {"label": "Visible likes", "value": _format_optional_int(listing.get("favourite_count"))},
+            {"label": "Visible views", "value": _format_optional_int(listing.get("view_count"))},
+            {"label": "Estimated publication", "value": estimated_publication_at or "n/a"},
+            {"label": "Radar first seen", "value": _format_optional_timestamp(radar_first_seen_at)},
             {"label": "Demand score", "value": _format_score(listing.get("demand_score"))},
             {"label": "Premium score", "value": _format_score(listing.get("premium_score"))},
         ],
         "transitions": transitions,
     }
+
+
+def _serialize_explorer_item(item: dict[str, Any]) -> dict[str, Any]:
+    listing_id = int(item["listing_id"])
+    estimated_publication_at = _format_unix_timestamp(item.get("created_at_ts"))
+    seller_login = item.get("user_login")
+    seller_profile_url = item.get("user_profile_url")
+    latest_probe_outcome = item.get("latest_probe_outcome")
+    latest_probe_status = item.get("latest_probe_response_status")
+    latest_probe_display = "Not probed"
+    if latest_probe_outcome:
+        latest_probe_display = str(latest_probe_outcome)
+        if latest_probe_status is not None:
+            latest_probe_display = f"{latest_probe_display} ({latest_probe_status})"
+
+    payload = dict(item)
+    payload.update(
+        {
+            "price_display": _format_money(item.get("price_amount_cents"), item.get("price_currency")),
+            "total_price_display": _format_money(item.get("total_price_amount_cents"), item.get("total_price_currency")),
+            "visible_likes_display": _format_optional_int(item.get("favourite_count")),
+            "visible_views_display": _format_optional_int(item.get("view_count")),
+            "estimated_publication_at": estimated_publication_at,
+            "estimated_publication_note": None if estimated_publication_at is None else "Main image timestamp estimate",
+            "radar_first_seen_display": _format_optional_timestamp(item.get("first_seen_at")),
+            "radar_last_seen_display": _format_optional_timestamp(item.get("last_seen_at")),
+            "seller_display": seller_login or "Seller not exposed",
+            "seller_profile_url": seller_profile_url,
+            "latest_probe_display": latest_probe_display,
+            "detail_href": "/" + _suffix_query(DashboardFilters(listing_id=listing_id), include_listing=True),
+            "detail_api": f"/api/listings/{listing_id}",
+        }
+    )
+    return payload
+
 
 
 def render_dashboard_html(payload: dict[str, Any]) -> str:
@@ -693,17 +777,25 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     available = payload["filters"]["available"]
     results = payload["results"]
     diagnostics = payload["diagnostics"]
+    notes = payload.get("notes") or {}
     items = payload["items"]
     filters = ExplorerFilters(
         root=None if selected["root"] == "all" else selected["root"],
         catalog_id=selected["catalog_id"],
+        brand=None if selected["brand"] == "all" else selected["brand"],
+        condition=None if selected["condition"] == "all" else selected["condition"],
         query=selected["q"] or None,
+        sort=str(selected["sort"]),
         page=int(selected["page"]),
         page_size=int(selected["page_size"]),
     )
 
     root_options = "".join(_option_html(item["value"], item["label"], selected["root"]) for item in available["roots"])
     catalog_options = "".join(_option_html(item["value"], item["label"], selected["catalog_id"]) for item in available["catalogs"])
+    brand_options = "".join(_option_html(item["value"], item["label"], selected["brand"]) for item in available["brands"])
+    condition_options = "".join(_option_html(item["value"], item["label"], selected["condition"]) for item in available["conditions"])
+    sort_options = "".join(_option_html(item["value"], item["label"], selected["sort"]) for item in available["sorts"])
+    selected_sort_label = next((item["label"] for item in available["sorts"] if item["value"] == selected["sort"]), str(selected["sort"]))
     page_size_options = "".join(_option_html(str(value), str(value), selected["page_size"]) for value in (25, 50, 100))
 
     if items:
@@ -714,21 +806,40 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
               <td>
                 <div><strong>{_escape(str(item.get('title') or '(untitled)'))}</strong></div>
                 <div class=\"link-muted\">{_escape(str(item.get('brand') or 'Unknown brand'))}</div>
+                <div class=\"link-muted\">{'<a class="link-muted" href="' + _escape(str(item.get('seller_profile_url'))) + '" target="_blank" rel="noreferrer">' + _escape(str(item.get('seller_display') or 'Seller not exposed')) + '</a>' if item.get('seller_profile_url') else _escape(str(item.get('seller_display') or 'Seller not exposed'))}</div>
               </td>
               <td>{_escape(str(item.get('primary_catalog_path') or item.get('root_title') or 'Unknown'))}</td>
-              <td>{_escape(str(item.get('freshness_bucket') or 'unknown'))}</td>
-              <td>{_escape(_format_money(item.get('price_amount_cents'), item.get('price_currency')))}</td>
-              <td>{_escape(str(item.get('observation_count') or 0))}</td>
-              <td>{_escape(str(item.get('last_seen_at') or 'unknown'))}</td>
               <td>
-                <a class=\"button secondary\" href=\"{_escape('/' + _suffix_query(DashboardFilters(listing_id=int(item['listing_id'])), include_listing=True))}\">Inspect</a>
+                <div>{_escape(str(item.get('price_display') or 'price n/a'))}</div>
+                <div class=\"link-muted\">total {_escape(str(item.get('total_price_display') or 'n/a'))}</div>
+              </td>
+              <td>{_escape(str(item.get('visible_likes_display') or 'n/a'))}</td>
+              <td>{_escape(str(item.get('visible_views_display') or 'n/a'))}</td>
+              <td>
+                <div>{_escape(str(item.get('estimated_publication_at') or 'n/a'))}</div>
+                <div class=\"link-muted\">{_escape(str(item.get('estimated_publication_note') or 'No image timestamp signal'))}</div>
+              </td>
+              <td>
+                <div>{_escape(str(item.get('radar_first_seen_display') or 'n/a'))}</div>
+                <div class=\"link-muted\">last {_escape(str(item.get('radar_last_seen_display') or 'n/a'))}</div>
+              </td>
+              <td>
+                <div>{_escape(str(item.get('freshness_bucket') or 'unknown'))}</div>
+                <div class=\"link-muted\">{_escape(str(item.get('observation_count') or 0))} obs</div>
+              </td>
+              <td>{_escape(str(item.get('latest_probe_display') or 'Not probed'))}</td>
+              <td>
+                <div class=\"actions\">
+                  <a class=\"button secondary\" href=\"{_escape(str(item.get('detail_href')))}\">Inspect</a>
+                  <a class=\"button secondary\" href=\"{_escape(str(item.get('detail_api')))}\">JSON</a>
+                </div>
               </td>
             </tr>
             """
             for item in items
         )
     else:
-        rows_html = "<tr><td colspan='8'>No tracked listings match the current explorer filters.</td></tr>"
+        rows_html = "<tr><td colspan='10'>No tracked listings match the current explorer filters.</td></tr>"
 
     previous_href = _explorer_query(filters, overrides={"page": max(filters.page - 1, 1)})
     next_href = _explorer_query(filters, overrides={"page": filters.page + 1})
@@ -752,7 +863,7 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     }}
     * {{ box-sizing: border-box; }}
     body {{ margin: 0; color: var(--ink); background: linear-gradient(180deg, #15120f 0%, #0f0d0b 100%); font-family: \"Avenir Next\", \"Segoe UI\", sans-serif; min-height: 100vh; }}
-    .shell {{ max-width: 1480px; margin: 0 auto; padding: 32px; }}
+    .shell {{ max-width: 1520px; margin: 0 auto; padding: 32px; }}
     .panel {{ background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; margin-bottom: 22px; }}
     h1, h2 {{ font-family: \"Iowan Old Style\", \"Palatino Linotype\", Georgia, serif; margin: 0; }}
     .eyebrow {{ text-transform: uppercase; letter-spacing: 0.22em; font-size: 12px; color: var(--accent); }}
@@ -767,9 +878,11 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 16px; }}
     .stat {{ padding: 16px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); }}
     .table-wrap {{ overflow: auto; border: 1px solid var(--line); border-radius: 18px; }}
-    table {{ width: 100%; border-collapse: collapse; min-width: 980px; }}
+    table {{ width: 100%; border-collapse: collapse; min-width: 1320px; }}
     th, td {{ padding: 13px 14px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }}
     th {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); background: rgba(255,255,255,0.02); }}
+    .notes {{ display: grid; gap: 8px; margin-top: 14px; }}
+    .notes p {{ margin: 0; color: var(--muted); line-height: 1.55; }}
   </style>
 </head>
 <body>
@@ -777,7 +890,11 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     <section class=\"panel\">
       <span class=\"eyebrow\">SQL-backed explorer</span>
       <h1>Listing explorer separated from the dashboard summary.</h1>
-      <p class=\"subhead\">This surface pages tracked listings directly from SQLite instead of loading the full scored corpus into memory. Use the main dashboard for summary and ranking proof; use this explorer for broad listing browsing.</p>
+      <p class=\"subhead\">This surface filters, sorts, and pages tracked listings in SQLite first, then enriches only the current page with observation history and latest probe context. Use the dashboard for market summary and ranking proof; use this explorer for broad corpus browsing.</p>
+      <div class=\"notes\">
+        <p>{_escape(str(notes.get('scalability') or ''))}</p>
+        <p>{_escape(str(notes.get('estimated_publication') or ''))}</p>
+      </div>
       <div class=\"api-links\" style=\"margin-top:16px;\">
         <a class=\"button secondary\" href=\"/\">Back to dashboard</a>
         <a class=\"button secondary\" href=\"{_escape(diagnostics['explorer_api'] + _explorer_suffix_query(filters))}\">Explorer payload</a>
@@ -795,8 +912,20 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
           <select name=\"catalog_id\">{catalog_options}</select>
         </label>
         <label>
+          Brand
+          <select name=\"brand\">{brand_options}</select>
+        </label>
+        <label>
+          Condition
+          <select name=\"condition\">{condition_options}</select>
+        </label>
+        <label>
           Search
-          <input type=\"search\" name=\"q\" value=\"{_escape(selected['q'])}\" placeholder=\"Title, brand, listing ID\">
+          <input type=\"search\" name=\"q\" value=\"{_escape(selected['q'])}\" placeholder=\"Title, brand, seller, listing ID\">
+        </label>
+        <label>
+          Sort
+          <select name=\"sort\">{sort_options}</select>
         </label>
         <label>
           Page size
@@ -812,6 +941,7 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
         <div class=\"stat\"><strong>{results['total_listings']}</strong><br><span class=\"link-muted\">matching tracked listings</span></div>
         <div class=\"stat\"><strong>{results['page']}</strong><br><span class=\"link-muted\">current page / {results['total_pages'] or 0}</span></div>
         <div class=\"stat\"><strong>{available['tracked_listings']}</strong><br><span class=\"link-muted\">tracked listings in DB</span></div>
+        <div class=\"stat\"><strong>{_escape(str(selected_sort_label))}</strong><br><span class=\"link-muted\">active SQL sort</span></div>
       </div>
     </section>
 
@@ -823,10 +953,13 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
               <th>ID</th>
               <th>Listing</th>
               <th>Catalog</th>
-              <th>Freshness</th>
               <th>Price</th>
-              <th>Obs</th>
-              <th>Last seen</th>
+              <th>Likes</th>
+              <th>Views</th>
+              <th>Estimated publication</th>
+              <th>Radar timing</th>
+              <th>Freshness</th>
+              <th>Latest probe</th>
               <th>Detail</th>
             </tr>
           </thead>
@@ -975,7 +1108,9 @@ def _render_detail_panel(detail: dict[str, Any] | None) -> str:
     if detail is None:
         return "<div><h2>No detail selected</h2><p class=\"subhead\">Pick a ranking row to inspect its history, score factors, and inference basis.</p></div>"
 
-    score_context = detail["score_explanation"].get("context") if isinstance(detail.get("score_explanation"), dict) else None
+    state_explanation = detail.get("state_explanation") if isinstance(detail.get("state_explanation"), dict) else {}
+    score_explanation = detail.get("score_explanation") if isinstance(detail.get("score_explanation"), dict) else {}
+    score_context = score_explanation.get("context") if isinstance(score_explanation, dict) else None
     score_context_html = (
         f"<li>Context { _escape(str(score_context.get('label') or 'unknown')) } · peers {score_context.get('sample_size', 0)} · percentile {score_context.get('price_percentile')}</li>"
         if score_context is not None
@@ -989,6 +1124,15 @@ def _render_detail_panel(detail: dict[str, Any] | None) -> str:
     transitions_html = "".join(
         f"<div class=\"timeline-item\"><strong>{_escape(str(item['label']))}</strong><span>{_escape(str(item['timestamp']))}</span><br><span>{_escape(str(item['description']))}</span></div>"
         for item in detail["transitions"]
+    )
+    state_reasons = state_explanation.get("reasons") if isinstance(state_explanation.get("reasons"), list) else []
+    score_factors = score_explanation.get("factors") if isinstance(score_explanation.get("factors"), dict) else {}
+    seller = detail.get("seller") if isinstance(detail.get("seller"), dict) else {}
+    timing = detail.get("timing") if isinstance(detail.get("timing"), dict) else {}
+    seller_html = (
+        f'<a class="link-muted" href="{_escape(str(seller.get("profile_url")))}" target="_blank" rel="noreferrer">{_escape(str(seller.get("login") or seller.get("display") or "Seller not exposed"))}</a>'
+        if seller.get("profile_url")
+        else f'<span class="link-muted">{_escape(str(seller.get("display") or "Seller not exposed"))}</span>'
     )
 
     return f"""
@@ -1007,17 +1151,30 @@ def _render_detail_panel(detail: dict[str, Any] | None) -> str:
       </div>
       <div class=\"signal\">
         <span class=\"signal-label\">Public fields</span>
-        <strong>{_escape(str(detail.get('price_display') or 'price n/a'))}</strong><br>
+        <strong>{_escape(str(detail.get('price_display') or 'price n/a'))}</strong> · <span class=\"link-muted\">total displayed { _escape(str(detail.get('total_price_display') or 'n/a')) }</span><br>
         <span class=\"link-muted\">Brand { _escape(str(detail.get('brand') or 'Unknown')) } · Size { _escape(str(detail.get('size_label') or 'n/a')) } · Condition { _escape(str(detail.get('condition_label') or 'n/a')) }</span>
+      </div>
+      <div class=\"signal\">
+        <span class=\"signal-label\">Visible seller</span>
+        {seller_html}<br>
+        <span class=\"link-muted\">Estimated publication comes from the main image timestamp when present. Radar first seen is the first moment this collector observed the listing.</span>
+      </div>
+      <div>
+        <h3>Timing</h3>
+        <ul class=\"bullet-list\">
+          <li>Estimated publication: {_escape(str(timing.get('publication_estimated_at') or 'n/a'))}</li>
+          <li>Radar first seen: {_escape(_format_optional_timestamp(timing.get('radar_first_seen_at')))}</li>
+          <li>Radar last seen: {_escape(_format_optional_timestamp(timing.get('radar_last_seen_at')))}</li>
+        </ul>
       </div>
       <div>
         <h3>Inference basis</h3>
-        <ul class=\"bullet-list\">{''.join(f'<li>{_escape(reason)}</li>' for reason in detail['state_explanation']['reasons'])}</ul>
+        <ul class=\"bullet-list\">{''.join(f'<li>{_escape(reason)}</li>' for reason in state_reasons) or '<li>No state explanation available.</li>'}</ul>
       </div>
       <div>
         <h3>Score context</h3>
         <ul class=\"bullet-list\">
-          {''.join(f'<li>{_escape(name.replace("_", " "))}: {_format_score(value)}</li>' for name, value in detail['score_explanation']['factors'].items())}
+          {''.join(f'<li>{_escape(name.replace("_", " "))}: {_format_score(value)}</li>' for name, value in score_factors.items())}
           {score_context_html}
         </ul>
       </div>
@@ -1268,6 +1425,20 @@ def _bounded_page_size(value: int | None) -> int:
     return max(1, min(value, MAX_EXPLORER_PAGE_SIZE))
 
 
+def _bounded_explorer_sort(value: str | None) -> str:
+    if value in {
+        "last_seen_desc",
+        "price_desc",
+        "price_asc",
+        "favourite_desc",
+        "view_desc",
+        "created_at_desc",
+        "first_seen_desc",
+    }:
+        return str(value)
+    return "last_seen_desc"
+
+
 def _normalized_filter_value(value: str | None) -> str | None:
     cleaned = _clean_text(value)
     if cleaned in {None, "", "all"}:
@@ -1298,6 +1469,30 @@ def _format_score(value: Any) -> str:
     if value is None:
         return "n/a"
     return f"{float(value):.2f}"
+
+
+def _format_optional_int(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    return str(int(value))
+
+
+def _format_optional_timestamp(value: Any) -> str:
+    if not value:
+        return "n/a"
+    try:
+        return datetime.fromisoformat(str(value)).astimezone(UTC).replace(microsecond=0).isoformat()
+    except ValueError:
+        return str(value)
+
+
+def _format_unix_timestamp(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(value), tz=UTC).replace(microsecond=0).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None
 
 
 def _escape(value: Any) -> str:

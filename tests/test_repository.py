@@ -113,3 +113,81 @@ def test_listing_observations_stay_one_row_per_run_and_accumulate_sightings(tmp_
     assert row["observed_at"] == "2026-03-17T10:05:00+00:00"
     assert row["first_card_position"] == 1
     assert row["sighting_count"] == 2
+
+
+def test_upsert_listing_persists_extended_catalog_metadata(tmp_path: Path) -> None:
+    db_path = tmp_path / "radar.db"
+    women_root = CatalogNode(
+        catalog_id=1904,
+        root_catalog_id=1904,
+        root_title="Femmes",
+        parent_catalog_id=None,
+        title="Femmes",
+        code="WOMEN_ROOT",
+        url="https://www.vinted.fr/catalog/1904-women",
+        path=("Femmes",),
+        depth=0,
+        is_leaf=False,
+        allow_browsing_subcategories=True,
+        order_index=0,
+    )
+    dresses = CatalogNode(
+        catalog_id=2001,
+        root_catalog_id=1904,
+        root_title="Femmes",
+        parent_catalog_id=1904,
+        title="Robes",
+        code="WOMEN_DRESSES",
+        url="https://www.vinted.fr/catalog/2001-womens-dresses",
+        path=("Femmes", "Robes"),
+        depth=1,
+        is_leaf=True,
+        allow_browsing_subcategories=True,
+        order_index=10,
+    )
+    listing = ListingCard(
+        listing_id=9010,
+        source_url="https://www.vinted.fr/items/9010-robe-premium?referrer=catalog",
+        canonical_url="https://www.vinted.fr/items/9010-robe-premium",
+        title="Robe premium",
+        brand="Sézane",
+        size_label="S",
+        condition_label="Très bon état",
+        price_amount_cents=9900,
+        price_currency="€",
+        total_price_amount_cents=10450,
+        total_price_currency="€",
+        image_url="https://images1.vinted.net/t/women-9010.webp",
+        favourite_count=17,
+        view_count=223,
+        user_id=41,
+        user_login="alice",
+        user_profile_url="https://www.vinted.fr/member/41",
+        created_at_ts=1711092000,
+        source_catalog_id=2001,
+        source_root_catalog_id=1904,
+        raw_card={"overlay_title": "Robe premium"},
+    )
+
+    with RadarRepository(db_path) as repository:
+        run_id = repository.start_run(root_scope="women", page_limit=1, max_leaf_categories=1, request_delay_seconds=0.0)
+        repository.upsert_catalogs([women_root, dresses], synced_at="2026-03-17T10:00:00+00:00")
+        repository.upsert_listing(
+            listing,
+            discovered_at="2026-03-17T10:05:00+00:00",
+            primary_catalog_id=2001,
+            primary_root_catalog_id=1904,
+            run_id=run_id,
+        )
+        row = repository.connection.execute(
+            "SELECT favourite_count, view_count, user_id, user_login, user_profile_url, created_at_ts FROM listings WHERE listing_id = ?",
+            (9010,),
+        ).fetchone()
+
+    assert row is not None
+    assert row["favourite_count"] == 17
+    assert row["view_count"] == 223
+    assert row["user_id"] == 41
+    assert row["user_login"] == "alice"
+    assert row["user_profile_url"] == "https://www.vinted.fr/member/41"
+    assert row["created_at_ts"] == 1711092000

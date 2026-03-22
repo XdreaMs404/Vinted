@@ -11,7 +11,7 @@ from itertools import zip_longest
 from urllib.parse import urlencode
 
 from vinted_radar.http import VintedHttpClient
-from vinted_radar.models import CatalogNode
+from vinted_radar.models import CatalogNode, ListingCard
 from vinted_radar.parsers.api_catalog_page import parse_api_catalog_page
 from vinted_radar.parsers.catalog_tree import parse_catalog_tree_from_html
 from vinted_radar.repository import RadarRepository
@@ -36,6 +36,9 @@ class DiscoveryOptions:
     root_scope: str = "both"
     request_delay: float = 3.0
     concurrency: int = 1
+    min_price: float = 30.0
+    target_catalogs: tuple[int, ...] = ()
+    target_brands: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +101,8 @@ class DiscoveryService:
             raise ValueError(f"Unsupported root scope: {options.root_scope}")
         if options.page_limit < 1:
             raise ValueError("page_limit must be at least 1")
+        if options.min_price < 0:
+            raise ValueError("min_price must be at least 0")
 
         run_id = self.repository.start_run(
             root_scope=options.root_scope,
@@ -133,6 +138,7 @@ class DiscoveryService:
                 catalogs=catalogs,
                 root_titles=ROOT_SCOPE_MAP[options.root_scope],
                 limit=options.max_leaf_categories,
+                target_catalogs=options.target_catalogs,
             )
             self.repository.update_run_catalog_totals(
                 run_id,
@@ -226,6 +232,8 @@ class DiscoveryService:
         ``concurrency`` requests are in-flight across *all* catalogs.
         """
         result = _CatalogScanResult()
+        minimum_price_cents = _price_floor_cents(options.min_price)
+        target_brands = _normalize_brand_filters(options.target_brands)
 
         for page_number in range(1, options.page_limit + 1):
             api_url = _build_api_catalog_url(catalog.catalog_id, page_number)
@@ -300,6 +308,12 @@ class DiscoveryService:
                 for card_position, listing in enumerate(
                     parsed_page.listings, start=1
                 ):
+                    if not _listing_matches_filters(
+                        listing,
+                        minimum_price_cents=minimum_price_cents,
+                        target_brands=target_brands,
+                    ):
+                        continue
                     result.unique_listing_ids.add(listing.listing_id)
                     self.repository.upsert_listing(
                         listing,
@@ -399,11 +413,16 @@ def _select_leaf_catalogs(
     catalogs: list[CatalogNode],
     root_titles: tuple[str, ...],
     limit: int | None,
+    target_catalogs: tuple[int, ...] = (),
 ) -> list[CatalogNode]:
+    target_catalog_ids = set(target_catalogs)
     grouped: dict[str, list[CatalogNode]] = defaultdict(list)
     for catalog in catalogs:
-        if catalog.is_leaf and catalog.root_title in root_titles:
-            grouped[catalog.root_title].append(catalog)
+        if not catalog.is_leaf or catalog.root_title not in root_titles:
+            continue
+        if target_catalog_ids and catalog.catalog_id not in target_catalog_ids:
+            continue
+        grouped[catalog.root_title].append(catalog)
 
     for items in grouped.values():
         items.sort(key=lambda catalog: catalog.path_text)
@@ -422,6 +441,42 @@ def _select_leaf_catalogs(
             if len(ordered) >= limit:
                 return ordered
     return ordered
+
+
+def _normalize_brand_filters(brands: tuple[str, ...]) -> frozenset[str]:
+    normalized: set[str] = set()
+    for brand in brands:
+        candidate = _normalize_filter_text(brand)
+        if candidate:
+            normalized.add(candidate)
+    return frozenset(normalized)
+
+
+def _listing_matches_filters(
+    listing: ListingCard,
+    *,
+    minimum_price_cents: int,
+    target_brands: frozenset[str],
+) -> bool:
+    price_amount_cents = listing.price_amount_cents
+    if price_amount_cents is None or price_amount_cents < minimum_price_cents:
+        return False
+
+    if not target_brands:
+        return True
+
+    normalized_brand = _normalize_filter_text(listing.brand)
+    return normalized_brand in target_brands
+
+
+def _normalize_filter_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.strip().casefold()
+
+
+def _price_floor_cents(min_price: float) -> int:
+    return int(round(min_price * 100))
 
 
 def _build_api_catalog_url(catalog_id: int, page: int) -> str:
