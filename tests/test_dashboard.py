@@ -108,32 +108,40 @@ def _call_app(app: DashboardApplication, path: str, query: str = "") -> tuple[st
     return captured["status"], body, captured
 
 
-def test_dashboard_payload_keeps_summary_filters_and_detail_separate(tmp_path: Path) -> None:
+def test_dashboard_payload_uses_sql_overview_contract_and_honesty_notes(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard.db"
     _seed_dashboard_db(db_path)
 
     with RadarRepository(db_path) as repository:
         payload = build_dashboard_payload(
             repository,
-            filters=DashboardFilters(root="Femmes", state="active", listing_id=9002, limit=5),
+            filters=DashboardFilters(state="active", limit=5),
             now="2026-03-19T12:00:00+00:00",
         )
 
-    assert payload["results"]["total_listings"] == 4
-    assert payload["results"]["filtered_listings"] == 2
-    assert payload["results"]["selected_listing_visible"] is False
-    assert payload["market_summary"]["performing_segments"] == []
-    assert payload["detail"]["listing_id"] == 9002
-    assert payload["detail"]["state_code"] == "sold_probable"
-    assert payload["detail"]["engagement"]["visible_likes"] == 2
-    assert payload["detail"]["engagement"]["visible_views"] == 35
-    assert payload["detail"]["seller"]["login"] == "bruno"
-    assert payload["detail"]["timing"]["publication_estimated_at"] == "2024-03-21T10:00:00+00:00"
-    assert payload["runtime"]["latest_cycle"]["status"] == "completed"
+    assert payload["request"]["primary_payload_source"] == "repository.overview_snapshot"
+    assert payload["request"]["legacy_query_filters"]["state"] == "active"
+    assert payload["summary"]["inventory"]["tracked_listings"] == 4
+    assert payload["summary"]["inventory"]["sold_like_count"] == 1
+    assert payload["summary"]["inventory"]["comparison_support_threshold"] == 3
+    assert payload["summary"]["honesty"]["inferred_state_count"] == 1
+    assert payload["summary"]["honesty"]["estimated_publication_count"] == 3
+    assert payload["summary"]["freshness"]["latest_runtime_cycle_status"] == "completed"
+    assert payload["comparisons"]["category"]["status"] == "ok"
+    assert payload["comparisons"]["brand"]["status"] == "thin-support"
+    assert payload["comparisons"]["category"]["rows"][0]["drilldown"]["filters"] == {"catalog_id": 2001}
+    assert payload["comparisons"]["brand"]["rows"][0]["honesty"]["low_support"] is True
+    assert [note["slug"] for note in payload["honesty_notes"]] == [
+        "low-support-rule",
+        "inferred-states",
+        "estimated-publication",
+    ]
+    assert [item["listing_id"] for item in payload["featured_listings"]] == [9003, 9001, 9004, 9002]
+    assert payload["featured_listings"][0]["detail_api"] == "/api/listings/9003"
+    assert payload["featured_listings"][0]["explorer_href"] == "/explorer?q=9003"
+    assert payload["diagnostics"]["dashboard_api"] == "/api/dashboard"
     assert payload["diagnostics"]["runtime_api"] == "/api/runtime"
     assert payload["diagnostics"]["explorer_api"] == "/api/explorer"
-    assert any(item["label"] == "Follow-up misses" for item in payload["detail"]["signals"])
-    assert payload["filters"]["available"]["roots"][0]["value"] == "all"
 
 
 def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> None:
@@ -203,16 +211,23 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
 
     assert html_status == "200 OK"
     assert html_headers["Content-Type"].startswith("text/html")
-    assert b"Market summary first" in html_body
-    assert b"Demand proof" in html_body
-    assert b"Runtime payload" in html_body
-    assert b"Explorer payload" in html_body
+    html_text = html_body.decode("utf-8")
+    assert "Vue d’ensemble du marché" in html_text
+    assert '<html lang="fr">' in html_text
+    assert "<style>" in html_text
+    assert "Niveau d’honnêteté du signal" in html_text
+    assert "Comparaisons à lire avec contexte" in html_text
+    assert "Explorer les annonces" in html_text
+    assert "JSON aperçu" in html_text
+    assert "JSON détail" in html_text
 
     assert api_status == "200 OK"
     assert api_headers["Content-Type"].startswith("application/json")
     api_payload = json.loads(api_body)
-    assert api_payload["results"]["filtered_listings"] == 2
-    assert api_payload["rankings"]["demand"][0]["listing_id"] == 9001
+    assert api_payload["request"]["legacy_query_filters"]["state"] == "active"
+    assert api_payload["summary"]["inventory"]["tracked_listings"] == 4
+    assert api_payload["comparisons"]["category"]["rows"][0]["label"] == "Femmes > Robes"
+    assert api_payload["featured_listings"][0]["detail_api"] == "/api/listings/9003"
 
     assert explorer_status == "200 OK"
     assert explorer_headers["Content-Type"].startswith("text/html")
@@ -229,6 +244,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert len(explorer_payload["items"]) == 2
     assert [item["listing_id"] for item in explorer_payload["items"]] == [9003, 9001]
     assert explorer_payload["items"][0]["visible_likes_display"] == "41"
+    assert explorer_payload["items"][0]["detail_api"] == "/api/listings/9003"
 
     assert runtime_status == "200 OK"
     assert runtime_headers["Content-Type"].startswith("application/json")

@@ -98,8 +98,11 @@ def batch_run(
         return
 
     typer.echo(f"Dashboard URL: http://{host}:{port}")
+    typer.echo(f"Overview home: http://{host}:{port}/")
     typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
+    typer.echo(f"Explorer: http://{host}:{port}/explorer")
     typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
+    typer.echo(f"Health: http://{host}:{port}/health")
     try:
         serve_dashboard(db_path=db, host=host, port=port)
     except KeyboardInterrupt:
@@ -145,8 +148,11 @@ def continuous_run(
     if dashboard:
         dashboard_server = start_dashboard_server(db_path=db, host=host, port=port)
         typer.echo(f"Dashboard URL: http://{host}:{port}")
+        typer.echo(f"Overview home: http://{host}:{port}/")
         typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
+        typer.echo(f"Explorer: http://{host}:{port}/explorer")
         typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
+        typer.echo(f"Health: http://{host}:{port}/health")
 
     typer.echo(f"Database: {db}")
     typer.echo(f"Continuous interval: {interval_seconds:.1f}s")
@@ -651,8 +657,11 @@ def dashboard(
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic rendering."),
 ) -> None:
     typer.echo(f"Dashboard URL: http://{host}:{port}")
+    typer.echo(f"Overview home: http://{host}:{port}/")
     typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
+    typer.echo(f"Explorer: http://{host}:{port}/explorer")
     typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
+    typer.echo(f"Health: http://{host}:{port}/health")
     typer.echo(f"Database: {db}")
     try:
         serve_dashboard(db_path=db, host=host, port=port, now=now)

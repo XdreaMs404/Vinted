@@ -11,8 +11,8 @@ from urllib.parse import parse_qs, urlencode
 from wsgiref.simple_server import WSGIServer, make_server
 
 from vinted_radar.repository import RadarRepository
-from vinted_radar.scoring import build_market_summary, build_rankings, load_listing_scores
-from vinted_radar.state_machine import STATE_ORDER, summarize_state_evaluations
+from vinted_radar.scoring import load_listing_scores
+from vinted_radar.state_machine import STATE_ORDER
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 24
@@ -234,70 +234,41 @@ def build_dashboard_payload(
     filters: DashboardFilters,
     now: str | None = None,
 ) -> dict[str, Any]:
-    generated_at = _generated_at(now)
-    listing_scores = load_listing_scores(repository, now=now)
-    coverage = repository.coverage_summary()
-    freshness = repository.freshness_summary(now=now)
-    runtime = repository.runtime_status(limit=8)
-    overall_state = summarize_state_evaluations(listing_scores, generated_at=generated_at)
-    filter_options = _build_filter_options(listing_scores)
-    filtered_scores = _apply_filters(listing_scores, filters)
-
-    if filtered_scores:
-        market_summary = build_market_summary(filtered_scores, repository, now=generated_at, limit=min(filters.limit, SEGMENT_LIMIT))
-    else:
-        market_summary = _empty_market_summary(generated_at, filtered_scores)
-
-    demand_rankings = build_rankings(filtered_scores, kind="demand", limit=filters.limit)
-    premium_rankings = build_rankings(filtered_scores, kind="premium", limit=filters.limit)
-    selected_listing = _select_listing(listing_scores, filtered_scores, filters, demand_rankings, premium_rankings)
-    detail = build_listing_detail_payload(repository, selected_listing, now=now) if selected_listing is not None else None
-    selected_listing_visible = selected_listing is not None and any(int(item["listing_id"]) == int(selected_listing["listing_id"]) for item in filtered_scores)
+    comparison_limit = max(1, min(int(filters.limit), SEGMENT_LIMIT))
+    overview = repository.overview_snapshot(now=now, comparison_limit=comparison_limit)
+    featured_page = repository.listing_explorer_page(page=1, page_size=4, sort="last_seen_desc", now=now)
+    featured_listings = [_serialize_overview_listing_item(item) for item in featured_page["items"]]
 
     return {
-        "generated_at": generated_at,
-        "db_path": str(repository.db_path),
-        "latest_run": None if coverage is None else coverage["run"],
-        "coverage": coverage,
-        "freshness": freshness,
-        "runtime": runtime,
-        "overall_state": overall_state,
-        "market_summary": market_summary,
-        "filters": {
-            "selected": {
-                "root": filters.root or "all",
-                "state": filters.state or "all",
+        "generated_at": overview["generated_at"],
+        "db_path": overview["db_path"],
+        "summary": overview["summary"],
+        "comparisons": overview["comparisons"],
+        "coverage": overview["coverage"],
+        "runtime": overview["runtime"],
+        "request": {
+            "comparison_limit": comparison_limit,
+            "primary_payload_source": "repository.overview_snapshot",
+            "legacy_query_filters": {
+                "root": filters.root,
+                "state": filters.state,
                 "catalog_id": filters.catalog_id,
-                "q": filters.query or "",
-                "limit": filters.limit,
-                "listing_id": None if selected_listing is None else int(selected_listing["listing_id"]),
+                "q": filters.query,
+                "listing_id": filters.listing_id,
             },
-            "available": filter_options,
         },
-        "results": {
-            "total_listings": len(listing_scores),
-            "filtered_listings": len(filtered_scores),
-            "selected_listing_visible": selected_listing_visible,
-            "has_results": bool(filtered_scores),
-            "empty_reason": None if filtered_scores else "No listings match the current dashboard filters.",
-        },
-        "rankings": {
-            "demand": demand_rankings,
-            "premium": premium_rankings,
-        },
-        "detail": detail,
+        "honesty_notes": _build_honesty_notes(overview),
+        "featured_listings": featured_listings,
         "diagnostics": {
+            "home": "/",
             "dashboard_api": "/api/dashboard",
             "runtime_api": "/api/runtime",
-            "listing_api": None if selected_listing is None else f"/api/listings/{selected_listing['listing_id']}",
             "explorer": "/explorer",
             "explorer_api": "/api/explorer",
             "health": "/health",
-            "latest_failures": [] if coverage is None else coverage["failures"],
+            "listing_detail_examples": [item["detail_api"] for item in featured_listings],
         },
     }
-
-
 def build_explorer_payload(
     repository: RadarRepository,
     *,
@@ -462,7 +433,8 @@ def _serialize_explorer_item(item: dict[str, Any]) -> dict[str, Any]:
             "seller_display": seller_login or "Seller not exposed",
             "seller_profile_url": seller_profile_url,
             "latest_probe_display": latest_probe_display,
-            "detail_href": "/" + _suffix_query(DashboardFilters(listing_id=listing_id), include_listing=True),
+            "explorer_href": f"/explorer?q={listing_id}",
+            "canonical_href": item.get("canonical_url"),
             "detail_api": f"/api/listings/{listing_id}",
         }
     )
@@ -471,306 +443,620 @@ def _serialize_explorer_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def render_dashboard_html(payload: dict[str, Any]) -> str:
-    selected = payload["filters"]["selected"]
-    filters = DashboardFilters(
-        root=None if selected["root"] == "all" else selected["root"],
-        state=None if selected["state"] == "all" else selected["state"],
-        catalog_id=selected["catalog_id"],
-        query=selected["q"] or None,
-        limit=int(selected["limit"]),
-        listing_id=selected["listing_id"],
-    )
-
-    latest_run = payload.get("latest_run") or {}
-    latest_runtime = payload["runtime"].get("latest_cycle") or {}
-    freshness = payload["freshness"]["overall"]
-    state_summary = payload["overall_state"]["overall"]
-    results = payload["results"]
-    detail = payload.get("detail")
+    summary = payload["summary"]
+    inventory = summary["inventory"]
+    honesty = summary["honesty"]
+    freshness = summary["freshness"]
     diagnostics = payload["diagnostics"]
+    featured_listings = payload["featured_listings"]
+    recent_failures = freshness.get("recent_acquisition_failures") or []
+    runtime = payload.get("runtime") or {}
+    latest_cycle = runtime.get("latest_cycle") or {}
 
-    runtime_value = _escape(str(latest_runtime.get("status") or "No cycle yet"))
-    runtime_items = [
-        f"Mode {latest_runtime.get('mode', 'n/a')}",
-        f"Phase {latest_runtime.get('phase', 'n/a')}",
-        f"Discovery run {latest_runtime.get('discovery_run_id', 'n/a')}",
+    cards_html = "".join(
+        (
+            _metric_card(
+                "Annonces suivies",
+                _escape(str(inventory.get("tracked_listings", 0))),
+                [
+                    f"{inventory['state_counts'].get('active', 0)} actives",
+                    f"{inventory['state_counts'].get('sold_observed', 0)} vendues observées",
+                    f"{inventory['state_counts'].get('sold_probable', 0)} vendues probables",
+                ],
+            ),
+            _metric_card(
+                "Signal de vente",
+                _escape(str(inventory.get("sold_like_count", 0))),
+                [
+                    f"Support minimal par module : {inventory.get('comparison_support_threshold', 0)} annonces",
+                    "Les modules marqués fragile restent visibles.",
+                ],
+            ),
+            _metric_card(
+                "Confiance",
+                _escape(str(honesty["confidence_counts"].get("high", 0))),
+                [
+                    f"Haute {honesty['confidence_counts'].get('high', 0)}",
+                    f"Moyenne {honesty['confidence_counts'].get('medium', 0)}",
+                    f"Basse {honesty['confidence_counts'].get('low', 0)}",
+                ],
+            ),
+            _metric_card(
+                "Fraîcheur",
+                _escape(_format_optional_timestamp(freshness.get("latest_successful_scan_at"))),
+                [
+                    f"Dernière vue annonce : {_format_optional_timestamp(freshness.get('latest_listing_seen_at'))}",
+                    f"Cycle runtime : {latest_cycle.get('status') or freshness.get('latest_runtime_cycle_status') or 'n/a'}",
+                ],
+            ),
+        )
+    )
+
+    modules_html = "".join(
+        _render_comparison_module(module, explorer_href=diagnostics["explorer"])
+        for module in payload["comparisons"].values()
+    )
+    notes_html = "".join(_render_honesty_note(note) for note in payload["honesty_notes"])
+    featured_html = _render_featured_listing_cards(featured_listings)
+    failure_html = (
+        '<ul class="failure-list">'
+        + "".join(
+            f"<li><strong>{_escape(str(item.get('catalog_path') or 'Catalogue inconnu'))}</strong><span>{_escape(str(item.get('error_message') or item.get('response_status') or 'Erreur inconnue'))}</span></li>"
+            for item in recent_failures[:5]
+        )
+        + "</ul>"
+        if recent_failures
+        else '<p class="muted">Aucune panne récente d’acquisition n’est remontée dans le dernier run connu.</p>'
+    )
+
+    diagnostics_links = [
+        ("Explorer", diagnostics["explorer"]),
+        ("JSON aperçu", diagnostics["dashboard_api"]),
+        ("JSON runtime", diagnostics["runtime_api"]),
+        ("Santé", diagnostics["health"]),
     ]
-    if latest_runtime.get("last_error"):
-        runtime_items.append(f"Last error {latest_runtime['last_error']}")
-
-    cards = [
-        _metric_card(
-            "Latest run",
-            _escape(str(latest_run.get("run_id") or "No run yet")),
-            [
-                f"Leaf catalogs {latest_run.get('scanned_leaf_catalogs', 0)} / {latest_run.get('total_leaf_catalogs', 0)}",
-                f"Page scans {latest_run.get('successful_scans', 0)} ok · {latest_run.get('failed_scans', 0)} failed",
-            ],
-        ),
-        _metric_card(
-            "Runtime",
-            runtime_value,
-            runtime_items,
-        ),
-        _metric_card(
-            "Freshness",
-            _escape(str(freshness.get("tracked_listings", 0))),
-            [
-                f"Fresh follow-up {freshness.get('fresh-followup', 0)}",
-                f"First pass only {freshness.get('first-pass-only', 0)}",
-                f"Stale follow-up {freshness.get('stale-followup', 0)}",
-            ],
-        ),
-        _metric_card(
-            "Confidence",
-            _escape(str(state_summary.get("high_confidence", 0))),
-            [
-                f"High confidence {state_summary.get('high_confidence', 0)}",
-                f"Medium confidence {state_summary.get('medium_confidence', 0)}",
-                f"Low confidence {state_summary.get('low_confidence', 0)}",
-            ],
-        ),
-        _metric_card(
-            "Filter lens",
-            _escape(f"{results['filtered_listings']} / {results['total_listings']}"),
-            [
-                f"Root {selected['root']}",
-                f"State {selected['state']}",
-                f"Catalog {selected['catalog_id'] or 'all'}",
-            ],
-        ),
-    ]
-
-    failures_html = "".join(
-        f"<li>{_escape(str(item.get('catalog_path') or 'Unknown catalog'))}: {_escape(str(item.get('error_message') or item.get('response_status') or 'unknown error'))}</li>"
-        for item in diagnostics["latest_failures"][:5]
-    )
-    failure_block = (
-        f"<section class=\"notice\"><h3>Latest scan failures</h3><ul>{failures_html}</ul></section>"
-        if failures_html
-        else ""
+    diagnostics_html = "".join(
+        f'<a class="button secondary" href="{_escape(href)}">{_escape(label)}</a>'
+        for label, href in diagnostics_links
     )
 
-    detail_block = _render_detail_panel(detail)
-    demand_table = _render_rankings_table("Demand proof", payload["rankings"]["demand"], filters, selected_listing_id=selected["listing_id"])
-    premium_table = _render_rankings_table("Premium proof", payload["rankings"]["premium"], filters, selected_listing_id=selected["listing_id"])
-
-    empty_block = (
-        f"<section class=\"empty-state\"><h3>No matching listings</h3><p>{_escape(results['empty_reason'])}</p></section>"
-        if not results["has_results"]
-        else ""
-    )
-
-    return f"""<!doctype html>
-<html lang=\"en\">
+    return f'''<!doctype html>
+<html lang="fr">
 <head>
-  <meta charset=\"utf-8\">
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>Vinted Radar dashboard</title>
-  <link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2315100f'/%3E%3Cpath d='M17 46V18h12.5c9.6 0 16.5 5.3 16.5 14 0 8.5-6.5 14-15.9 14H17Zm8-6h4.3c5.1 0 8.7-3 8.7-8s-3.7-8-9-8H25v16Z' fill='%23d5a15b'/%3E%3C/svg%3E\">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vinted Radar — aperçu du marché</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230e1620'/%3E%3Cpath d='M18 46V18h14.5c9.6 0 15.5 5.2 15.5 14s-5.9 14-15.2 14H18Zm8-6h5c5 0 8.6-3.1 8.6-8s-3.7-8-8.8-8H26v16Z' fill='%2387c7ff'/%3E%3C/svg%3E">
   <style>
     :root {{
-      --bg: #11100d;
-      --panel: rgba(29, 25, 20, 0.92);
-      --panel-strong: rgba(36, 31, 25, 0.96);
-      --ink: #f3ece0;
-      --muted: #c9baa4;
-      --accent: #d5a15b;
-      --accent-soft: rgba(213, 161, 91, 0.18);
-      --line: rgba(255,255,255,0.08);
-      --danger: #d46a5f;
-      --success: #7cc083;
-      --shadow: 0 24px 70px rgba(0,0,0,0.42);
-      --radius: 22px;
+      --bg: #08131e;
+      --bg-soft: #0f2030;
+      --panel: rgba(12, 26, 39, 0.92);
+      --panel-strong: rgba(10, 20, 31, 0.97);
+      --ink: #f3f7fb;
+      --muted: #b7c8d8;
+      --line: rgba(255,255,255,0.10);
+      --accent: #87c7ff;
+      --accent-strong: #3aa2ff;
+      --accent-soft: rgba(135, 199, 255, 0.16);
+      --success: #73d6a6;
+      --warning: #ffcf74;
+      --danger: #ff8a7a;
+      --shadow: 0 26px 80px rgba(0, 0, 0, 0.30);
+      --radius-lg: 28px;
+      --radius-md: 22px;
+      --radius-sm: 16px;
     }}
     * {{ box-sizing: border-box; }}
+    html {{ color-scheme: dark; }}
     body {{
       margin: 0;
+      min-height: 100vh;
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, rgba(213, 161, 91, 0.18), transparent 26%),
-        radial-gradient(circle at bottom right, rgba(120, 192, 131, 0.10), transparent 24%),
-        linear-gradient(180deg, #15120f 0%, #0f0d0b 100%);
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
-      min-height: 100vh;
+        radial-gradient(circle at top left, rgba(58,162,255,0.23), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(115,214,166,0.12), transparent 26%),
+        linear-gradient(180deg, #08131e 0%, #09111a 100%);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
     }}
     body::before {{
       content: "";
       position: fixed;
       inset: 0;
       pointer-events: none;
-      background-image: linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
-      background-size: 22px 22px;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px);
+      background-size: 28px 28px;
       mask-image: radial-gradient(circle at center, black, transparent 82%);
-      opacity: 0.25;
+      opacity: 0.34;
     }}
-    .shell {{ max-width: 1500px; margin: 0 auto; padding: 32px; position: relative; }}
-    .hero {{ display: grid; gap: 22px; margin-bottom: 24px; }}
-    .hero-header {{
-      display: grid;
-      gap: 10px;
-      padding: 28px 30px;
-      background: linear-gradient(135deg, rgba(213,161,91,0.16), rgba(255,255,255,0.03));
-      border: 1px solid rgba(213,161,91,0.2);
-      border-radius: 28px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
+    a {{ color: inherit; }}
+    .skip-link {{
+      position: absolute;
+      left: 16px;
+      top: -64px;
+      background: var(--panel-strong);
+      color: var(--ink);
+      padding: 12px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      z-index: 10;
+      text-decoration: none;
     }}
-    .eyebrow {{ text-transform: uppercase; letter-spacing: 0.22em; font-size: 12px; color: var(--accent); }}
-    h1, h2, h3 {{ font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; margin: 0; font-weight: 600; }}
-    h1 {{ font-size: clamp(2.1rem, 4vw, 4rem); line-height: 0.98; max-width: 14ch; }}
-    .subhead {{ color: var(--muted); max-width: 78ch; line-height: 1.6; }}
-    .cards {{ display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }}
-    .card, .panel, .metric, .notice, .empty-state {{
+    .skip-link:focus {{ top: 16px; }}
+    .shell {{ max-width: 1440px; margin: 0 auto; padding: 28px; position: relative; }}
+    .hero, .panel, .module, .note, .metric, .listing-card {{
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: var(--radius);
       box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
+      backdrop-filter: blur(16px);
     }}
-    .metric {{ padding: 22px; }}
-    .metric-label {{ color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; font-size: 11px; margin-bottom: 14px; }}
-    .metric-value {{ font-size: 2rem; font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; margin-bottom: 8px; }}
-    .metric ul {{ list-style: none; padding: 0; margin: 0; color: var(--muted); display: grid; gap: 6px; font-size: 0.95rem; }}
-    .layout {{ display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }}
-    .stack {{ display: grid; gap: 22px; }}
-    .panel {{ padding: 22px; }}
-    .panel-header {{ display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 18px; }}
-    .panel-header p {{ margin: 4px 0 0; color: var(--muted); }}
-    .filters {{ display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }}
-    label {{ display: grid; gap: 8px; color: var(--muted); font-size: 0.92rem; }}
-    input, select {{
-      width: 100%;
-      border: 1px solid rgba(255,255,255,0.09);
-      border-radius: 14px;
-      background: rgba(255,255,255,0.04);
-      color: var(--ink);
-      padding: 12px 14px;
-      font: inherit;
+    .hero {{
+      border-radius: var(--radius-lg);
+      padding: 30px;
+      display: grid;
+      gap: 20px;
+      background:
+        linear-gradient(135deg, rgba(135,199,255,0.22), rgba(255,255,255,0.03)),
+        var(--panel);
+      margin-bottom: 22px;
     }}
-    .actions {{ display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }}
+    .eyebrow {{
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 700;
+    }}
+    h1, h2, h3 {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 600;
+      text-wrap: balance;
+    }}
+    h1 {{ font-size: clamp(2.3rem, 5vw, 4.4rem); line-height: 0.96; max-width: 12ch; }}
+    h2 {{ font-size: clamp(1.45rem, 2.1vw, 2.1rem); line-height: 1.04; }}
+    h3 {{ font-size: 1.08rem; line-height: 1.2; }}
+    p {{ margin: 0; }}
+    .lead {{ max-width: 76ch; color: var(--muted); line-height: 1.65; text-wrap: pretty; }}
+    .nav-links, .button-row, .feature-actions, .module-actions {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }}
     .button {{
-      appearance: none;
-      border: 1px solid rgba(213,161,91,0.35);
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 11px 16px;
       border-radius: 999px;
-      padding: 12px 16px;
-      background: linear-gradient(135deg, rgba(213,161,91,0.26), rgba(213,161,91,0.08));
+      border: 1px solid rgba(135,199,255,0.34);
+      background: linear-gradient(135deg, rgba(135,199,255,0.24), rgba(58,162,255,0.08));
       color: var(--ink);
-      cursor: pointer;
       text-decoration: none;
       font-weight: 600;
+      transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+      font-variant-numeric: tabular-nums;
     }}
-    .button.secondary {{ background: rgba(255,255,255,0.03); border-color: var(--line); color: var(--muted); }}
-    .segment-grid {{ display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }}
-    .segment {{ padding: 18px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); border: 1px solid var(--line); }}
-    .segment small {{ display: block; margin-top: 10px; color: var(--muted); line-height: 1.45; }}
-    .table-wrap {{ overflow: auto; border: 1px solid var(--line); border-radius: 18px; }}
-    table {{ width: 100%; border-collapse: collapse; min-width: 760px; }}
-    th, td {{ padding: 13px 14px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }}
-    th {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); background: rgba(255,255,255,0.02); }}
-    tr.selected {{ background: var(--accent-soft); }}
-    .pill {{ display: inline-flex; padding: 5px 10px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(255,255,255,0.09); background: rgba(255,255,255,0.04); }}
-    .pill.active {{ color: var(--success); }}
-    .pill.sold_observed, .pill.sold_probable {{ color: var(--accent); }}
-    .pill.deleted {{ color: var(--danger); }}
-    .detail {{ position: sticky; top: 24px; display: grid; gap: 18px; background: var(--panel-strong); }}
-    .detail h2 {{ font-size: 2rem; line-height: 1.03; }}
-    .detail-meta {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-    .detail-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
-    .signal {{ padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--line); }}
-    .signal-label {{ display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px; }}
-    .bullet-list {{ margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.55; }}
-    .timeline {{ display: grid; gap: 12px; }}
-    .timeline-item {{ padding: 14px 16px; border-radius: 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--line); }}
-    .timeline-item strong {{ display: block; margin-bottom: 6px; }}
-    .notice, .empty-state {{ padding: 18px 20px; }}
-    a {{ color: inherit; }}
-    .link-muted {{ color: var(--muted); }}
-    .api-links {{ display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.92rem; color: var(--muted); }}
-    @media (max-width: 1080px) {{
-      .layout {{ grid-template-columns: 1fr; }}
-      .detail {{ position: static; }}
+    .button:hover {{ transform: translateY(-1px); border-color: rgba(135,199,255,0.6); }}
+    .button:active {{ transform: scale(0.96); }}
+    .button.secondary {{ background: rgba(255,255,255,0.04); border-color: var(--line); color: var(--muted); }}
+    .button:focus-visible, .lens-link:focus-visible, .listing-link:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 3px; }}
+    .cards {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 22px; }}
+    .metric {{ border-radius: var(--radius-md); padding: 22px; }}
+    .metric-label {{ color: var(--muted); text-transform: uppercase; letter-spacing: 0.15em; font-size: 11px; margin-bottom: 12px; }}
+    .metric-value {{ font-size: 1.95rem; font-family: Georgia, "Times New Roman", serif; margin-bottom: 10px; font-variant-numeric: tabular-nums; }}
+    .metric ul {{ margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--muted); line-height: 1.45; text-wrap: pretty; }}
+    .layout {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.92fr); gap: 22px; align-items: start; }}
+    .stack {{ display: grid; gap: 22px; }}
+    .panel {{ border-radius: var(--radius-lg); padding: 24px; }}
+    .panel-head {{ display: grid; gap: 8px; margin-bottom: 18px; }}
+    .panel-head p, .muted {{ color: var(--muted); line-height: 1.6; text-wrap: pretty; }}
+    .module-grid {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }}
+    .module {{ border-radius: var(--radius-md); padding: 18px; display: grid; gap: 16px; }}
+    .module-header {{ display: grid; gap: 10px; }}
+    .badge-row, .lens-badges {{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }}
+    .badge {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 32px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.04);
+      font-size: 12px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
     }}
-    @media (max-width: 640px) {{
+    .badge.ok {{ color: var(--success); }}
+    .badge.warning {{ color: var(--warning); }}
+    .badge.danger {{ color: var(--danger); }}
+    .lens-list {{ display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }}
+    .lens-row {{
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.07);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }}
+    .lens-top {{ display: flex; justify-content: space-between; gap: 12px; align-items: start; }}
+    .lens-top strong {{ font-size: 1rem; }}
+    .lens-meta {{ color: var(--muted); line-height: 1.5; text-wrap: pretty; }}
+    .lens-link, .listing-link {{ color: var(--accent); text-decoration: none; font-weight: 600; }}
+    .note-list {{ display: grid; gap: 12px; }}
+    .note {{ border-radius: var(--radius-md); padding: 16px; display: grid; gap: 8px; }}
+    .note.warning {{ border-color: rgba(255, 207, 116, 0.28); background: rgba(255, 207, 116, 0.08); }}
+    .note.danger {{ border-color: rgba(255, 138, 122, 0.24); background: rgba(255, 138, 122, 0.08); }}
+    .note.info {{ border-color: rgba(135, 199, 255, 0.26); background: rgba(135, 199, 255, 0.07); }}
+    .note-title {{ display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }}
+    .note-title strong {{ font-size: 1rem; }}
+    .note-title span {{ color: var(--muted); font-variant-numeric: tabular-nums; }}
+    .listing-grid {{ display: grid; gap: 14px; }}
+    .listing-card {{ border-radius: var(--radius-md); padding: 18px; display: grid; gap: 12px; }}
+    .listing-meta {{ color: var(--muted); line-height: 1.55; text-wrap: pretty; }}
+    .listing-stats {{ display: flex; gap: 8px; flex-wrap: wrap; }}
+    .failure-list {{ margin: 0; padding-left: 18px; display: grid; gap: 10px; color: var(--muted); line-height: 1.5; }}
+    .failure-list strong {{ color: var(--ink); display: block; margin-bottom: 3px; }}
+    @media (max-width: 1080px) {{ .layout {{ grid-template-columns: 1fr; }} }}
+    @media (max-width: 680px) {{
       .shell {{ padding: 18px; }}
-      .hero-header, .panel, .metric {{ padding: 18px; }}
-      .detail-grid {{ grid-template-columns: 1fr; }}
+      .hero, .panel, .metric {{ padding: 18px; }}
+      .module-grid {{ grid-template-columns: 1fr; }}
+      .lens-top {{ flex-direction: column; }}
     }}
   </style>
 </head>
 <body>
-  <main class=\"shell\">
-    <section class=\"hero\">
-      <div class=\"hero-header\">
-        <span class=\"eyebrow\">Local radar · evidence first</span>
-        <h1>Market summary first. Listing proof immediately underneath.</h1>
-        <p class=\"subhead\">This dashboard is a thin local product surface over the current Vinted Radar state, freshness, and scoring outputs. It does not invent new logic: every segment card, ranking row, and detail explanation comes from the same repository-backed payloads exposed by the CLI diagnostics.</p>
-      </div>
-      <div class=\"cards\">{''.join(cards)}</div>
-    </section>
+  <a class="skip-link" href="#contenu-principal">Aller au contenu</a>
+  <main id="contenu-principal" class="shell">
+    <header class="hero">
+      <span class="eyebrow">Vue d’ensemble du marché</span>
+      <h1>Ce qui bouge maintenant sur le radar Vinted.</h1>
+      <p class="lead">Cette page d’accueil privilégie un aperçu français, lisible et honnête. Le contenu principal vient directement du contrat SQL du dépôt : volumes suivis, fraîcheur réelle, niveaux de confiance, zones fragiles et premiers comparatifs catégories / marques / prix / états / statuts de vente.</p>
+      <nav class="nav-links" aria-label="Raccourcis d’exploration">
+        <a class="button" href="{_escape(diagnostics['explorer'])}">Explorer les annonces</a>
+        <a class="button secondary" href="{_escape(diagnostics['dashboard_api'])}">Ouvrir le JSON aperçu</a>
+        <a class="button secondary" href="{_escape(diagnostics['runtime_api'])}">Voir le runtime</a>
+        <a class="button secondary" href="{_escape(diagnostics['health'])}">Vérifier la santé</a>
+      </nav>
+    </header>
 
-    <section class=\"layout\">
-      <div class=\"stack\">
-        <section class=\"panel\">
-          <div class=\"panel-header\">
-            <div>
-              <h2>Filter lens</h2>
-              <p>Keep the market read tight without disconnecting it from the evidence base.</p>
-            </div>
+    <section class="cards" aria-label="Indicateurs clés">{cards_html}</section>
+
+    <div class="layout">
+      <div class="stack">
+        <section class="panel" aria-labelledby="modules-title">
+          <div class="panel-head">
+            <h2 id="modules-title">Comparaisons à lire avec contexte</h2>
+            <p>Chaque module garde les raisons de support faible, de signal partiel et d’estimation. Rien n’est lissé : les cartes fragiles restent visibles pour que le doute soit lisible, pas caché.</p>
           </div>
-          {_render_filter_form(payload)}
+          <div class="module-grid">{modules_html}</div>
         </section>
 
-        <section class=\"panel\">
-          <div class=\"panel-header\">
-            <div>
-              <h2>Performing segments</h2>
-              <p>Segments with the strongest combined demand and premium posture in the current filtered lens.</p>
-            </div>
+        <section class="panel" aria-labelledby="listings-title">
+          <div class="panel-head">
+            <h2 id="listings-title">Exemples d’annonces pour aller plus loin</h2>
+            <p>Ces cartes ouvrent des chemins concrets vers l’explorateur, la fiche JSON détaillée et la page publique quand elle est encore disponible.</p>
           </div>
-          {_render_segment_cards(payload['market_summary']['performing_segments'], empty_label='No performing segments match the current filters.')}
+          {featured_html}
+        </section>
+      </div>
+
+      <aside class="stack" aria-label="Contexte et honnêteté">
+        <section class="panel" aria-labelledby="honesty-title">
+          <div class="panel-head">
+            <h2 id="honesty-title">Niveau d’honnêteté du signal</h2>
+            <p>Ces notes résument les zones d’inférence, de dégradation et d’approximation qui comptent le plus pour interpréter la page correctement.</p>
+          </div>
+          <div class="note-list">{notes_html}</div>
         </section>
 
-        <section class=\"panel\">
-          <div class=\"panel-header\">
-            <div>
-              <h2>Rising segments</h2>
-              <p>Recent arrivals, visible deltas, and sold-like pressure from the same filtered evidence base.</p>
-            </div>
+        <section class="panel" aria-labelledby="runtime-title">
+          <div class="panel-head">
+            <h2 id="runtime-title">Fraîcheur et incidents récents</h2>
+            <p>Dernier scan réussi : {_escape(_format_optional_timestamp(freshness.get('latest_successful_scan_at')))} · dernier cycle runtime : {_escape(str(freshness.get('latest_runtime_cycle_status') or 'n/a'))}.</p>
           </div>
-          {_render_segment_cards(payload['market_summary']['rising_segments'], empty_label='No rising segments match the current filters.')}
+          {failure_html}
         </section>
 
-        {failure_block}
-        {empty_block}
-
-        <section class=\"panel\">{demand_table}</section>
-        <section class=\"panel\">{premium_table}</section>
-      </div>
-
-      <aside class=\"panel detail\">{detail_block}</aside>
-    </section>
-
-    <section class=\"panel\" style=\"margin-top:22px;\">
-      <div class=\"panel-header\">
-        <div>
-          <h2>Diagnostics</h2>
-          <p>Truthful JSON endpoints for debugging the exact payload that rendered this page.</p>
-        </div>
-      </div>
-      <div class=\"api-links\">
-        <a class=\"button secondary\" href=\"{_escape(diagnostics['dashboard_api'] + _suffix_query(filters, include_listing=True))}\">Dashboard payload</a>
-        <a class=\"button secondary\" href=\"{_escape(diagnostics['runtime_api'])}\">Runtime payload</a>
-        <a class=\"button secondary\" href=\"{_escape(diagnostics['explorer'])}\">Explorer</a>
-        <a class=\"button secondary\" href=\"{_escape(diagnostics['explorer_api'])}\">Explorer payload</a>
-        <a class=\"button secondary\" href=\"{_escape(diagnostics['health'])}\">Health</a>
-        {'' if diagnostics['listing_api'] is None else f'<a class="button secondary" href="{_escape(diagnostics["listing_api"])}">Selected listing payload</a>'}
-      </div>
-    </section>
+        <section class="panel" aria-labelledby="diag-title">
+          <div class="panel-head">
+            <h2 id="diag-title">Surfaces de diagnostic</h2>
+            <p>Pour diagnostiquer une régression, comparez d’abord cette page avec les JSON publics correspondants : même source, symptômes plus faciles à tracer.</p>
+          </div>
+          <div class="button-row">{diagnostics_html}</div>
+        </section>
+      </aside>
+    </div>
   </main>
 </body>
-</html>"""
+</html>'''
 
+
+
+def _serialize_overview_listing_item(item: dict[str, Any]) -> dict[str, Any]:
+    return _serialize_explorer_item(item)
+
+
+
+def _build_honesty_notes(overview: dict[str, Any]) -> list[dict[str, Any]]:
+    summary = overview["summary"]
+    inventory = summary["inventory"]
+    honesty = summary["honesty"]
+    freshness = summary["freshness"]
+
+    threshold = int(inventory.get("comparison_support_threshold") or 0)
+    notes: list[dict[str, Any]] = [
+        {
+            "slug": "low-support-rule",
+            "level": "info",
+            "title": "Supports fragiles laissés visibles",
+            "count": threshold,
+            "description": f"Toute ligne sous {threshold} annonces suivies reste affichée avec un badge de prudence au lieu d’être masquée.",
+        }
+    ]
+
+    inferred_count = int(honesty.get("inferred_state_count") or 0)
+    if inferred_count:
+        notes.append(
+            {
+                "slug": "inferred-states",
+                "level": "warning",
+                "title": "États inférés",
+                "count": inferred_count,
+                "description": f"{inferred_count} annonces reposent sur des absences de rescans ou un contexte indirect, pas sur un constat direct de la page produit.",
+            }
+        )
+
+    unknown_count = int(honesty.get("unknown_state_count") or 0)
+    if unknown_count:
+        notes.append(
+            {
+                "slug": "unknown-states",
+                "level": "warning",
+                "title": "États encore inconnus",
+                "count": unknown_count,
+                "description": f"{unknown_count} annonces n’ont pas encore assez de signal pour trancher proprement entre actif, vendu ou supprimé.",
+            }
+        )
+
+    partial_count = int(honesty.get("partial_signal_count") or 0)
+    if partial_count:
+        notes.append(
+            {
+                "slug": "partial-signals",
+                "level": "warning",
+                "title": "Signal partiel",
+                "count": partial_count,
+                "description": f"{partial_count} annonces ont des champs publics incomplets ; la lecture reste utile, mais moins robuste.",
+            }
+        )
+
+    thin_count = int(honesty.get("thin_signal_count") or 0)
+    if thin_count:
+        notes.append(
+            {
+                "slug": "thin-signals",
+                "level": "danger",
+                "title": "Signal mince",
+                "count": thin_count,
+                "description": f"{thin_count} annonces cumulent très peu de signaux publics : à lire comme une piste, pas comme une certitude.",
+            }
+        )
+
+    estimated_count = int(honesty.get("estimated_publication_count") or 0)
+    missing_estimated_count = int(honesty.get("missing_estimated_publication_count") or 0)
+    if estimated_count or missing_estimated_count:
+        description_parts: list[str] = []
+        if estimated_count:
+            description_parts.append(
+                f"{estimated_count} annonces utilisent une estimation de date de publication basée sur l’horodatage de l’image principale"
+            )
+        if missing_estimated_count:
+            description_parts.append(
+                f"{missing_estimated_count} n’ont pas cette estimation et restent donc plus opaques dans le temps"
+            )
+        notes.append(
+            {
+                "slug": "estimated-publication",
+                "level": "info",
+                "title": "Signal de publication estimé",
+                "count": estimated_count,
+                "description": ". ".join(part.rstrip(".") for part in description_parts) + ".",
+            }
+        )
+
+    failure_count = int(freshness.get("recent_acquisition_failure_count") or 0)
+    if failure_count:
+        notes.append(
+            {
+                "slug": "recent-acquisition-failures",
+                "level": "danger",
+                "title": "Acquisition dégradée récemment",
+                "count": failure_count,
+                "description": f"{failure_count} échecs récents de scan peuvent sous-représenter certaines zones du marché jusqu’au prochain cycle propre.",
+            }
+        )
+
+    return notes
+
+
+
+def _render_honesty_note(note: dict[str, Any]) -> str:
+    level = str(note.get("level") or "info")
+    return (
+        f'<article class="note { _escape(level) }">'
+        f'<div class="note-title"><strong>{_escape(str(note.get("title") or "Note"))}</strong>'
+        f'<span>{_escape(str(note.get("count") if note.get("count") is not None else ""))}</span></div>'
+        f'<p class="muted">{_escape(str(note.get("description") or ""))}</p>'
+        f'</article>'
+    )
+
+
+
+def _translate_overview_reason(reason: str, *, support_threshold: int) -> str:
+    thin_support_reason = f"No lens value reaches the minimum support threshold of {support_threshold} tracked listings."
+    if reason == thin_support_reason:
+        return f"Aucune valeur de ce module n’atteint le seuil minimal de {support_threshold} annonces suivies."
+    if reason == "No tracked listings are available for this comparison lens yet.":
+        return "Aucune annonce suivie n’est encore disponible pour ce module de comparaison."
+    return reason
+
+
+
+def _render_comparison_module(module: dict[str, Any], *, explorer_href: str) -> str:
+    status = str(module.get("status") or "empty")
+    status_labels = {
+        "ok": ("Support solide", "ok"),
+        "thin-support": ("Support fragile", "warning"),
+        "empty": ("Vide", "danger"),
+    }
+    status_label, status_class = status_labels.get(status, (status, "warning"))
+    rows = module.get("rows") or []
+    rows_html = (
+        "<ol class=" + '"lens-list">' + "".join(_render_comparison_row(row, explorer_href=explorer_href) for row in rows) + "</ol>"
+        if rows
+        else '<p class="muted">Aucune ligne disponible pour ce module.</p>'
+    )
+    reason_html = "" if not module.get("reason") else f'<p class="muted">{_escape(_translate_overview_reason(str(module["reason"]), support_threshold=int(module.get("support_threshold") or 0)))}</p>'
+    return (
+        f'<article class="module">'
+        f'<header class="module-header">'
+        f'<div class="lens-top"><div><h3>{_escape(str(module.get("title") or module.get("lens") or "Module"))}</h3></div>'
+        f'<span class="badge {status_class}">{_escape(status_label)}</span></div>'
+        f'{reason_html}'
+        f'</header>'
+        f'{rows_html}'
+        f'</article>'
+    )
+
+
+
+def _render_comparison_row(row: dict[str, Any], *, explorer_href: str) -> str:
+    inventory = row.get("inventory") if isinstance(row.get("inventory"), dict) else {}
+    honesty = row.get("honesty") if isinstance(row.get("honesty"), dict) else {}
+    filters = row.get("drilldown", {}).get("filters") if isinstance(row.get("drilldown"), dict) else {}
+    if not isinstance(filters, dict):
+        filters = {}
+
+    average_price = inventory.get("average_price_amount_cents")
+    average_price_display = "n/a" if average_price is None else _format_money(round(float(average_price)), "€")
+    support_share = float(inventory.get("support_share") or 0.0) * 100.0
+    filters_label = _describe_drilldown_filters(filters)
+    drilldown_href = _explorer_href_from_filters(filters, fallback=explorer_href)
+    uses_specific_filters = drilldown_href != explorer_href
+
+    badges: list[str] = []
+    if honesty.get("low_support"):
+        badges.append('<span class="badge warning">Support fragile</span>')
+    if int(honesty.get("partial_signal_count") or 0):
+        badges.append(f'<span class="badge warning">Partiel {int(honesty.get("partial_signal_count") or 0)}</span>')
+    if int(honesty.get("thin_signal_count") or 0):
+        badges.append(f'<span class="badge danger">Mince {int(honesty.get("thin_signal_count") or 0)}</span>')
+    if int(honesty.get("unknown_state_count") or 0):
+        badges.append(f'<span class="badge warning">Inconnu {int(honesty.get("unknown_state_count") or 0)}</span>')
+    if int(honesty.get("inferred_state_count") or 0):
+        badges.append(f'<span class="badge info">Inféré {int(honesty.get("inferred_state_count") or 0)}</span>')
+
+    action_label = "Ouvrir le filtre dans l’explorateur" if uses_specific_filters else "Explorer en détail"
+    return (
+        f'<li class="lens-row">'
+        f'<div class="lens-top"><div><strong>{_escape(str(row.get("label") or row.get("value") or "n/a"))}</strong>'
+        f'<p class="lens-meta">Support {int(inventory.get("support_count") or 0)} · {support_share:.0f} % du suivi · vendus-like {int(inventory.get("sold_like_count") or 0)} · prix moyen {average_price_display}</p></div>'
+        f'<a class="lens-link" href="{_escape(drilldown_href)}">{_escape(action_label)}</a></div>'
+        f'<div class="lens-badges">{"".join(badges) or "<span class=\"badge ok\">Lecture stable</span>"}</div>'
+        f'<p class="muted">Observé {int(honesty.get("observed_state_count") or 0)} · Inféré {int(honesty.get("inferred_state_count") or 0)} · Estimé publication {int(honesty.get("estimated_publication_count") or 0)} · {filters_label}</p>'
+        f'</li>'
+    )
+
+
+
+def _render_featured_listing_cards(featured_listings: list[dict[str, Any]]) -> str:
+    if not featured_listings:
+        return '<p class="muted">Aucune annonce suivie n’est disponible pour le moment.</p>'
+
+    cards: list[str] = []
+    for item in featured_listings:
+        canonical_link = ""
+        if item.get("canonical_href"):
+            canonical_link = f'<a class="button secondary" href="{_escape(str(item["canonical_href"]))}" target="_blank" rel="noreferrer">Voir sur Vinted</a>'
+        cards.append(
+            f'''
+            <article class="listing-card">
+              <div>
+                <h3>{_escape(str(item.get("title") or "Annonce sans titre"))}</h3>
+                <p class="listing-meta">{_escape(str(item.get("primary_catalog_path") or "Catalogue inconnu"))} · {_escape(str(item.get("brand") or "Marque inconnue"))}</p>
+              </div>
+              <div class="listing-stats">
+                <span class="badge ok">{_escape(str(item.get("price_display") or "prix n/a"))}</span>
+                <span class="badge">{_escape(str(item.get("freshness_bucket") or "fraîcheur inconnue"))}</span>
+                <span class="badge">Likes { _escape(str(item.get("visible_likes_display") or "n/a")) }</span>
+                <span class="badge">Vues { _escape(str(item.get("visible_views_display") or "n/a")) }</span>
+              </div>
+              <p class="listing-meta">Publication estimée : {_escape(str(item.get("estimated_publication_at") or "n/a"))} · { _escape(str(item.get("estimated_publication_note") or "Aucune estimation publique supplémentaire.")) }</p>
+              <div class="feature-actions">
+                <a class="button" href="{_escape(str(item.get("explorer_href") or "/explorer"))}">Ouvrir dans l’explorateur</a>
+                <a class="button secondary" href="{_escape(str(item.get("detail_api") or "#"))}">JSON détail</a>
+                {canonical_link}
+              </div>
+            </article>
+            '''
+        )
+    return '<div class="listing-grid">' + "".join(cards) + '</div>'
+
+
+
+def _explorer_href_from_filters(filters: dict[str, Any], *, fallback: str = "/explorer") -> str:
+    supported_keys = {"root", "catalog_id", "brand", "condition"}
+    params: dict[str, str] = {}
+    for key, value in filters.items():
+        if key not in supported_keys or value in {None, "", "all"}:
+            continue
+        params[key] = str(value)
+    if not params:
+        return fallback
+    return f"{fallback}?{urlencode(params)}"
+
+
+
+def _describe_drilldown_filters(filters: dict[str, Any]) -> str:
+    labels = {
+        "root": "racine",
+        "catalog_id": "catalogue",
+        "brand": "marque",
+        "condition": "état",
+        "price_band": "tranche de prix",
+        "state": "statut radar",
+    }
+    state_labels = {
+        "active": "actif",
+        "sold_observed": "vendu observé",
+        "sold_probable": "vendu probable",
+        "unavailable_non_conclusive": "indisponible",
+        "deleted": "supprimée",
+        "unknown": "inconnu",
+    }
+    price_labels = {
+        "under_20_eur": "< 20 €",
+        "20_to_39_eur": "20–39 €",
+        "40_plus_eur": "40 € et plus",
+        "unknown": "prix inconnu",
+    }
+    parts: list[str] = []
+    for key, value in filters.items():
+        rendered_value = value
+        if key == "state":
+            rendered_value = state_labels.get(str(value), value)
+        elif key == "price_band":
+            rendered_value = price_labels.get(str(value), value)
+        parts.append(f"{labels.get(key, key)} : {rendered_value}")
+    return "Filtre suggéré — " + ", ".join(parts) if parts else "Filtre suggéré indisponible dans l’explorateur actuel."
 
 def render_explorer_html(payload: dict[str, Any]) -> str:
     selected = payload["filters"]["selected"]
@@ -830,8 +1116,9 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
               <td>{_escape(str(item.get('latest_probe_display') or 'Not probed'))}</td>
               <td>
                 <div class=\"actions\">
-                  <a class=\"button secondary\" href=\"{_escape(str(item.get('detail_href')))}\">Inspect</a>
+                  <a class=\"button secondary\" href=\"{_escape(str(item.get('explorer_href') or '/explorer'))}\">Explorer</a>
                   <a class=\"button secondary\" href=\"{_escape(str(item.get('detail_api')))}\">JSON</a>
+                  {'' if not item.get('canonical_href') else f'<a class="button secondary" href="{_escape(str(item.get("canonical_href")))}" target="_blank" rel="noreferrer">Vinted</a>'}
                 </div>
               </td>
             </tr>
@@ -845,11 +1132,12 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     next_href = _explorer_query(filters, overrides={"page": filters.page + 1})
 
     return f"""<!doctype html>
-<html lang=\"en\">
+<html lang=\"fr\">
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>Vinted Radar explorer</title>
+  <title>Vinted Radar — explorateur</title>
+  <link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2315100f'/%3E%3Cpath d='M17 46V18h12.5c9.6 0 16.5 5.3 16.5 14 0 8.5-6.5 14-15.9 14H17Zm8-6h4.3c5.1 0 8.7-3 8.7-8s-3.7-8-9-8H25v16Z' fill='%23d5a15b'/%3E%3C/svg%3E'>
   <style>
     :root {{
       --bg: #11100d;

@@ -70,7 +70,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: SQL-Backed Overview Home + First Comparative Modules** `risk:high` `depends:[]`
+- [x] **S01: SQL-Backed Overview Home + First Comparative Modules** `risk:high` `depends:[]`
   > After this: `/` is a real market-overview home rather than an M001 truth screen, powered by SQL-backed aggregates and plain-language coverage/freshness/confidence cues instead of full-corpus Python recomputation.
 
 - [ ] **S02: Runtime Truth + Pause/Resume Surface** `risk:high` `depends:[S01]`

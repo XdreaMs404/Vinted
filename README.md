@@ -35,7 +35,7 @@ python -m vinted_radar.cli continuous \
   --port 8765
 ```
 
-This keeps the radar alive locally and serves the dashboard from the same DB while cycles continue in the background process.
+This keeps the radar alive locally and serves the French market overview home from the same DB while cycles continue in the background process.
 
 ## Current entrypoints
 
@@ -45,6 +45,7 @@ This keeps the radar alive locally and serves the dashboard from the same DB whi
 - `python -m vinted_radar.cli continuous --db data/vinted-radar.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --interval-seconds 1800 --dashboard --host 127.0.0.1 --port 8765`
 - `python -m vinted_radar.cli runtime-status --db data/vinted-radar.db`
 - `python -m vinted_radar.cli dashboard --db data/vinted-radar.db --host 127.0.0.1 --port 8765`
+- French market overview home: `http://127.0.0.1:8765/`
 - SQL-backed listing explorer: `http://127.0.0.1:8765/explorer`
 
 ### Focused diagnostics
@@ -63,11 +64,11 @@ This keeps the radar alive locally and serves the dashboard from the same DB whi
 - `python -m vinted_radar.cli market-summary --db data/vinted-radar.db --limit 8`
 - `python -m vinted_radar.cli score --db data/vinted-radar.db --listing-id <id>`
 
-## Dashboard diagnostics
+## Overview + diagnostics routes
 
-- HTML dashboard: `http://127.0.0.1:8765/`
+- French overview home: `http://127.0.0.1:8765/`
 - SQL-backed explorer: `http://127.0.0.1:8765/explorer`
-- JSON dashboard payload: `http://127.0.0.1:8765/api/dashboard`
+- JSON overview payload (compat dashboard endpoint): `http://127.0.0.1:8765/api/dashboard`
 - JSON explorer payload: `http://127.0.0.1:8765/api/explorer`
 - JSON runtime payload: `http://127.0.0.1:8765/api/runtime`
 - JSON listing detail payload: `http://127.0.0.1:8765/api/listings/<id>`
@@ -153,6 +154,6 @@ python -m vinted_radar.cli continuous \
 
 Then use:
 
-- summary dashboard → `http://127.0.0.1:8765/`
+- overview home → `http://127.0.0.1:8765/`
 - explorer → `http://127.0.0.1:8765/explorer`
 - runtime truth → `http://127.0.0.1:8765/api/runtime`

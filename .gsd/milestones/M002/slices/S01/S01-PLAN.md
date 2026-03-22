@@ -42,7 +42,7 @@
   - Do: promote the current listing-state evidence into a reusable SQL overview contract; expose summary blocks plus category/brand/price-band/condition/sold-state comparison modules with support metadata and drill-down lens values; keep observed/inferred/estimated/partial-signal honesty explicit.
   - Verify: `python -m pytest tests/test_overview_repository.py tests/test_history_repository.py`
   - Done when: repository tests prove that the overview home can get its primary payload from SQL aggregates and comparison modules without requiring full-corpus Python ranking work.
-- [ ] **T02: Rebuild `/` as a French overview home on top of the SQL contract** `est:1h30m`
+- [x] **T02: Rebuild `/` as a French overview home on top of the SQL contract** `est:1h30m`
   - Why: S01 is only complete when the actual default route stops reading like an M001 debug dashboard and starts behaving like the new market overview product surface.
   - Files: `vinted_radar/dashboard.py`, `vinted_radar/cli.py`, `README.md`, `tests/test_dashboard.py`, `tests/test_dashboard_cli.py`, `tests/test_overview_repository.py`
   - Do: refactor the home payload/rendering to consume the T01 SQL contract, switch the main copy and sectioning to French-first overview language, surface low-support and degraded-signal notes in the UI, and preserve links to `/explorer`, runtime diagnostics, and listing-detail JSON without reintroducing full-corpus Python recomputation on the primary path.
