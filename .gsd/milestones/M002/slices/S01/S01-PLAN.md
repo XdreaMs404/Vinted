@@ -36,7 +36,7 @@
 
 ## Tasks
 
-- [ ] **T01: Define the SQL overview contract and comparison lenses** `est:1h30m`
+- [x] **T01: Define the SQL overview contract and comparison lenses** `est:1h30m`
   - Why: The home-path scale risk only goes away if overview counts, honesty cues, and comparison modules can be assembled in SQL without scoring the entire corpus in Python first.
   - Files: `vinted_radar/repository.py`, `vinted_radar/state_machine.py`, `tests/test_overview_repository.py`, `tests/test_history_repository.py`
   - Do: promote the current listing-state evidence into a reusable SQL overview contract; expose summary blocks plus category/brand/price-band/condition/sold-state comparison modules with support metadata and drill-down lens values; keep observed/inferred/estimated/partial-signal honesty explicit.

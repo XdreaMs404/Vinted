@@ -11,9 +11,31 @@ import uuid
 from vinted_radar.card_payload import normalize_card_snapshot
 from vinted_radar.db import connect_database
 from vinted_radar.models import CatalogNode, ListingCard
+from vinted_radar.state_machine import (
+    ACTIVE_LATEST_SCAN_OBSERVED_CONFIDENCE,
+    ACTIVE_PROBE_OBSERVED_CONFIDENCE,
+    ACTIVE_RECENT_NO_RESCAN_INFERRED_CONFIDENCE,
+    ACTIVE_RECENT_WITHOUT_RESCAN_HOURS,
+    DELETED_OBSERVED_CONFIDENCE,
+    HIGH_CONFIDENCE,
+    MEDIUM_CONFIDENCE,
+    SOLD_OBSERVED_CONFIDENCE,
+    SOLD_PROBABLE_MULTI_MISS_CONFIDENCE,
+    SOLD_PROBABLE_TWO_MISS_CONFIDENCE,
+    STALE_HISTORY_UNKNOWN_HOURS,
+    STATE_ORDER,
+    UNAVAILABLE_OBSERVED_CONFIDENCE,
+    UNAVAILABLE_SINGLE_MISS_INFERRED_CONFIDENCE,
+    UNKNOWN_INCONCLUSIVE_CONFIDENCE,
+    UNKNOWN_STALE_CONFIDENCE,
+)
 
 FRESH_FOLLOWUP_HOURS = 24.0
 STALE_FOLLOWUP_HOURS = 72.0
+FULL_SIGNAL_COMPLETENESS = 7
+HIGH_SIGNAL_COMPLETENESS = 5
+DEFAULT_OVERVIEW_COMPARISON_LIMIT = 6
+DEFAULT_OVERVIEW_SUPPORT_THRESHOLD = 3
 
 
 class RadarRepository(AbstractContextManager["RadarRepository"]):
@@ -1268,6 +1290,519 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             )
             inputs.append(enriched)
         return inputs
+
+    def overview_snapshot(
+        self,
+        *,
+        now: str | None = None,
+        comparison_limit: int = DEFAULT_OVERVIEW_COMPARISON_LIMIT,
+        support_threshold: int = DEFAULT_OVERVIEW_SUPPORT_THRESHOLD,
+    ) -> dict[str, object]:
+        now_dt = _coerce_now(now)
+        generated_at = now_dt.replace(microsecond=0).isoformat()
+        bounded_limit = max(int(comparison_limit), 1)
+        bounded_support_threshold = max(int(support_threshold), 1)
+        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+
+        summary_row = self.connection.execute(
+            f"""
+            {cte_sql}
+            SELECT
+                COUNT(*) AS tracked_listings,
+                MAX(last_seen_at) AS latest_listing_seen_at,
+                MAX(latest_primary_scan_at) AS latest_successful_scan_at,
+                SUM(CASE WHEN sold_like = 1 THEN 1 ELSE 0 END) AS sold_like_count,
+                SUM(CASE WHEN state_code = 'active' THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE WHEN state_code = 'sold_observed' THEN 1 ELSE 0 END) AS sold_observed_count,
+                SUM(CASE WHEN state_code = 'sold_probable' THEN 1 ELSE 0 END) AS sold_probable_count,
+                SUM(CASE WHEN state_code = 'unavailable_non_conclusive' THEN 1 ELSE 0 END) AS unavailable_non_conclusive_count,
+                SUM(CASE WHEN state_code = 'deleted' THEN 1 ELSE 0 END) AS deleted_count,
+                SUM(CASE WHEN state_code = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
+                SUM(CASE WHEN basis_kind = 'observed' THEN 1 ELSE 0 END) AS observed_state_count,
+                SUM(CASE WHEN basis_kind = 'inferred' THEN 1 ELSE 0 END) AS inferred_state_count,
+                SUM(CASE WHEN basis_kind = 'unknown' THEN 1 ELSE 0 END) AS unknown_state_count,
+                SUM(CASE WHEN confidence_label = 'high' THEN 1 ELSE 0 END) AS high_confidence_count,
+                SUM(CASE WHEN confidence_label = 'medium' THEN 1 ELSE 0 END) AS medium_confidence_count,
+                SUM(CASE WHEN confidence_label = 'low' THEN 1 ELSE 0 END) AS low_confidence_count,
+                SUM(partial_signal) AS partial_signal_count,
+                SUM(thin_signal) AS thin_signal_count,
+                SUM(has_estimated_publication) AS estimated_publication_count,
+                SUM(CASE WHEN has_estimated_publication = 0 THEN 1 ELSE 0 END) AS missing_estimated_publication_count
+            FROM classified
+            """,
+            cte_params,
+        ).fetchone()
+        summary_values = dict(summary_row) if summary_row is not None else {}
+        coverage = self.coverage_summary()
+        runtime = self.runtime_status(limit=5)
+        latest_cycle = runtime.get("latest_cycle") if isinstance(runtime, dict) else None
+        recent_failures = [] if coverage is None else list(coverage.get("failures") or [])
+
+        comparisons: dict[str, dict[str, object]] = {}
+        for spec in (
+            {
+                "lens": "category",
+                "title": "Catégories",
+                "value_expression": "CASE WHEN primary_catalog_id IS NOT NULL THEN CAST(primary_catalog_id AS TEXT) ELSE COALESCE(root_title, 'unknown-root') END",
+                "label_expression": "COALESCE(category_path, COALESCE(root_title, 'Catégorie inconnue'))",
+                "extra_select": ", MAX(primary_catalog_id) AS catalog_id, MAX(root_title) AS root_title",
+                "order_by": "support_count DESC, lens_label ASC",
+            },
+            {
+                "lens": "brand",
+                "title": "Marques",
+                "value_expression": "COALESCE(brand, 'unknown-brand')",
+                "label_expression": "COALESCE(brand, 'Marque inconnue')",
+                "extra_select": "",
+                "order_by": "support_count DESC, lens_label ASC",
+            },
+            {
+                "lens": "price_band",
+                "title": "Tranches de prix",
+                "value_expression": "price_band_code",
+                "label_expression": "price_band_label",
+                "extra_select": ", MIN(price_band_sort_order) AS sort_rank",
+                "order_by": "support_count DESC, sort_rank ASC, lens_label ASC",
+            },
+            {
+                "lens": "condition",
+                "title": "États",
+                "value_expression": "COALESCE(condition_label, 'unknown-condition')",
+                "label_expression": "COALESCE(condition_label, 'État inconnu')",
+                "extra_select": "",
+                "order_by": "support_count DESC, lens_label ASC",
+            },
+            {
+                "lens": "sold_state",
+                "title": "Statut de vente",
+                "value_expression": "state_code",
+                "label_expression": "state_label",
+                "extra_select": ", MIN(state_sort_order) AS sort_rank",
+                "order_by": "support_count DESC, sort_rank ASC, lens_label ASC",
+            },
+        ):
+            comparisons[str(spec["lens"])] = self._overview_comparison_module(
+                cte_sql=cte_sql,
+                cte_params=cte_params,
+                lens=str(spec["lens"]),
+                title=str(spec["title"]),
+                value_expression=str(spec["value_expression"]),
+                label_expression=str(spec["label_expression"]),
+                extra_select=str(spec["extra_select"]),
+                order_by=str(spec["order_by"]),
+                limit=bounded_limit,
+                support_threshold=bounded_support_threshold,
+            )
+
+        return {
+            "generated_at": generated_at,
+            "db_path": str(self.db_path),
+            "summary": {
+                "inventory": {
+                    "tracked_listings": int(summary_values.get("tracked_listings") or 0),
+                    "sold_like_count": int(summary_values.get("sold_like_count") or 0),
+                    "comparison_support_threshold": bounded_support_threshold,
+                    "state_counts": {
+                        state_code: int(summary_values.get(f"{state_code}_count") or 0)
+                        for state_code in STATE_ORDER
+                    },
+                },
+                "honesty": {
+                    "observed_state_count": int(summary_values.get("observed_state_count") or 0),
+                    "inferred_state_count": int(summary_values.get("inferred_state_count") or 0),
+                    "unknown_state_count": int(summary_values.get("unknown_state_count") or 0),
+                    "partial_signal_count": int(summary_values.get("partial_signal_count") or 0),
+                    "thin_signal_count": int(summary_values.get("thin_signal_count") or 0),
+                    "estimated_publication_count": int(summary_values.get("estimated_publication_count") or 0),
+                    "missing_estimated_publication_count": int(summary_values.get("missing_estimated_publication_count") or 0),
+                    "confidence_counts": {
+                        "high": int(summary_values.get("high_confidence_count") or 0),
+                        "medium": int(summary_values.get("medium_confidence_count") or 0),
+                        "low": int(summary_values.get("low_confidence_count") or 0),
+                    },
+                },
+                "freshness": {
+                    "latest_listing_seen_at": summary_values.get("latest_listing_seen_at"),
+                    "latest_successful_scan_at": summary_values.get("latest_successful_scan_at"),
+                    "latest_run_id": None if coverage is None else coverage["run"].get("run_id"),
+                    "latest_run_started_at": None if coverage is None else coverage["run"].get("started_at"),
+                    "latest_run_finished_at": None if coverage is None else coverage["run"].get("finished_at"),
+                    "latest_runtime_cycle_status": None if latest_cycle is None else latest_cycle.get("status"),
+                    "latest_runtime_cycle_started_at": None if latest_cycle is None else latest_cycle.get("started_at"),
+                    "recent_acquisition_failure_count": len(recent_failures),
+                    "recent_acquisition_failures": recent_failures,
+                },
+            },
+            "comparisons": comparisons,
+            "coverage": coverage,
+            "runtime": runtime,
+        }
+
+    def _overview_comparison_module(
+        self,
+        *,
+        cte_sql: str,
+        cte_params: list[object],
+        lens: str,
+        title: str,
+        value_expression: str,
+        label_expression: str,
+        extra_select: str,
+        order_by: str,
+        limit: int,
+        support_threshold: int,
+    ) -> dict[str, object]:
+        rows = self.connection.execute(
+            f"""
+            {cte_sql}
+            SELECT
+                {value_expression} AS lens_value,
+                {label_expression} AS lens_label{extra_select},
+                COUNT(*) AS support_count,
+                ROUND(COUNT(*) * 1.0 / NULLIF(totals.tracked_listings, 0), 3) AS support_share,
+                ROUND(AVG(CAST(price_amount_cents AS REAL)), 2) AS average_price_amount_cents,
+                SUM(CASE WHEN state_code = 'active' THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE WHEN state_code = 'sold_observed' THEN 1 ELSE 0 END) AS sold_observed_count,
+                SUM(CASE WHEN state_code = 'sold_probable' THEN 1 ELSE 0 END) AS sold_probable_count,
+                SUM(CASE WHEN state_code = 'unavailable_non_conclusive' THEN 1 ELSE 0 END) AS unavailable_non_conclusive_count,
+                SUM(CASE WHEN state_code = 'deleted' THEN 1 ELSE 0 END) AS deleted_count,
+                SUM(CASE WHEN state_code = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
+                SUM(sold_like) AS sold_like_count,
+                ROUND(SUM(sold_like) * 1.0 / COUNT(*), 3) AS sold_like_rate,
+                SUM(CASE WHEN basis_kind = 'observed' THEN 1 ELSE 0 END) AS observed_state_count,
+                SUM(CASE WHEN basis_kind = 'inferred' THEN 1 ELSE 0 END) AS inferred_state_count,
+                SUM(CASE WHEN basis_kind = 'unknown' THEN 1 ELSE 0 END) AS unknown_state_count,
+                SUM(partial_signal) AS partial_signal_count,
+                SUM(thin_signal) AS thin_signal_count,
+                SUM(has_estimated_publication) AS estimated_publication_count,
+                SUM(CASE WHEN has_estimated_publication = 0 THEN 1 ELSE 0 END) AS missing_estimated_publication_count
+            FROM classified
+            CROSS JOIN (SELECT COUNT(*) AS tracked_listings FROM classified) AS totals
+            GROUP BY {value_expression}, {label_expression}
+            ORDER BY {order_by}
+            LIMIT ?
+            """,
+            [*cte_params, max(int(limit), 1)],
+        ).fetchall()
+
+        items: list[dict[str, object]] = []
+        for row in rows:
+            hydrated = dict(row)
+            lens_value = hydrated.get("lens_value")
+            support_count = int(hydrated.get("support_count") or 0)
+            if lens == "category" and hydrated.get("catalog_id") is not None:
+                filters: dict[str, object] = {"catalog_id": int(hydrated["catalog_id"])}
+            elif lens == "sold_state":
+                filters = {"state": str(lens_value)}
+            elif lens == "brand":
+                filters = {"brand": str(lens_value)}
+            elif lens == "condition":
+                filters = {"condition": str(lens_value)}
+            elif lens == "price_band":
+                filters = {"price_band": str(lens_value)}
+            elif hydrated.get("root_title"):
+                filters = {"root": str(hydrated["root_title"])}
+            else:
+                filters = {lens: str(lens_value)}
+
+            items.append(
+                {
+                    "label": hydrated.get("lens_label"),
+                    "value": lens_value,
+                    "drilldown": {
+                        "lens": lens,
+                        "value": lens_value,
+                        "filters": filters,
+                    },
+                    "inventory": {
+                        "support_count": support_count,
+                        "support_share": float(hydrated.get("support_share") or 0.0),
+                        "average_price_amount_cents": None
+                        if hydrated.get("average_price_amount_cents") is None
+                        else round(float(hydrated["average_price_amount_cents"]), 2),
+                        "sold_like_count": int(hydrated.get("sold_like_count") or 0),
+                        "sold_like_rate": float(hydrated.get("sold_like_rate") or 0.0),
+                        "state_counts": {
+                            state_code: int(hydrated.get(f"{state_code}_count") or 0)
+                            for state_code in STATE_ORDER
+                        },
+                    },
+                    "honesty": {
+                        "low_support": support_count < support_threshold,
+                        "support_threshold": support_threshold,
+                        "observed_state_count": int(hydrated.get("observed_state_count") or 0),
+                        "inferred_state_count": int(hydrated.get("inferred_state_count") or 0),
+                        "unknown_state_count": int(hydrated.get("unknown_state_count") or 0),
+                        "partial_signal_count": int(hydrated.get("partial_signal_count") or 0),
+                        "thin_signal_count": int(hydrated.get("thin_signal_count") or 0),
+                        "estimated_publication_count": int(hydrated.get("estimated_publication_count") or 0),
+                        "missing_estimated_publication_count": int(hydrated.get("missing_estimated_publication_count") or 0),
+                    },
+                }
+            )
+
+        supported_rows = sum(1 for item in items if not bool(item["honesty"]["low_support"]))
+        if not items:
+            status = "empty"
+            reason = "No tracked listings are available for this comparison lens yet."
+        elif supported_rows == 0:
+            status = "thin-support"
+            reason = f"No lens value reaches the minimum support threshold of {support_threshold} tracked listings."
+        else:
+            status = "ok"
+            reason = None
+
+        return {
+            "lens": lens,
+            "title": title,
+            "support_threshold": support_threshold,
+            "status": status,
+            "reason": reason,
+            "total_rows": len(items),
+            "supported_rows": supported_rows,
+            "thin_support_rows": len(items) - supported_rows,
+            "rows": items,
+        }
+
+    def _overview_state_snapshot_ctes(self, *, now_dt: datetime) -> tuple[str, list[object]]:
+        generated_at = now_dt.replace(microsecond=0).isoformat()
+        cte_sql = f"""
+        WITH ordered_observations AS (
+            SELECT
+                listing_observations.listing_id,
+                listing_observations.observed_at,
+                listing_observations.sighting_count,
+                LAG(listing_observations.observed_at) OVER (
+                    PARTITION BY listing_observations.listing_id
+                    ORDER BY listing_observations.observed_at
+                ) AS previous_observed_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY listing_observations.listing_id
+                    ORDER BY listing_observations.observed_at DESC, listing_observations.run_id DESC
+                ) AS observation_recency_rank,
+                listing_observations.run_id
+            FROM listing_observations
+        ),
+        observation_summary AS (
+            SELECT
+                ordered_observations.listing_id,
+                COUNT(*) AS observation_count,
+                SUM(ordered_observations.sighting_count) AS total_sightings,
+                MIN(ordered_observations.observed_at) AS first_seen_at,
+                MAX(ordered_observations.observed_at) AS last_seen_at,
+                AVG(CASE
+                    WHEN ordered_observations.previous_observed_at IS NULL THEN NULL
+                    ELSE (julianday(ordered_observations.observed_at) - julianday(ordered_observations.previous_observed_at)) * 24.0
+                END) AS average_revisit_hours,
+                MAX(CASE WHEN ordered_observations.observation_recency_rank = 1 THEN ordered_observations.run_id END) AS last_observed_run_id
+            FROM ordered_observations
+            GROUP BY ordered_observations.listing_id
+        ),
+        latest_primary_scan AS (
+            SELECT catalog_id, run_id, fetched_at
+            FROM (
+                SELECT
+                    catalog_scans.catalog_id,
+                    catalog_scans.run_id,
+                    catalog_scans.fetched_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY catalog_scans.catalog_id
+                        ORDER BY catalog_scans.fetched_at DESC, catalog_scans.run_id DESC
+                    ) AS scan_rank
+                FROM catalog_scans
+                WHERE catalog_scans.success = 1
+            )
+            WHERE scan_rank = 1
+        ),
+        follow_up_miss AS (
+            SELECT
+                observation_summary.listing_id,
+                COUNT(DISTINCT scans.run_id) AS follow_up_miss_count,
+                MAX(scans.fetched_at) AS latest_follow_up_miss_at
+            FROM observation_summary
+            JOIN listings ON listings.listing_id = observation_summary.listing_id
+            LEFT JOIN catalog_scans AS scans
+              ON scans.catalog_id = listings.primary_catalog_id
+             AND scans.success = 1
+             AND scans.fetched_at > observation_summary.last_seen_at
+            LEFT JOIN listing_observations AS observations
+              ON observations.listing_id = observation_summary.listing_id
+             AND observations.run_id = scans.run_id
+            WHERE observations.run_id IS NULL
+            GROUP BY observation_summary.listing_id
+        ),
+        latest_probe AS (
+            SELECT
+                listing_id,
+                probed_at,
+                response_status,
+                probe_outcome,
+                error_message
+            FROM (
+                SELECT
+                    item_page_probes.listing_id,
+                    item_page_probes.probed_at,
+                    item_page_probes.response_status,
+                    item_page_probes.probe_outcome,
+                    item_page_probes.error_message,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY item_page_probes.listing_id
+                        ORDER BY item_page_probes.probed_at DESC, item_page_probes.probe_id DESC
+                    ) AS probe_rank
+                FROM item_page_probes
+            )
+            WHERE probe_rank = 1
+        ),
+        snapshot AS (
+            SELECT
+                observation_summary.listing_id,
+                listings.primary_catalog_id,
+                listings.primary_root_catalog_id,
+                COALESCE(roots.title, 'Unknown') AS root_title,
+                COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS category_path,
+                listings.title,
+                listings.brand,
+                listings.size_label,
+                listings.condition_label,
+                listings.price_amount_cents,
+                listings.price_currency,
+                listings.total_price_amount_cents,
+                listings.total_price_currency,
+                listings.image_url,
+                listings.created_at_ts,
+                observation_summary.observation_count,
+                observation_summary.total_sightings,
+                observation_summary.first_seen_at,
+                observation_summary.last_seen_at,
+                ROUND(observation_summary.average_revisit_hours, 2) AS average_revisit_hours,
+                observation_summary.last_observed_run_id,
+                latest_primary_scan.run_id AS latest_primary_scan_run_id,
+                latest_primary_scan.fetched_at AS latest_primary_scan_at,
+                COALESCE(follow_up_miss.follow_up_miss_count, 0) AS follow_up_miss_count,
+                follow_up_miss.latest_follow_up_miss_at,
+                CASE
+                    WHEN latest_primary_scan.run_id IS NOT NULL
+                     AND latest_primary_scan.run_id = observation_summary.last_observed_run_id
+                    THEN 1 ELSE 0
+                END AS seen_in_latest_primary_scan,
+                latest_probe.probed_at AS latest_probe_at,
+                latest_probe.response_status AS latest_probe_response_status,
+                latest_probe.probe_outcome AS latest_probe_outcome,
+                latest_probe.error_message AS latest_probe_error_message,
+                CASE
+                    WHEN (julianday(?) - julianday(observation_summary.last_seen_at)) * 24.0 < 0 THEN 0.0
+                    ELSE ROUND((julianday(?) - julianday(observation_summary.last_seen_at)) * 24.0, 2)
+                END AS last_seen_age_hours,
+                (
+                    CASE WHEN listings.title IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.brand IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.size_label IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.condition_label IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.price_amount_cents IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.total_price_amount_cents IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.image_url IS NOT NULL THEN 1 ELSE 0 END
+                ) AS signal_completeness,
+                CASE WHEN listings.created_at_ts IS NULL THEN 0 ELSE 1 END AS has_estimated_publication,
+                CASE
+                    WHEN listings.price_amount_cents IS NULL THEN 'unknown'
+                    WHEN listings.price_amount_cents < 2000 THEN 'under_20_eur'
+                    WHEN listings.price_amount_cents < 4000 THEN '20_to_39_eur'
+                    ELSE '40_plus_eur'
+                END AS price_band_code,
+                CASE
+                    WHEN listings.price_amount_cents IS NULL THEN 'Prix indisponible'
+                    WHEN listings.price_amount_cents < 2000 THEN '< 20 €'
+                    WHEN listings.price_amount_cents < 4000 THEN '20–39 €'
+                    ELSE '40 € et plus'
+                END AS price_band_label,
+                CASE
+                    WHEN listings.price_amount_cents IS NULL THEN 4
+                    WHEN listings.price_amount_cents < 2000 THEN 1
+                    WHEN listings.price_amount_cents < 4000 THEN 2
+                    ELSE 3
+                END AS price_band_sort_order
+            FROM observation_summary
+            JOIN listings ON listings.listing_id = observation_summary.listing_id
+            LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+            LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
+            LEFT JOIN latest_primary_scan ON latest_primary_scan.catalog_id = listings.primary_catalog_id
+            LEFT JOIN follow_up_miss ON follow_up_miss.listing_id = observation_summary.listing_id
+            LEFT JOIN latest_probe ON latest_probe.listing_id = observation_summary.listing_id
+        ),
+        classified_base AS (
+            SELECT
+                snapshot.*,
+                CASE
+                    WHEN observation_count <= 1 THEN 'first-pass-only'
+                    WHEN last_seen_age_hours <= {FRESH_FOLLOWUP_HOURS} THEN 'fresh-followup'
+                    WHEN last_seen_age_hours <= {STALE_FOLLOWUP_HOURS} THEN 'aging-followup'
+                    ELSE 'stale-followup'
+                END AS freshness_bucket,
+                CASE WHEN signal_completeness < {FULL_SIGNAL_COMPLETENESS} THEN 1 ELSE 0 END AS partial_signal,
+                CASE WHEN signal_completeness < {HIGH_SIGNAL_COMPLETENESS} THEN 1 ELSE 0 END AS thin_signal,
+                CASE
+                    WHEN latest_probe_outcome = 'deleted' THEN 'deleted'
+                    WHEN latest_probe_outcome = 'sold' THEN 'sold_observed'
+                    WHEN latest_probe_outcome = 'active' THEN 'active'
+                    WHEN latest_probe_outcome = 'unavailable' THEN 'unavailable_non_conclusive'
+                    WHEN seen_in_latest_primary_scan = 1 THEN 'active'
+                    WHEN follow_up_miss_count >= 2 THEN 'sold_probable'
+                    WHEN follow_up_miss_count = 1 THEN 'unavailable_non_conclusive'
+                    WHEN latest_primary_scan_run_id IS NULL AND last_seen_age_hours <= {ACTIVE_RECENT_WITHOUT_RESCAN_HOURS} THEN 'active'
+                    WHEN last_seen_age_hours > {STALE_HISTORY_UNKNOWN_HOURS} THEN 'unknown'
+                    ELSE 'unknown'
+                END AS state_code,
+                CASE
+                    WHEN latest_probe_outcome IN ('deleted', 'sold', 'active', 'unavailable') THEN 'observed'
+                    WHEN seen_in_latest_primary_scan = 1 THEN 'observed'
+                    WHEN follow_up_miss_count >= 1 THEN 'inferred'
+                    WHEN latest_primary_scan_run_id IS NULL AND last_seen_age_hours <= {ACTIVE_RECENT_WITHOUT_RESCAN_HOURS} THEN 'inferred'
+                    ELSE 'unknown'
+                END AS basis_kind,
+                ROUND(CASE
+                    WHEN latest_probe_outcome = 'deleted' THEN {DELETED_OBSERVED_CONFIDENCE}
+                    WHEN latest_probe_outcome = 'sold' THEN {SOLD_OBSERVED_CONFIDENCE}
+                    WHEN latest_probe_outcome = 'active' THEN {ACTIVE_PROBE_OBSERVED_CONFIDENCE}
+                    WHEN latest_probe_outcome = 'unavailable' THEN {UNAVAILABLE_OBSERVED_CONFIDENCE}
+                    WHEN seen_in_latest_primary_scan = 1 THEN {ACTIVE_LATEST_SCAN_OBSERVED_CONFIDENCE}
+                    WHEN follow_up_miss_count = 2 THEN {SOLD_PROBABLE_TWO_MISS_CONFIDENCE}
+                    WHEN follow_up_miss_count >= 3 THEN {SOLD_PROBABLE_MULTI_MISS_CONFIDENCE}
+                    WHEN follow_up_miss_count = 1 THEN {UNAVAILABLE_SINGLE_MISS_INFERRED_CONFIDENCE}
+                    WHEN latest_primary_scan_run_id IS NULL AND last_seen_age_hours <= {ACTIVE_RECENT_WITHOUT_RESCAN_HOURS} THEN {ACTIVE_RECENT_NO_RESCAN_INFERRED_CONFIDENCE}
+                    WHEN last_seen_age_hours > {STALE_HISTORY_UNKNOWN_HOURS} THEN {UNKNOWN_STALE_CONFIDENCE}
+                    ELSE {UNKNOWN_INCONCLUSIVE_CONFIDENCE}
+                END, 2) AS confidence_score
+            FROM snapshot
+        ),
+        classified AS (
+            SELECT
+                classified_base.*,
+                CASE
+                    WHEN confidence_score >= {HIGH_CONFIDENCE} THEN 'high'
+                    WHEN confidence_score >= {MEDIUM_CONFIDENCE} THEN 'medium'
+                    ELSE 'low'
+                END AS confidence_label,
+                CASE state_code
+                    WHEN 'active' THEN 'Actif'
+                    WHEN 'sold_observed' THEN 'Vendu observé'
+                    WHEN 'sold_probable' THEN 'Vendu probable'
+                    WHEN 'unavailable_non_conclusive' THEN 'Indisponible'
+                    WHEN 'deleted' THEN 'Supprimée'
+                    ELSE 'Inconnu'
+                END AS state_label,
+                CASE state_code
+                    WHEN 'active' THEN 1
+                    WHEN 'sold_observed' THEN 2
+                    WHEN 'sold_probable' THEN 3
+                    WHEN 'unavailable_non_conclusive' THEN 4
+                    WHEN 'deleted' THEN 5
+                    ELSE 6
+                END AS state_sort_order,
+                CASE WHEN state_code IN ('sold_observed', 'sold_probable') THEN 1 ELSE 0 END AS sold_like
+            FROM classified_base
+        )
+        """
+        return cte_sql, [generated_at, generated_at]
 
     def _hydrate_observation_row(self, row: sqlite3.Row) -> dict[str, object]:
         raw_payload = json.loads(row["raw_card_payload_json"]) if row["raw_card_payload_json"] else {}

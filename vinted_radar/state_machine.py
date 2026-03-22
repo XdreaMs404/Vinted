@@ -5,6 +5,21 @@ from datetime import UTC, datetime
 HIGH_CONFIDENCE = 0.8
 MEDIUM_CONFIDENCE = 0.55
 
+ACTIVE_RECENT_WITHOUT_RESCAN_HOURS = 24.0
+STALE_HISTORY_UNKNOWN_HOURS = 72.0
+
+DELETED_OBSERVED_CONFIDENCE = 0.97
+SOLD_OBSERVED_CONFIDENCE = 0.91
+ACTIVE_PROBE_OBSERVED_CONFIDENCE = 0.95
+UNAVAILABLE_OBSERVED_CONFIDENCE = 0.62
+ACTIVE_LATEST_SCAN_OBSERVED_CONFIDENCE = 0.9
+SOLD_PROBABLE_TWO_MISS_CONFIDENCE = 0.72
+SOLD_PROBABLE_MULTI_MISS_CONFIDENCE = 0.82
+UNAVAILABLE_SINGLE_MISS_INFERRED_CONFIDENCE = 0.46
+ACTIVE_RECENT_NO_RESCAN_INFERRED_CONFIDENCE = 0.58
+UNKNOWN_STALE_CONFIDENCE = 0.24
+UNKNOWN_INCONCLUSIVE_CONFIDENCE = 0.32
+
 STATE_ORDER = [
     "active",
     "sold_observed",
@@ -24,22 +39,57 @@ def evaluate_listing_state(evidence: dict[str, object], *, now: str | None = Non
 
     if probe_outcome == "deleted":
         reasons.append(f"Item page returned a distinct deletion signal ({latest_probe.get('response_status')}).")
-        return _finalize(result, now_dt, state_code="deleted", basis_kind="observed", confidence_score=0.97, reasons=reasons)
+        return _finalize(
+            result,
+            now_dt,
+            state_code="deleted",
+            basis_kind="observed",
+            confidence_score=DELETED_OBSERVED_CONFIDENCE,
+            reasons=reasons,
+        )
     if probe_outcome == "sold":
         reasons.append("Item page buy signal is closed, so the listing appears sold on the public page.")
-        return _finalize(result, now_dt, state_code="sold_observed", basis_kind="observed", confidence_score=0.91, reasons=reasons)
+        return _finalize(
+            result,
+            now_dt,
+            state_code="sold_observed",
+            basis_kind="observed",
+            confidence_score=SOLD_OBSERVED_CONFIDENCE,
+            reasons=reasons,
+        )
     if probe_outcome == "active":
         reasons.append("Item page is still publicly buyable, which is direct active evidence.")
-        return _finalize(result, now_dt, state_code="active", basis_kind="observed", confidence_score=0.95, reasons=reasons)
+        return _finalize(
+            result,
+            now_dt,
+            state_code="active",
+            basis_kind="observed",
+            confidence_score=ACTIVE_PROBE_OBSERVED_CONFIDENCE,
+            reasons=reasons,
+        )
     if probe_outcome == "unavailable":
         reasons.append("Item page is reachable but publicly unavailable without a distinct sold/deleted signal.")
-        return _finalize(result, now_dt, state_code="unavailable_non_conclusive", basis_kind="observed", confidence_score=0.62, reasons=reasons)
+        return _finalize(
+            result,
+            now_dt,
+            state_code="unavailable_non_conclusive",
+            basis_kind="observed",
+            confidence_score=UNAVAILABLE_OBSERVED_CONFIDENCE,
+            reasons=reasons,
+        )
     if probe_outcome == "unknown":
         reasons.append("The latest item-page probe was inconclusive, so history remains the safer signal.")
 
     if bool(evidence.get("seen_in_latest_primary_scan")):
         reasons.append("The listing was observed in the latest successful scan of its primary catalog.")
-        return _finalize(result, now_dt, state_code="active", basis_kind="observed", confidence_score=0.9, reasons=reasons)
+        return _finalize(
+            result,
+            now_dt,
+            state_code="active",
+            basis_kind="observed",
+            confidence_score=ACTIVE_LATEST_SCAN_OBSERVED_CONFIDENCE,
+            reasons=reasons,
+        )
 
     follow_up_miss_count = int(evidence.get("follow_up_miss_count") or 0)
     observation_count = int(evidence.get("observation_count") or 0)
@@ -49,24 +99,38 @@ def evaluate_listing_state(evidence: dict[str, object], *, now: str | None = Non
         reasons.append(f"The primary catalog was rescanned {follow_up_miss_count} times after the last sighting without seeing the listing again.")
         if observation_count >= 2:
             reasons.append("The listing was seen repeatedly before disappearing, which strengthens the sell-through signal.")
-        confidence = 0.72 if follow_up_miss_count == 2 else 0.82
+        confidence = SOLD_PROBABLE_TWO_MISS_CONFIDENCE if follow_up_miss_count == 2 else SOLD_PROBABLE_MULTI_MISS_CONFIDENCE
         return _finalize(result, now_dt, state_code="sold_probable", basis_kind="inferred", confidence_score=confidence, reasons=reasons)
 
     if follow_up_miss_count == 1:
         reasons.append("The listing missed one follow-up scan after its last sighting, but that is not distinct enough to call sold or deleted.")
-        return _finalize(result, now_dt, state_code="unavailable_non_conclusive", basis_kind="inferred", confidence_score=0.46, reasons=reasons)
+        return _finalize(
+            result,
+            now_dt,
+            state_code="unavailable_non_conclusive",
+            basis_kind="inferred",
+            confidence_score=UNAVAILABLE_SINGLE_MISS_INFERRED_CONFIDENCE,
+            reasons=reasons,
+        )
 
     latest_primary_scan_run_id = evidence.get("latest_primary_scan_run_id")
-    if latest_primary_scan_run_id is None and last_seen_age_hours <= 24.0:
+    if latest_primary_scan_run_id is None and last_seen_age_hours <= ACTIVE_RECENT_WITHOUT_RESCAN_HOURS:
         reasons.append("The listing was seen recently, but there is no newer successful primary-catalog scan yet.")
-        return _finalize(result, now_dt, state_code="active", basis_kind="inferred", confidence_score=0.58, reasons=reasons)
+        return _finalize(
+            result,
+            now_dt,
+            state_code="active",
+            basis_kind="inferred",
+            confidence_score=ACTIVE_RECENT_NO_RESCAN_INFERRED_CONFIDENCE,
+            reasons=reasons,
+        )
 
-    if last_seen_age_hours > 72.0:
+    if last_seen_age_hours > STALE_HISTORY_UNKNOWN_HOURS:
         reasons.append("The last sighting is too old and there is no distinct contrary evidence, so the current state stays unknown.")
-        return _finalize(result, now_dt, state_code="unknown", basis_kind="unknown", confidence_score=0.24, reasons=reasons)
+        return _finalize(result, now_dt, state_code="unknown", basis_kind="unknown", confidence_score=UNKNOWN_STALE_CONFIDENCE, reasons=reasons)
 
     reasons.append("There is not enough direct or repeated absence evidence to classify the current state confidently.")
-    return _finalize(result, now_dt, state_code="unknown", basis_kind="unknown", confidence_score=0.32, reasons=reasons)
+    return _finalize(result, now_dt, state_code="unknown", basis_kind="unknown", confidence_score=UNKNOWN_INCONCLUSIVE_CONFIDENCE, reasons=reasons)
 
 
 def summarize_state_evaluations(evaluations: list[dict[str, object]], *, generated_at: str | None = None) -> dict[str, object]:
