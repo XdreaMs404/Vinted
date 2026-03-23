@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from vinted_radar.cli import app
 from vinted_radar.repository import RadarRepository
 from vinted_radar.services.runtime import RadarRuntimeCycleReport
+from vinted_radar.services.state_refresh import StateRefreshReport
 
 
 def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_path: Path) -> None:
@@ -38,6 +39,13 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
                 },
                 last_error=None,
                 config={"state_refresh_limit": 4},
+                state_refresh_summary={
+                    "status": "degraded",
+                    "direct_signal_count": 1,
+                    "inconclusive_probe_count": 0,
+                    "degraded_probe_count": 1,
+                    "anti_bot_challenge_count": 1,
+                },
             )
 
     def fake_serve_dashboard(
@@ -101,6 +109,8 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
     assert result.exit_code == 0
     assert "Cycle: cycle-1" in result.stdout
     assert "State probes: 2 / 4" in result.stdout
+    assert "State refresh health: degraded | direct 1 | inconclusive 0 | degraded 1" in result.stdout
+    assert "Anti-bot challenges: 1" in result.stdout
     assert "Dashboard URL: http://127.0.0.1:8766" in result.stdout
     assert "Runtime: http://127.0.0.1:8766/runtime" in result.stdout
     assert "Runtime API: http://127.0.0.1:8766/api/runtime" in result.stdout
@@ -156,6 +166,13 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
                     },
                     last_error="RuntimeError: boom",
                     config={"state_refresh_limit": 3},
+                    state_refresh_summary={
+                        "status": "degraded",
+                        "direct_signal_count": 0,
+                        "inconclusive_probe_count": 0,
+                        "degraded_probe_count": 1,
+                        "anti_bot_challenge_count": 1,
+                    },
                 )
             )
             on_cycle_complete(
@@ -177,6 +194,12 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
                     },
                     last_error=None,
                     config={"state_refresh_limit": 3},
+                    state_refresh_summary={
+                        "status": "partial",
+                        "direct_signal_count": 0,
+                        "inconclusive_probe_count": 1,
+                        "degraded_probe_count": 0,
+                    },
                 )
             )
             return []
@@ -219,7 +242,9 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
     assert "Listing detail: http://127.0.0.1:8770/listings/<id>" in result.stdout
     assert "Cycle: cycle-1" in result.stdout
     assert "Last error: RuntimeError: boom" in result.stdout
+    assert "State refresh health: degraded | direct 0 | inconclusive 0 | degraded 1" in result.stdout
     assert "Cycle: cycle-2" in result.stdout
+    assert "State refresh health: partial | direct 0 | inconclusive 1 | degraded 0" in result.stdout
     assert captured["interval_seconds"] == 1.0
     assert captured["max_cycles"] == 2
     assert captured["options"].min_price == 120.0
@@ -254,6 +279,13 @@ def test_runtime_status_cli_emits_json_payload(tmp_path: Path) -> None:
                 "stale-followup": 0,
             },
             last_error=None,
+            state_refresh_summary={
+                "status": "degraded",
+                "direct_signal_count": 1,
+                "inconclusive_probe_count": 0,
+                "degraded_probe_count": 1,
+                "anti_bot_challenge_count": 1,
+            },
         )
 
     runner = CliRunner()
@@ -265,7 +297,91 @@ def test_runtime_status_cli_emits_json_payload(tmp_path: Path) -> None:
     assert payload["controller"]["status"] == "idle"
     assert payload["latest_cycle"]["cycle_id"] == cycle_id
     assert payload["latest_cycle"]["status"] == "completed"
+    assert payload["latest_cycle"]["state_refresh_summary"]["status"] == "degraded"
+    assert payload["latest_cycle"]["state_refresh_summary"]["anti_bot_challenge_count"] == 1
     assert payload["totals"]["completed_cycles"] == 1
+
+
+
+def test_state_refresh_cli_accepts_proxy_pool_and_emits_probe_summary(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRepository:
+        def close(self) -> None:
+            captured["repository_closed"] = True
+
+    class FakeStateRefreshService:
+        def __init__(self) -> None:
+            self.repository = FakeRepository()
+
+        def refresh(self, *, limit: int = 10, listing_id: int | None = None, now: str | None = None) -> StateRefreshReport:
+            captured["refresh"] = {"limit": limit, "listing_id": listing_id, "now": now}
+            return StateRefreshReport(
+                probed_count=1,
+                probed_listing_ids=[9001],
+                probe_summary={
+                    "status": "degraded",
+                    "requested_limit": limit,
+                    "selected_target_count": 1,
+                    "probed_count": 1,
+                    "direct_signal_count": 0,
+                    "inconclusive_probe_count": 0,
+                    "degraded_probe_count": 1,
+                    "anti_bot_challenge_count": 1,
+                    "http_error_count": 0,
+                    "transport_error_count": 0,
+                    "outcome_counts": {"active": 0, "sold": 0, "unavailable": 0, "deleted": 0, "unknown": 1},
+                    "reason_counts": {"anti_bot_challenge": 1},
+                    "degraded_listing_ids": [9001],
+                },
+                state_summary={"generated_at": now or "2026-03-23T10:00:00+00:00", "overall": {"tracked_listings": 1}, "by_root": []},
+            )
+
+    def fake_factory(*, db_path: str, timeout_seconds: float, request_delay: float, proxies=None):
+        captured["factory"] = {
+            "db_path": db_path,
+            "timeout_seconds": timeout_seconds,
+            "request_delay": request_delay,
+            "proxies": proxies,
+        }
+        return FakeStateRefreshService()
+
+    monkeypatch.setattr("vinted_radar.cli.build_default_state_refresh_service", fake_factory)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "state-refresh",
+            "--db",
+            str(tmp_path / "runtime.db"),
+            "--limit",
+            "1",
+            "--request-delay",
+            "0.0",
+            "--timeout-seconds",
+            "5.0",
+            "--proxy",
+            "http://proxy-a:8080",
+            "--proxy",
+            "http://proxy-b:8080",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["probe_summary"]["status"] == "degraded"
+    assert payload["probe_summary"]["anti_bot_challenge_count"] == 1
+    assert captured["factory"] == {
+        "db_path": str(tmp_path / "runtime.db"),
+        "timeout_seconds": 5.0,
+        "request_delay": 0.0,
+        "proxies": ["http://proxy-a:8080", "http://proxy-b:8080"],
+    }
+    assert captured["refresh"] == {"limit": 1, "listing_id": None, "now": None}
+    assert captured["repository_closed"] is True
 
 
 
@@ -331,6 +447,12 @@ def test_runtime_status_cli_table_shows_controller_timing(tmp_path: Path) -> Non
                 "stale-followup": 0,
             },
             last_error=None,
+            state_refresh_summary={
+                "status": "partial",
+                "direct_signal_count": 0,
+                "inconclusive_probe_count": 1,
+                "degraded_probe_count": 0,
+            },
         )
         repository.set_runtime_controller_state(
             status="paused",
@@ -363,3 +485,4 @@ def test_runtime_status_cli_table_shows_controller_timing(tmp_path: Path) -> Non
     assert "Runtime now: paused (phase paused)" in result.stdout
     assert "Paused since: 2026-03-23T09:00:00+00:00 (10m 00s)" in result.stdout
     assert "Next resume: 2026-03-23T09:15:00+00:00 (5m 00s remaining)" in result.stdout
+    assert "State refresh health: partial | direct 0 | inconclusive 1 | degraded 0" in result.stdout

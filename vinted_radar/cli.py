@@ -265,6 +265,16 @@ def runtime_status(
         typer.echo(f"Finished: {latest['finished_at'] or 'still running'}")
         typer.echo(f"Discovery run: {latest.get('discovery_run_id') or 'n/a'}")
         typer.echo(f"State probes: {latest.get('state_probed_count', 0)} / {latest.get('state_probe_limit', 0)}")
+        state_refresh_summary = latest.get("state_refresh_summary") or {}
+        if state_refresh_summary:
+            typer.echo(
+                "State refresh health: {status} | direct {direct} | inconclusive {inconclusive} | degraded {degraded}".format(
+                    status=state_refresh_summary.get("status") or "unknown",
+                    direct=state_refresh_summary.get("direct_signal_count") or 0,
+                    inconclusive=state_refresh_summary.get("inconclusive_probe_count") or 0,
+                    degraded=state_refresh_summary.get("degraded_probe_count") or 0,
+                )
+            )
         typer.echo(
             "Freshness snapshot: first-pass {first_pass_only}, fresh {fresh_followup}, aging {aging_followup}, stale {stale_followup}".format(
                 **latest
@@ -490,10 +500,16 @@ def state_refresh(
     listing_id: int | None = typer.Option(None, "--listing-id", min=1, help="Refresh a specific listing instead of selecting probe candidates."),
     request_delay: float = typer.Option(0.5, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic evaluation."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
 ) -> None:
-    service = build_default_state_refresh_service(db_path=str(db), timeout_seconds=timeout_seconds, request_delay=request_delay)
+    service = build_default_state_refresh_service(
+        db_path=str(db),
+        timeout_seconds=timeout_seconds,
+        request_delay=request_delay,
+        proxies=list(proxy) if proxy else None,
+    )
     try:
         report = service.refresh(limit=limit, listing_id=listing_id, now=now)
     finally:
@@ -505,6 +521,7 @@ def state_refresh(
                 {
                     "probed_count": report.probed_count,
                     "probed_listing_ids": report.probed_listing_ids,
+                    "probe_summary": report.probe_summary,
                     "state_summary": report.state_summary,
                 },
                 ensure_ascii=False,
@@ -520,6 +537,20 @@ def state_refresh(
     typer.echo(f"Probed listings: {report.probed_count}")
     if report.probed_listing_ids:
         typer.echo(f"Listing IDs: {', '.join(str(item) for item in report.probed_listing_ids)}")
+    probe_summary = report.probe_summary or {}
+    if probe_summary:
+        typer.echo(
+            "Probe health: {status} | direct {direct} | inconclusive {inconclusive} | degraded {degraded}".format(
+                status=probe_summary.get("status") or "unknown",
+                direct=probe_summary.get("direct_signal_count") or 0,
+                inconclusive=probe_summary.get("inconclusive_probe_count") or 0,
+                degraded=probe_summary.get("degraded_probe_count") or 0,
+            )
+        )
+        if probe_summary.get("anti_bot_challenge_count"):
+            typer.echo(f"Anti-bot challenges: {probe_summary['anti_bot_challenge_count']}")
+        if probe_summary.get("transport_error_count"):
+            typer.echo(f"Transport errors: {probe_summary['transport_error_count']}")
     _render_state_summary(report.state_summary)
 
 
@@ -806,6 +837,17 @@ def _render_runtime_cycle_report(report: RadarRuntimeCycleReport, *, db: Path) -
             )
         typer.echo(discovery_summary)
     typer.echo(f"State probes: {report.state_probed_count} / {report.config.get('state_refresh_limit', 0)}")
+    if report.state_refresh_summary:
+        typer.echo(
+            "State refresh health: {status} | direct {direct} | inconclusive {inconclusive} | degraded {degraded}".format(
+                status=report.state_refresh_summary.get("status") or "unknown",
+                direct=report.state_refresh_summary.get("direct_signal_count") or 0,
+                inconclusive=report.state_refresh_summary.get("inconclusive_probe_count") or 0,
+                degraded=report.state_refresh_summary.get("degraded_probe_count") or 0,
+            )
+        )
+        if report.state_refresh_summary.get("anti_bot_challenge_count"):
+            typer.echo(f"Anti-bot challenges: {report.state_refresh_summary['anti_bot_challenge_count']}")
     typer.echo(f"Tracked listings: {report.tracked_listings}")
     typer.echo(
         "Freshness snapshot: first-pass {first_pass_only}, fresh {fresh_followup}, aging {aging_followup}, stale {stale_followup}".format(

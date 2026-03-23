@@ -43,6 +43,13 @@ def test_runtime_cycle_methods_keep_controller_snapshot_in_sync(tmp_path: Path) 
                 "stale-followup": 0,
             },
             last_error=None,
+            state_refresh_summary={
+                "status": "partial",
+                "probed_count": 2,
+                "direct_signal_count": 1,
+                "inconclusive_probe_count": 1,
+                "degraded_probe_count": 0,
+            },
         )
         status = repository.runtime_status(limit=5)
 
@@ -50,6 +57,8 @@ def test_runtime_cycle_methods_keep_controller_snapshot_in_sync(tmp_path: Path) 
     assert status["phase"] == "idle"
     assert status["latest_cycle"]["cycle_id"] == cycle_id
     assert status["latest_cycle"]["status"] == "completed"
+    assert status["latest_cycle"]["state_refresh_summary"]["status"] == "partial"
+    assert status["latest_cycle"]["state_refresh_summary"]["inconclusive_probe_count"] == 1
     assert status["controller"]["latest_cycle_id"] == cycle_id
     assert status["controller"]["active_cycle_id"] is None
     assert status["totals"]["completed_cycles"] == 1
@@ -98,6 +107,14 @@ def test_runtime_status_exposes_controller_timing_recent_failures_and_redacts_co
                 "stale-followup": 0,
             },
             last_error=None,
+            state_refresh_summary={
+                "status": "degraded",
+                "probed_count": 1,
+                "direct_signal_count": 0,
+                "inconclusive_probe_count": 0,
+                "degraded_probe_count": 1,
+                "anti_bot_challenge_count": 1,
+            },
         )
 
         repository.set_runtime_controller_state(
@@ -129,12 +146,15 @@ def test_runtime_status_exposes_controller_timing_recent_failures_and_redacts_co
     assert status["latest_failure"] is not None
     assert status["latest_failure"]["cycle_id"] == failed_cycle
     assert len(status["recent_failures"]) == 1
+    assert status["acquisition"]["status"] == "degraded"
+    assert status["acquisition"]["latest_state_refresh_summary"]["anti_bot_challenge_count"] == 1
 
     controller = status["controller"]
     assert controller is not None
     assert controller["heartbeat"]["age_seconds"] == 300.0
     assert controller["heartbeat"]["stale_after_seconds"] == 120.0
     assert controller["heartbeat"]["is_stale"] is True
+    assert status["acquisition"]["latest_cycle_id"] == completed_cycle
     assert controller["config"]["proxy"] == "http://***@proxy.example:8080"
     assert controller["config"]["nested"]["upstream"] == "https://***@example.com/path"
 

@@ -82,10 +82,10 @@ This milestone is complete only when all are true:
 - [x] **S04: Full Explorer + Comparative Intelligence** `risk:high` `depends:[S01,S03]`
   > After this: a user can explore the real tracked corpus with server-side filters, sorts, paging, and comparison modules across category, brand, price band, condition, and sold state without leaving the live product.
 
-- [ ] **S05: Listing Detail Narrative + Progressive Proof** `risk:medium` `depends:[S01,S03,S04]`
+- [x] **S05: Listing Detail Narrative + Progressive Proof** `risk:medium` `depends:[S01,S03,S04]`
   > After this: opening a listing yields a French plain-language reading first, then richer seller, engagement, timing, state, and evidence detail behind progressive disclosure rather than leading with debugger vocabulary.
 
-- [ ] **S06: Acquisition Hardening + Degraded-Mode Visibility** `risk:high` `depends:[S02,S03,S04,S05]`
+- [x] **S06: Acquisition Hardening + Degraded-Mode Visibility** `risk:high` `depends:[S02,S03,S04,S05]`
   > After this: proxy-aware state refresh, degraded acquisition telemetry, and explicit partial-signal messaging keep the product honest when live collection weakens instead of hiding uncertainty behind polished screens.
 
 - [ ] **S07: Live VPS End-to-End Acceptance Closure** `risk:medium` `depends:[S01,S02,S03,S04,S05,S06]`

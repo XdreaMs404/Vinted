@@ -60,7 +60,7 @@ This keeps the radar alive locally and serves the French market overview home fr
 - `python -m vinted_radar.cli freshness --db data/vinted-radar.db`
 - `python -m vinted_radar.cli revisit-plan --db data/vinted-radar.db --limit 10`
 - `python -m vinted_radar.cli history --db data/vinted-radar.db --listing-id <id>`
-- `python -m vinted_radar.cli state-refresh --db data/vinted-radar.db --limit 10`
+- `python -m vinted_radar.cli state-refresh --db data/vinted-radar.db --limit 10 --format json`
 - `python -m vinted_radar.cli state-summary --db data/vinted-radar.db`
 - `python -m vinted_radar.cli state --db data/vinted-radar.db --listing-id <id>`
 - `python -m vinted_radar.cli rankings --db data/vinted-radar.db --kind demand --limit 10`
@@ -105,6 +105,24 @@ Example explorer URLs:
 
 - active high-price women slice: `http://127.0.0.1:8765/explorer?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=24`
 - drill into one category/brand slice from the current explorer state: `http://127.0.0.1:8765/explorer?root=Femmes&brand=Maje&q=robe&sort=view_desc&page_size=24`
+
+## Listing detail workflow
+
+The HTML detail route is now narrative-first instead of proof-first.
+
+What the route does:
+
+- keeps the explorer query string on `/listings/<id>` and `/api/listings/<id>`
+- exposes `Retour aux résultats` so the user can go back to the same filtered explorer slice
+- starts with a plain-language reading (`Ce que le radar voit d’abord`) before showing proof
+- keeps prudence/provenance visible (`Repères et limites visibles`) so observed facts, inferred state, estimated publication timing, and radar timestamps do not get blurred together
+- moves technical proof into disclosures (`Preuve d’état`, `Contexte de score`, `Chronologie radar`) instead of forcing that reasoning above the fold
+
+The JSON detail payload remains the authoritative machine-readable contract. It now includes `narrative` and `provenance` sections on top of the existing `state_explanation`, `score_explanation`, `history`, and `transitions` proof blocks.
+
+Example detail URL from an explorer slice:
+
+- `http://127.0.0.1:8765/listings/<id>?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=24`
 
 ## Proxy / VPS serving contract
 
@@ -182,6 +200,30 @@ Use these surfaces depending on the question:
 - JSON runtime payload: `http://127.0.0.1:8765/api/runtime`
 
 A healthy waiting loop should now appear as `scheduled`, not as a misleadingly "completed" runtime.
+
+## Degraded acquisition visibility
+
+The product now distinguishes three acquisition-health states across overview, explorer, listing detail, runtime, `/api/runtime`, and `/health`:
+
+- `healthy` — the latest discovery run has no visible scan failures and the latest persisted state-refresh probes were direct enough to trust operationally
+- `partial` — probes completed, but one or more of them stayed inconclusive, so the product leans more heavily on the radar history than on a fresh direct page signal
+- `degraded` — recent catalog scans failed or the latest state-refresh probes hit anti-bot / challenge pages, transport exceptions, or other explicit degraded HTTP outcomes
+
+Operator inspection flow:
+
+```bash
+python -m vinted_radar.cli runtime-status --db data/vinted-radar.db --format json
+python -m vinted_radar.cli state-refresh --db data/vinted-radar.db --limit 10 --format json \
+  --proxy http://user:pass@proxy.example:8080
+```
+
+What to look for:
+
+- `latest_cycle.state_refresh_summary` in `runtime-status` JSON — persisted direct/inconclusive/degraded probe counts for the latest usable cycle
+- `acquisition` in `/api/runtime` and `/health` — the cross-surface healthy/partial/degraded contract plus recent failed scans and example degraded probes
+- the overview/explorer/detail/runtime HTML routes — French product copy that warns when the radar is reading under degraded acquisition instead of pretending the data is fully healthy
+
+A degraded state-refresh probe does **not** automatically mean the listing is deleted or sold. It means the page-level check failed to provide a clean direct signal, so the product should fall back to the safer historical reading until a later clean probe succeeds.
 
 ## Database safety
 

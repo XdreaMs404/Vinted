@@ -7,6 +7,7 @@ ACTIVE_HTML = '<script>{"type":"buy","section":"sidebar","data":{"item_id":9001,
 SOLD_HTML = '<script>{"type":"buy","section":"sidebar","data":{"item_id":9002,"seller_id":1,"can_buy":false,"instant_buy":false,"is_closed":true,"is_hidden":false,"is_reserved":false}}</script>'
 UNAVAILABLE_HTML = '<script>{"type":"buy","section":"sidebar","data":{"item_id":9003,"seller_id":1,"can_buy":false,"instant_buy":false,"is_closed":false,"is_hidden":true,"is_reserved":false}}</script>'
 UNKNOWN_HTML = '<html><body><h1>No buy block here</h1></body></html>'
+CHALLENGE_HTML = '<html><head><title>Just a moment...</title></head><body><div id="challenge">Verify you are human</div></body></html>'
 
 
 def test_parse_item_page_probe_detects_active_signal() -> None:
@@ -43,3 +44,19 @@ def test_parse_item_page_probe_degrades_unknown_shape_to_unknown() -> None:
 
     assert result.probe_outcome == "unknown"
     assert result.detail["reason"] == "buy_signal_not_found"
+
+
+def test_parse_item_page_probe_detects_anti_bot_challenge_on_retryable_http() -> None:
+    result = parse_item_page_probe(listing_id=9006, response_status=403, html=CHALLENGE_HTML)
+
+    assert result.probe_outcome == "unknown"
+    assert result.detail["reason"] == "anti_bot_challenge"
+    assert "just a moment" in result.detail["challenge_markers"]
+
+
+def test_parse_item_page_probe_detects_anti_bot_challenge_even_with_http_200() -> None:
+    result = parse_item_page_probe(listing_id=9007, response_status=200, html=CHALLENGE_HTML)
+
+    assert result.probe_outcome == "unknown"
+    assert result.detail["reason"] == "anti_bot_challenge"
+    assert "verify you are human" in result.detail["challenge_markers"]

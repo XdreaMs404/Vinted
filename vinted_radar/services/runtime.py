@@ -54,6 +54,7 @@ class RadarRuntimeCycleReport:
     freshness_counts: dict[str, int]
     last_error: str | None
     config: dict[str, object]
+    state_refresh_summary: dict[str, object] | None = None
     discovery_report: DiscoveryRunReport | None = None
     state_report: StateRefreshReport | None = None
 
@@ -129,6 +130,7 @@ class RadarRuntimeService:
                 db_path=str(self.db_path),
                 timeout_seconds=options.timeout_seconds,
                 request_delay=options.request_delay,
+                proxies=list(options.proxies) or None,
             )
             try:
                 state_report = state_refresh_service.refresh(limit=options.state_refresh_limit)
@@ -147,6 +149,7 @@ class RadarRuntimeService:
                 tracked_listings=tracked_listings,
                 freshness_counts=freshness_counts,
                 last_error=None,
+                state_refresh_summary=state_report.probe_summary,
             )
             return self._build_report(cycle_id, discovery_report=discovery_report, state_report=state_report)
         except KeyboardInterrupt:
@@ -160,6 +163,7 @@ class RadarRuntimeService:
                 tracked_listings=tracked_listings,
                 freshness_counts=freshness_counts,
                 last_error="Interrupted by operator.",
+                state_refresh_summary=None if state_report is None else state_report.probe_summary,
             )
             raise
         except Exception as exc:  # noqa: BLE001
@@ -406,6 +410,7 @@ class RadarRuntimeService:
         tracked_listings: int,
         freshness_counts: dict[str, int],
         last_error: str | None,
+        state_refresh_summary: dict[str, object] | None,
     ) -> None:
         with RadarRepository(self.db_path) as repository:
             repository.complete_runtime_cycle(
@@ -417,6 +422,7 @@ class RadarRuntimeService:
                 tracked_listings=tracked_listings,
                 freshness_counts=freshness_counts,
                 last_error=last_error,
+                state_refresh_summary=state_refresh_summary,
             )
 
     def _complete_and_build_failure_report(
@@ -441,6 +447,7 @@ class RadarRuntimeService:
             tracked_listings=tracked_listings,
             freshness_counts=freshness_counts,
             last_error=last_error,
+            state_refresh_summary=None if state_report is None else state_report.probe_summary,
         )
         return self._build_report(cycle_id, discovery_report=discovery_report, state_report=state_report)
 
@@ -493,6 +500,7 @@ class RadarRuntimeService:
             },
             last_error=None if cycle.get("last_error") is None else str(cycle["last_error"]),
             config=dict(cycle.get("config") or {}),
+            state_refresh_summary=dict(cycle.get("state_refresh_summary") or {}),
             discovery_report=discovery_report,
             state_report=state_report,
         )

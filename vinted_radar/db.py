@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS runtime_cycles (
     aging_followup INTEGER NOT NULL DEFAULT 0,
     stale_followup INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    state_refresh_summary_json TEXT NOT NULL DEFAULT '{}',
     config_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (discovery_run_id) REFERENCES discovery_runs(run_id) ON DELETE SET NULL
 );
@@ -233,6 +234,14 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         except sqlite3.OperationalError:
             pass
     # -----------------------------------
+
+    for table_name, column_spec in (
+        ("runtime_cycles", "state_refresh_summary_json TEXT NOT NULL DEFAULT '{}'"),
+    ):
+        try:
+            connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_spec}")
+        except sqlite3.OperationalError:
+            pass
 
     if _table_exists(connection, "listing_discoveries") and _table_exists(connection, "listings"):
         version = connection.execute("PRAGMA user_version").fetchone()[0]

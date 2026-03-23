@@ -8,6 +8,17 @@ _BUY_SIGNAL_RE = re.compile(
     re.DOTALL,
 )
 
+_CHALLENGE_MARKERS: tuple[str, ...] = (
+    "just a moment",
+    "attention required",
+    "turnstile",
+    "cf-chl",
+    "challenge-platform",
+    "verify you are human",
+    "captcha",
+    "cloudflare",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ItemPageProbeResult:
@@ -16,6 +27,9 @@ class ItemPageProbeResult:
 
 
 def parse_item_page_probe(*, listing_id: int, response_status: int | None, html: str) -> ItemPageProbeResult:
+    challenge_markers = _challenge_markers(html)
+    challenge_detected = bool(challenge_markers)
+
     if response_status in {404, 410}:
         return ItemPageProbeResult(
             probe_outcome="deleted",
@@ -23,13 +37,27 @@ def parse_item_page_probe(*, listing_id: int, response_status: int | None, html:
         )
 
     if response_status is None:
-        return ItemPageProbeResult(probe_outcome="unknown", detail={"reason": "no_response_status"})
+        detail = {"reason": "no_response_status"}
+        if challenge_detected:
+            detail["challenge_markers"] = challenge_markers
+        return ItemPageProbeResult(probe_outcome="unknown", detail=detail)
+
     if response_status >= 500:
         return ItemPageProbeResult(
             probe_outcome="unknown",
             detail={"reason": f"http_{response_status}", "response_status": response_status},
         )
+
     if response_status >= 400:
+        if challenge_detected or response_status in {403, 429}:
+            return ItemPageProbeResult(
+                probe_outcome="unknown",
+                detail={
+                    "reason": "anti_bot_challenge",
+                    "response_status": response_status,
+                    "challenge_markers": challenge_markers,
+                },
+            )
         return ItemPageProbeResult(
             probe_outcome="unknown",
             detail={"reason": f"unexpected_http_{response_status}", "response_status": response_status},
@@ -38,6 +66,15 @@ def parse_item_page_probe(*, listing_id: int, response_status: int | None, html:
     search_text = html.replace('\\"', '"')
     match = _BUY_SIGNAL_RE.search(search_text)
     if match is None:
+        if challenge_detected:
+            return ItemPageProbeResult(
+                probe_outcome="unknown",
+                detail={
+                    "reason": "anti_bot_challenge",
+                    "response_status": response_status,
+                    "challenge_markers": challenge_markers,
+                },
+            )
         return ItemPageProbeResult(
             probe_outcome="unknown",
             detail={"reason": "buy_signal_not_found", "response_status": response_status},
@@ -72,6 +109,11 @@ def parse_item_page_probe(*, listing_id: int, response_status: int | None, html:
 
     detail["reason"] = "buy_signal_ambiguous"
     return ItemPageProbeResult(probe_outcome="unknown", detail=detail)
+
+
+def _challenge_markers(html: str) -> list[str]:
+    lowered = html.casefold()
+    return [marker for marker in _CHALLENGE_MARKERS if marker in lowered]
 
 
 def _to_bool(value: str) -> bool:

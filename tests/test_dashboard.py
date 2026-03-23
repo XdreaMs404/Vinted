@@ -67,6 +67,16 @@ def _seed_dashboard_db(db_path: Path) -> None:
             error_message=None,
         )
         repository.record_item_page_probe(
+            listing_id=9002,
+            probed_at="2026-03-19T11:05:00+00:00",
+            requested_url="https://www.vinted.fr/items/9002-sold-probable",
+            final_url="https://www.vinted.fr/items/9002-sold-probable",
+            response_status=403,
+            probe_outcome="unknown",
+            detail={"reason": "anti_bot_challenge", "response_status": 403, "challenge_markers": ["just a moment"]},
+            error_message=None,
+        )
+        repository.record_item_page_probe(
             listing_id=9004,
             probed_at="2026-03-19T11:10:00+00:00",
             requested_url="https://www.vinted.fr/items/9004-deleted",
@@ -88,7 +98,7 @@ def _seed_dashboard_db(db_path: Path) -> None:
             status="completed",
             phase="completed",
             discovery_run_id="run-3",
-            state_probed_count=2,
+            state_probed_count=3,
             tracked_listings=4,
             freshness_counts={
                 "first-pass-only": 2,
@@ -97,6 +107,17 @@ def _seed_dashboard_db(db_path: Path) -> None:
                 "stale-followup": 1,
             },
             last_error=None,
+            state_refresh_summary={
+                "status": "degraded",
+                "probed_count": 3,
+                "direct_signal_count": 2,
+                "inconclusive_probe_count": 0,
+                "degraded_probe_count": 1,
+                "anti_bot_challenge_count": 1,
+                "http_error_count": 0,
+                "transport_error_count": 0,
+                "degraded_listing_ids": [9002],
+            },
         )
         repository.set_runtime_controller_state(
             status="scheduled",
@@ -150,6 +171,8 @@ def test_dashboard_payload_uses_sql_overview_contract_and_honesty_notes(tmp_path
     assert payload["summary"]["honesty"]["inferred_state_count"] == 1
     assert payload["summary"]["honesty"]["estimated_publication_count"] == 3
     assert payload["summary"]["freshness"]["current_runtime_status"] == "scheduled"
+    assert payload["summary"]["freshness"]["acquisition_status"] == "degraded"
+    assert payload["summary"]["freshness"]["recent_probe_issue_count"] == 1
     assert payload["summary"]["freshness"]["latest_runtime_cycle_status"] == "completed"
     assert payload["comparisons"]["category"]["status"] == "ok"
     assert payload["comparisons"]["brand"]["status"] == "thin-support"
@@ -159,6 +182,7 @@ def test_dashboard_payload_uses_sql_overview_contract_and_honesty_notes(tmp_path
         "low-support-rule",
         "inferred-states",
         "estimated-publication",
+        "degraded-state-refresh",
     ]
     assert [item["listing_id"] for item in payload["featured_listings"]] == [9003, 9001, 9004, 9002]
     assert payload["featured_listings"][0]["detail_href"] == "/listings/9003"
@@ -189,6 +213,7 @@ def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> Non
 
     assert payload["results"]["total_listings"] == 4
     assert payload["summary"]["inventory"]["matched_listings"] == 4
+    assert payload["notes"]["acquisition_status"] == "degraded"
     assert payload["results"]["page"] == 1
     assert payload["results"]["page_size"] == 2
     assert payload["results"]["has_next_page"] is True
@@ -267,6 +292,40 @@ def test_listing_detail_payload_exposes_back_link_for_explorer_context(tmp_path:
 
 
 
+def test_listing_detail_payload_exposes_narrative_and_provenance_contract(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        payload = build_listing_detail_payload(
+            repository,
+            listing_id=9002,
+            now="2026-03-19T12:00:00+00:00",
+            explorer_filters=ExplorerFilters(root="Femmes", state="active", price_band="40_plus_eur", page_size=12),
+        )
+
+    assert payload is not None
+    assert payload["narrative"]["headline"].startswith("Lecture radar")
+    assert payload["narrative"]["summary"].startswith("L’annonce a disparu après")
+    assert payload["narrative"]["explorer_angle"].startswith("Lecture ouverte depuis Vue active —")
+    assert [item["slug"] for item in payload["narrative"]["highlights"]] == [
+        "radar_read",
+        "market_read",
+        "timing",
+        "visibility",
+    ]
+    assert any(note["slug"] == "inferred-state" for note in payload["narrative"]["risk_notes"])
+    assert any(note["slug"] == "estimated-publication" for note in payload["narrative"]["risk_notes"])
+    assert any(note["slug"] == "degraded-probe" for note in payload["narrative"]["risk_notes"])
+    assert payload["provenance"]["state_signal"]["kind"] == "inferred"
+    assert payload["provenance"]["state_signal"]["source"] == "historique radar après probe dégradée"
+    assert payload["provenance"]["publication_timing"]["kind"] == "estimated"
+    assert payload["provenance"]["radar_window"]["kind"] == "radar"
+    assert payload["state_explanation"]["reasons"]
+    assert payload["score_explanation"]["factors"]["follow_up_miss"] > 0
+
+
+
 def test_runtime_payload_surfaces_controller_truth_separately_from_latest_cycle(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard.db"
     _seed_dashboard_db(db_path)
@@ -277,7 +336,9 @@ def test_runtime_payload_surfaces_controller_truth_separately_from_latest_cycle(
     assert payload["summary"]["status"] == "scheduled"
     assert payload["summary"]["phase"] == "waiting"
     assert payload["summary"]["next_resume_at"] == "2026-03-19T12:05:00+00:00"
+    assert payload["summary"]["acquisition_status"] == "degraded"
     assert payload["runtime"]["latest_cycle"]["status"] == "completed"
+    assert payload["acquisition"]["latest_state_refresh_summary"]["anti_bot_challenge_count"] == 1
     assert payload["diagnostics"]["runtime"] == "/runtime"
 
 
@@ -305,6 +366,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert '<html lang="fr">' in html_text
     assert "Ce qui bouge maintenant sur le radar Vinted." in html_text
     assert "Niveau d’honnêteté du signal" in html_text
+    assert "acquisition dégradée" in html_text
     assert "Comparaisons à lire avec contexte" in html_text
     assert "JSON aperçu" in html_text
     assert 'aria-current="page">Accueil<' in html_text
@@ -315,6 +377,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert api_payload["request"]["legacy_query_filters"]["state"] == "active"
     assert api_payload["summary"]["inventory"]["tracked_listings"] == 4
     assert api_payload["summary"]["freshness"]["current_runtime_status"] == "scheduled"
+    assert api_payload["summary"]["freshness"]["acquisition_status"] == "degraded"
     assert api_payload["comparisons"]["category"]["rows"][0]["label"] == "Femmes > Robes"
     assert api_payload["featured_listings"][0]["detail_api"] == "/api/listings/9003"
 
@@ -322,6 +385,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert explorer_headers["Content-Type"].startswith("text/html")
     explorer_text = explorer_body.decode("utf-8")
     assert "Navigation principale du produit" in explorer_text
+    assert "acquisition dégradée" in explorer_text
     assert "Filtres d’exploration" in explorer_text
     assert "Comparer la tranche affichée" in explorer_text
     assert "Annonces du corpus" in explorer_text
@@ -334,6 +398,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     explorer_payload = json.loads(explorer_api_body)
     assert explorer_payload["results"]["total_listings"] == 4
     assert explorer_payload["summary"]["inventory"]["matched_listings"] == 4
+    assert explorer_payload["notes"]["acquisition_status"] == "degraded"
     assert explorer_payload["results"]["page_size"] == 2
     assert explorer_payload["results"]["sort"] == "favourite_desc"
     assert len(explorer_payload["items"]) == 2
@@ -346,6 +411,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     runtime_page_text = runtime_page_body.decode("utf-8")
     assert "Navigation principale du produit" in runtime_page_text
     assert "Le contrôleur vivant du radar" in runtime_page_text
+    assert "Santé d’acquisition" in runtime_page_text
     assert "Cycles récents" in runtime_page_text
     assert "JSON runtime" in runtime_page_text
 
@@ -357,14 +423,17 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert runtime_payload["next_resume_at"] == "2026-03-19T12:05:00+00:00"
     assert runtime_payload["latest_cycle"]["status"] == "completed"
     assert runtime_payload["latest_cycle"]["discovery_run_id"] == "run-3"
+    assert runtime_payload["acquisition"]["status"] == "degraded"
+    assert runtime_payload["acquisition"]["latest_state_refresh_summary"]["anti_bot_challenge_count"] == 1
 
     assert detail_page_status == "200 OK"
     assert detail_page_headers["Content-Type"].startswith("text/html")
     detail_page_text = detail_page_body.decode("utf-8")
     assert "Navigation principale du produit" in detail_page_text
     assert "Fiche annonce" in detail_page_text
-    assert "Base d’inférence" in detail_page_text
-    assert "sold_probable" in detail_page_text
+    assert "Ce que le radar voit d’abord" in detail_page_text
+    assert "Preuves techniques et détails" in detail_page_text
+    assert "Lecture radar : probablement déjà partie" in detail_page_text
 
     assert detail_status == "200 OK"
     assert detail_headers["Content-Type"].startswith("application/json")
@@ -372,12 +441,18 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert detail_payload["listing_id"] == 9002
     assert detail_payload["state_code"] == "sold_probable"
     assert detail_payload["seller"]["login"] == "bruno"
+    assert detail_payload["narrative"]["headline"].startswith("Lecture radar")
+    assert any(note["slug"] == "degraded-probe" for note in detail_payload["narrative"]["risk_notes"])
+    assert detail_payload["provenance"]["state_signal"]["kind"] == "inferred"
+    assert detail_payload["provenance"]["state_signal"]["source"] == "historique radar après probe dégradée"
 
     assert health_status == "200 OK"
     health_payload = json.loads(health_body)
     assert health_payload["tracked_listings"] == 4
     assert health_payload["current_runtime_status"] == "scheduled"
     assert health_payload["latest_runtime_cycle"]["status"] == "completed"
+    assert health_payload["acquisition"]["status"] == "degraded"
+    assert health_payload["acquisition"]["latest_state_refresh_summary"]["anti_bot_challenge_count"] == 1
     assert health_payload["serving"]["home"] == "/"
     assert health_payload["serving"]["detail_example"] == "/listings/1"
 

@@ -55,6 +55,16 @@ def _seed_overview_db(db_path: Path) -> None:
             """
         )
         repository.record_item_page_probe(
+            listing_id=9102,
+            probed_at="2026-03-19T10:58:00+00:00",
+            requested_url="https://www.vinted.fr/items/9102-sold-probable",
+            final_url="https://www.vinted.fr/items/9102-sold-probable",
+            response_status=403,
+            probe_outcome="unknown",
+            detail={"reason": "anti_bot_challenge", "response_status": 403, "challenge_markers": ["just a moment"]},
+            error_message=None,
+        )
+        repository.record_item_page_probe(
             listing_id=9103,
             probed_at="2026-03-19T11:00:00+00:00",
             requested_url="https://www.vinted.fr/items/9103-sold-observed",
@@ -96,7 +106,7 @@ def _seed_overview_db(db_path: Path) -> None:
             status="completed",
             phase="completed",
             discovery_run_id="run-3",
-            state_probed_count=3,
+            state_probed_count=4,
             tracked_listings=6,
             freshness_counts={
                 "first-pass-only": 5,
@@ -105,6 +115,17 @@ def _seed_overview_db(db_path: Path) -> None:
                 "stale-followup": 0,
             },
             last_error=None,
+            state_refresh_summary={
+                "status": "degraded",
+                "probed_count": 4,
+                "direct_signal_count": 3,
+                "inconclusive_probe_count": 0,
+                "degraded_probe_count": 1,
+                "anti_bot_challenge_count": 1,
+                "http_error_count": 0,
+                "transport_error_count": 0,
+                "degraded_listing_ids": [9102],
+            },
         )
         conn.commit()
 
@@ -136,6 +157,9 @@ def test_overview_snapshot_returns_summary_and_lens_modules(tmp_path: Path) -> N
     assert summary["honesty"]["missing_estimated_publication_count"] == 2
     assert summary["freshness"]["latest_successful_scan_at"] == "2026-03-19T10:06:00+00:00"
     assert summary["freshness"]["latest_runtime_cycle_status"] == "completed"
+    assert summary["freshness"]["acquisition_status"] == "degraded"
+    assert summary["freshness"]["recent_probe_issue_count"] == 1
+    assert summary["freshness"]["recent_probe_issues"][0]["listing_id"] == 9102
     assert summary["freshness"]["recent_acquisition_failure_count"] == 1
     assert summary["freshness"]["recent_acquisition_failures"][0]["catalog_path"] == "Femmes > Jupes"
 

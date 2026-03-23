@@ -148,6 +148,27 @@ class FakeStateRefreshService:
         return StateRefreshReport(
             probed_count=len(probed_ids),
             probed_listing_ids=probed_ids,
+            probe_summary={
+                "status": "healthy",
+                "requested_limit": limit,
+                "selected_target_count": len(probed_ids),
+                "probed_count": len(probed_ids),
+                "direct_signal_count": len(probed_ids),
+                "inconclusive_probe_count": 0,
+                "degraded_probe_count": 0,
+                "anti_bot_challenge_count": 0,
+                "http_error_count": 0,
+                "transport_error_count": 0,
+                "outcome_counts": {
+                    "active": len(probed_ids),
+                    "sold": 0,
+                    "unavailable": 0,
+                    "deleted": 0,
+                    "unknown": 0,
+                },
+                "reason_counts": {"buy_signal_open": len(probed_ids)},
+                "degraded_listing_ids": [],
+            },
             state_summary={
                 "generated_at": now or "2026-03-20T10:10:00+00:00",
                 "overall": {"tracked_listings": 1},
@@ -172,7 +193,24 @@ class StateFactory:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
 
-    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float):
+    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
+        return FakeStateRefreshService(self.db_path)
+
+
+class CapturingStateFactory:
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
+        self.calls.append(
+            {
+                "db_path": db_path,
+                "timeout_seconds": timeout_seconds,
+                "request_delay": request_delay,
+                "proxies": proxies,
+            }
+        )
         return FakeStateRefreshService(self.db_path)
 
 
@@ -236,6 +274,8 @@ def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: P
     assert report.tracked_listings == 1
     assert report.freshness_counts["first-pass-only"] == 1
     assert report.state_probed_count == 1
+    assert report.state_refresh_summary is not None
+    assert report.state_refresh_summary["status"] == "healthy"
 
     with RadarRepository(db_path) as repository:
         status = repository.runtime_status(limit=5)
@@ -248,6 +288,8 @@ def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: P
     assert latest["discovery_run_id"] == report.discovery_run_id
     assert latest["tracked_listings"] == 1
     assert latest["state_probe_limit"] == 3
+    assert latest["state_refresh_summary"]["status"] == "healthy"
+    assert latest["state_refresh_summary"]["direct_signal_count"] == 1
     assert status["controller"] is not None
     assert status["controller"]["status"] == "idle"
     assert status["controller"]["latest_cycle_id"] == report.cycle_id
@@ -255,13 +297,14 @@ def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: P
     assert status["latest_failure"] is None
 
 
-def test_runtime_service_passes_proxy_pool_to_discovery_factory(tmp_path: Path) -> None:
+def test_runtime_service_passes_proxy_pool_to_discovery_and_state_refresh_factories(tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     discovery_factory = CapturingDiscoveryFactory(db_path)
+    state_factory = CapturingStateFactory(db_path)
     runtime = RadarRuntimeService(
         db_path,
         discovery_service_factory=discovery_factory,
-        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+        state_refresh_service_factory=state_factory,
     )
 
     report = runtime.run_cycle(
@@ -279,6 +322,14 @@ def test_runtime_service_passes_proxy_pool_to_discovery_factory(tmp_path: Path) 
 
     assert report.status == "completed"
     assert discovery_factory.calls == [
+        {
+            "db_path": str(db_path),
+            "timeout_seconds": 5.0,
+            "request_delay": 0.0,
+            "proxies": ["http://proxy-a:8080", "http://proxy-b:8080"],
+        }
+    ]
+    assert state_factory.calls == [
         {
             "db_path": str(db_path),
             "timeout_seconds": 5.0,

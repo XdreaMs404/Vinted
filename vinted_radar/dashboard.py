@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import html
 import json
 from pathlib import Path
+import re
 from threading import Thread
 from typing import Any
 from urllib.parse import parse_qs, urlencode
@@ -241,6 +242,7 @@ class DashboardApplication:
                     "current_runtime_status": runtime_status.get("status"),
                     "runtime_controller": runtime_status.get("controller"),
                     "latest_runtime_cycle": runtime_status["latest_cycle"],
+                    "acquisition": runtime_status.get("acquisition"),
                     "serving": {
                         "base_path": route_context.base_path or "/",
                         "public_base_url": route_context.public_base_url,
@@ -386,6 +388,8 @@ def build_explorer_payload(
         comparison_limit=SEGMENT_LIMIT,
         now=now,
     )
+    runtime = repository.runtime_status(limit=5, now=now)
+    acquisition = runtime.get("acquisition") if isinstance(runtime, dict) else {}
     page = snapshot["page"]
     summary = snapshot["summary"]
     explorer_context = _build_explorer_context(filters, available=options, route_context=route_context)
@@ -442,10 +446,14 @@ def build_explorer_payload(
         },
         "items": items,
         "context": explorer_context,
+        "runtime": runtime,
+        "acquisition": acquisition,
         "notes": {
             "estimated_publication": "La publication estimée s'appuie sur le timestamp de l'image principale. C'est un signal utile, pas une date de publication exacte.",
             "scalability": "Les résultats, comparaisons et compteurs de l’explorateur sont calculés côté SQL sur la tranche filtrée avant le rendu HTML de la page courante.",
             "support_rule": f"Toute comparaison sous {summary['inventory']['comparison_support_threshold']} annonces suivies garde un badge de prudence au lieu d’être supprimée.",
+            "acquisition_status": None if not isinstance(acquisition, dict) else acquisition.get("status"),
+            "acquisition_reasons": [] if not isinstance(acquisition, dict) else list(acquisition.get("reasons") or []),
         },
         "diagnostics": {
             "home": route_context.path("/"),
@@ -471,6 +479,7 @@ def build_runtime_payload(
     controller = runtime.get("controller") or {}
     latest_cycle = runtime.get("latest_cycle") or {}
     heartbeat = runtime.get("heartbeat") or {}
+    acquisition = runtime.get("acquisition") or {}
     return {
         "generated_at": generated_at,
         "db_path": str(repository.db_path),
@@ -479,6 +488,7 @@ def build_runtime_payload(
             "public_base_url": route_context.public_base_url,
         },
         "runtime": runtime,
+        "acquisition": acquisition,
         "summary": {
             "status": runtime.get("status"),
             "phase": runtime.get("phase"),
@@ -496,6 +506,7 @@ def build_runtime_payload(
             "active_cycle_id": runtime.get("active_cycle_id"),
             "latest_cycle_id": runtime.get("latest_cycle_id"),
             "controller_mode": controller.get("mode"),
+            "acquisition_status": acquisition.get("status"),
         },
         "latest_cycle": latest_cycle,
         "recent_cycles": runtime.get("recent_cycles") or [],
@@ -549,6 +560,38 @@ def build_listing_detail_payload(
             route_context=route_context,
         )
 
+    engagement = {
+        "visible_likes": listing.get("favourite_count"),
+        "visible_views": listing.get("view_count"),
+    }
+    seller = {
+        "user_id": listing.get("user_id"),
+        "login": seller_login,
+        "profile_url": seller_profile_url,
+        "display": seller_login or "Vendeur non exposé sur la carte actuelle",
+    }
+    timing = {
+        "publication_estimated_at": estimated_publication_at,
+        "publication_signal_label": None if estimated_publication_at is None else "Estimation via le timestamp de l'image principale",
+        "radar_first_seen_at": radar_first_seen_at,
+        "radar_last_seen_at": radar_last_seen_at,
+    }
+    narrative = _build_detail_narrative(
+        listing=listing,
+        history_summary=summary,
+        latest_probe=latest_probe,
+        explorer_context=explorer_context,
+        timing=timing,
+        seller=seller,
+        engagement=engagement,
+    )
+    provenance = _build_detail_provenance(
+        listing=listing,
+        latest_probe=latest_probe,
+        timing=timing,
+        history_summary=summary,
+    )
+
     return {
         "listing_id": listing_id,
         "title": listing.get("title"),
@@ -576,6 +619,8 @@ def build_listing_detail_payload(
         "latest_probe": latest_probe,
         "history": history,
         "explorer_context": explorer_context,
+        "narrative": narrative,
+        "provenance": provenance,
         "serving": {
             "base_path": route_context.base_path or "/",
             "public_base_url": route_context.public_base_url,
@@ -591,22 +636,9 @@ def build_listing_detail_payload(
             "explorer_back": None if explorer_context is None else explorer_context.get("back_href"),
             "explorer_back_api": None if explorer_context is None else explorer_context.get("back_api"),
         },
-        "engagement": {
-            "visible_likes": listing.get("favourite_count"),
-            "visible_views": listing.get("view_count"),
-        },
-        "seller": {
-            "user_id": listing.get("user_id"),
-            "login": seller_login,
-            "profile_url": seller_profile_url,
-            "display": seller_login or "Vendeur non exposé sur la carte actuelle",
-        },
-        "timing": {
-            "publication_estimated_at": estimated_publication_at,
-            "publication_signal_label": None if estimated_publication_at is None else "Estimation via le timestamp de l'image principale",
-            "radar_first_seen_at": radar_first_seen_at,
-            "radar_last_seen_at": radar_last_seen_at,
-        },
+        "engagement": engagement,
+        "seller": seller,
+        "timing": timing,
         "signals": [
             {"label": "Observations", "value": str(listing.get("observation_count") or 0)},
             {"label": "Fraîcheur", "value": _freshness_label(listing.get("freshness_bucket") or "unknown")},
@@ -620,6 +652,362 @@ def build_listing_detail_payload(
         ],
         "transitions": transitions,
     }
+
+
+def _build_detail_narrative(
+    *,
+    listing: dict[str, Any],
+    history_summary: dict[str, Any] | None,
+    latest_probe: dict[str, Any] | None,
+    explorer_context: dict[str, Any] | None,
+    timing: dict[str, Any],
+    seller: dict[str, Any],
+    engagement: dict[str, Any],
+) -> dict[str, Any]:
+    state_read = _build_detail_state_read(listing, latest_probe=latest_probe)
+    market_read = _build_detail_market_read(listing)
+    timing_read = _build_detail_timing_read(timing)
+    visibility_read = _build_detail_visibility_read(seller=seller, engagement=engagement)
+    active_filters = [] if explorer_context is None else explorer_context.get("active_filters") or []
+    explorer_angle = None
+    if explorer_context is not None and explorer_context.get("summary"):
+        explorer_angle = f"Lecture ouverte depuis {explorer_context['summary']}."
+    highlights = [state_read, market_read, timing_read, visibility_read]
+    return {
+        "headline": state_read["headline"],
+        "summary": state_read["summary"],
+        "explorer_angle": explorer_angle,
+        "active_filter_count": len(active_filters),
+        "highlights": highlights,
+        "risk_notes": _build_detail_risk_notes(
+            listing=listing,
+            latest_probe=latest_probe,
+            timing=timing,
+            seller=seller,
+            engagement=engagement,
+        ),
+        "proof_guide": "Les sections de preuve conservent le détail technique du score, de l’état, de la timeline et des transitions utilisées par le radar.",
+    }
+
+
+def _build_detail_state_read(listing: dict[str, Any], *, latest_probe: dict[str, Any] | None) -> dict[str, str]:
+    state_code = str(listing.get("state_code") or "unknown")
+    basis_kind = str(listing.get("basis_kind") or "unknown")
+    confidence_label = str(listing.get("confidence_label") or "unknown")
+    follow_up_miss_count = int(listing.get("follow_up_miss_count") or 0)
+    observation_count = int(listing.get("observation_count") or 0)
+    latest_probe_outcome = None if latest_probe is None else latest_probe.get("probe_outcome")
+    latest_probe_status = None if latest_probe is None else latest_probe.get("response_status")
+
+    if state_code == "active":
+        headline = "Lecture radar : encore visible"
+        if latest_probe_outcome == "active":
+            summary = "La dernière vérification publique retrouvait une annonce encore achetable, ce qui garde la lecture côté actif sur une base observée."
+        elif basis_kind == "observed":
+            summary = "L’annonce figurait encore dans le dernier scan réussi de son catalogue principal, donc le radar la traite comme toujours active."
+        else:
+            summary = "Le radar la garde active faute de scan plus récent contradictoire ; ce n’est pas un constat direct de page produit."
+    elif state_code == "sold_observed":
+        headline = "Lecture radar : vendue avec signal direct"
+        summary = "La page produit exposait un signal public de fermeture à l’achat, donc le radar lit cette annonce comme vendue sur une base observée."
+    elif state_code == "sold_probable":
+        headline = "Lecture radar : probablement déjà partie"
+        summary = f"L’annonce a disparu après {follow_up_miss_count} rescans du catalogue sans réapparition ; le radar penche donc vers une vente probable, sans constat direct final."
+    elif state_code == "unavailable_non_conclusive":
+        headline = "Lecture radar : retirée ou indisponible, sans verdict final"
+        if latest_probe_outcome == "unavailable":
+            summary = "La page produit reste atteignable mais publiquement indisponible ; le signal ne permet pas de conclure proprement à une vente ou à une suppression."
+        else:
+            summary = "Le radar voit un affaiblissement du signal, mais pas assez distinct pour trancher entre vendu, supprimé, ou simple indisponibilité temporaire."
+    elif state_code == "deleted":
+        headline = "Lecture radar : signal distinct de suppression"
+        summary = "La dernière vérification publique a renvoyé un signal clair de suppression, ce qui en fait la lecture la plus robuste disponible."
+    else:
+        headline = "Lecture radar : signal encore trop faible pour trancher"
+        summary = "Le radar manque encore de preuve directe ou d’absences répétées assez nettes pour conclure proprement sur l’état actuel."
+
+    detail_bits = [
+        f"Base {_detail_basis_phrase(basis_kind)}",
+        f"confiance {_confidence_label(confidence_label)}",
+        _detail_observation_label(observation_count),
+    ]
+    if latest_probe_status is not None:
+        detail_bits.append(f"dernière probe HTTP {latest_probe_status}")
+    return {
+        "slug": "radar_read",
+        "title": "Lecture radar",
+        "headline": headline,
+        "summary": summary,
+        "body": summary + " " + " · ".join(detail_bits) + ".",
+        "tone": _detail_state_tone(state_code=state_code, basis_kind=basis_kind, confidence_label=confidence_label),
+        "provenance": basis_kind,
+    }
+
+
+def _build_detail_market_read(listing: dict[str, Any]) -> dict[str, str]:
+    demand_score = float(listing.get("demand_score") or 0.0)
+    premium_score = float(listing.get("premium_score") or 0.0)
+    score_explanation = listing.get("score_explanation") if isinstance(listing.get("score_explanation"), dict) else {}
+    context = score_explanation.get("context") if isinstance(score_explanation.get("context"), dict) else None
+    demand_band = _detail_score_band(demand_score)
+    premium_band = _detail_score_band(premium_score)
+    if context is not None:
+        sample_size = int(context.get("sample_size") or 0)
+        percentile = context.get("price_percentile")
+        body = (
+            f"Le signal demande ressort {demand_band} ({_format_score(demand_score)}), et le signal premium reste {premium_band} ({_format_score(premium_score)}). "
+            f"Le contexte prix compare cette annonce à {sample_size} annonces sur {_detail_score_context_label(str(context.get('label') or 'unknown'))} ; son prix y apparaît {_detail_price_percentile_summary(percentile)}."
+        )
+    else:
+        body = (
+            f"Le signal demande ressort {demand_band} ({_format_score(demand_score)}). "
+            f"Le score premium reste plus prudent ({_format_score(premium_score)}) car le radar n’a pas encore un groupe de comparaison prix assez large pour lire sa tenue de prix solidement."
+        )
+    return {
+        "slug": "market_read",
+        "title": "Lecture marché",
+        "headline": f"Demande {demand_band} · premium {premium_band}",
+        "summary": body,
+        "body": body,
+        "tone": "info" if context is None else "success",
+        "provenance": "scored",
+    }
+
+
+def _build_detail_timing_read(timing: dict[str, Any]) -> dict[str, str]:
+    publication_estimated_at = timing.get("publication_estimated_at")
+    radar_first_seen_at = _format_optional_timestamp(timing.get("radar_first_seen_at"))
+    radar_last_seen_at = _format_optional_timestamp(timing.get("radar_last_seen_at"))
+    if publication_estimated_at:
+        body = (
+            f"Publication estimée autour de {publication_estimated_at}. "
+            f"Le radar l’a d’abord vue le {radar_first_seen_at} puis l’a revue au plus tard le {radar_last_seen_at}."
+        )
+        provenance = "estimated"
+    else:
+        body = (
+            f"Pas d’estimation de publication fiable sur cette carte. "
+            f"Le repère le plus sûr reste la fenêtre radar : premier vu le {radar_first_seen_at}, dernier vu le {radar_last_seen_at}."
+        )
+        provenance = "radar"
+    return {
+        "slug": "timing",
+        "title": "Repères temporels",
+        "headline": "Temps public estimé + fenêtre radar",
+        "summary": body,
+        "body": body,
+        "tone": "info",
+        "provenance": provenance,
+    }
+
+
+def _build_detail_visibility_read(*, seller: dict[str, Any], engagement: dict[str, Any]) -> dict[str, str]:
+    likes = _format_optional_int(engagement.get("visible_likes"))
+    views = _format_optional_int(engagement.get("visible_views"))
+    seller_display = str(seller.get("login") or seller.get("display") or "Vendeur non exposé")
+    missing_fields = sum(1 for value in (engagement.get("visible_likes"), engagement.get("visible_views"), seller.get("login")) if value in {None, ""})
+    if missing_fields:
+        body = f"Visibilité publique partielle : vendeur {seller_display}, likes {likes}, vues {views}. Certaines cartes n’exposent pas tous les champs publics à chaque passage."
+        provenance = "partial"
+    else:
+        body = f"Visibilité publique exploitable : vendeur {seller_display}, likes {likes}, vues {views}."
+        provenance = "observed"
+    return {
+        "slug": "visibility",
+        "title": "Visibilité publique",
+        "headline": "Vendeur et engagement visibles",
+        "summary": body,
+        "body": body,
+        "tone": "info",
+        "provenance": provenance,
+    }
+
+
+def _build_detail_risk_notes(
+    *,
+    listing: dict[str, Any],
+    latest_probe: dict[str, Any] | None,
+    timing: dict[str, Any],
+    seller: dict[str, Any],
+    engagement: dict[str, Any],
+) -> list[dict[str, str]]:
+    notes: list[dict[str, str]] = []
+    basis_kind = str(listing.get("basis_kind") or "unknown")
+    confidence_label = str(listing.get("confidence_label") or "unknown")
+    score_explanation = listing.get("score_explanation") if isinstance(listing.get("score_explanation"), dict) else {}
+    context = score_explanation.get("context") if isinstance(score_explanation.get("context"), dict) else None
+
+    if basis_kind != "observed":
+        notes.append(
+            {
+                "slug": "inferred-state",
+                "title": "État non directement constaté",
+                "body": "Cette lecture d’état repose en partie sur l’historique radar et les absences de rescans, pas uniquement sur une page produit observée ouverte ou fermée.",
+                "tone": "warning",
+            }
+        )
+    if _probe_is_degraded(latest_probe):
+        notes.append(
+            {
+                "slug": "degraded-probe",
+                "title": "Dernière probe dégradée",
+                "body": _detail_probe_degradation_note(latest_probe),
+                "tone": "danger",
+            }
+        )
+    if confidence_label == "low":
+        notes.append(
+            {
+                "slug": "low-confidence",
+                "title": "Confiance encore basse",
+                "body": "Le radar garde cette lecture, mais le niveau de confiance reste faible ; mieux vaut la lire comme une piste que comme une conclusion ferme.",
+                "tone": "danger",
+            }
+        )
+    if timing.get("publication_estimated_at"):
+        notes.append(
+            {
+                "slug": "estimated-publication",
+                "title": "Publication seulement estimée",
+                "body": "La date de publication visible ici vient du timestamp de l’image principale. C’est utile pour se repérer, mais ce n’est pas un horodatage de publication garanti par Vinted.",
+                "tone": "info",
+            }
+        )
+    if context is None:
+        notes.append(
+            {
+                "slug": "thin-premium-context",
+                "title": "Lecture premium prudente",
+                "body": "Le radar ne dispose pas encore d’un groupe de comparaison prix assez solide pour interpréter fortement la tenue de prix de cette annonce.",
+                "tone": "warning",
+            }
+        )
+    if seller.get("login") in {None, ""} or engagement.get("visible_likes") is None or engagement.get("visible_views") is None:
+        notes.append(
+            {
+                "slug": "partial-public-fields",
+                "title": "Champs publics incomplets",
+                "body": "Certaines informations publiques (vendeur, likes ou vues) manquent sur cette annonce ou sur cette observation. La lecture reste utile, mais moins complète.",
+                "tone": "warning",
+            }
+        )
+    return notes
+
+
+def _build_detail_provenance(
+    *,
+    listing: dict[str, Any],
+    latest_probe: dict[str, Any] | None,
+    timing: dict[str, Any],
+    history_summary: dict[str, Any] | None,
+) -> dict[str, dict[str, str]]:
+    latest_probe_outcome = None if latest_probe is None else latest_probe.get("probe_outcome")
+    latest_probe_status = None if latest_probe is None else latest_probe.get("response_status")
+    state_kind = str(listing.get("basis_kind") or "unknown")
+    publication_kind = "estimated" if timing.get("publication_estimated_at") else "missing"
+    state_source = "page produit" if latest_probe_outcome in {"active", "sold", "deleted", "unavailable"} else "historique radar"
+    if _probe_is_degraded(latest_probe):
+        state_source = "historique radar après probe dégradée"
+    return {
+        "state_signal": {
+            "label": "État radar",
+            "kind": state_kind,
+            "summary": f"Statut {_state_label(listing.get('state_code'))} lu sur une base {_detail_basis_phrase(state_kind)} avec confiance {_confidence_label(listing.get('confidence_label'))}.",
+            "source": state_source,
+            "latest_probe": "n/a" if latest_probe_status is None else f"{latest_probe_outcome} / HTTP {latest_probe_status}",
+        },
+        "publication_timing": {
+            "label": "Publication visible",
+            "kind": publication_kind,
+            "summary": "Date estimée via le timestamp de l’image principale." if publication_kind == "estimated" else "Pas de repère public fiable pour estimer la publication.",
+            "source": "image principale" if publication_kind == "estimated" else "aucun signal public stable",
+            "value": str(timing.get("publication_estimated_at") or "n/a"),
+        },
+        "radar_window": {
+            "label": "Fenêtre radar",
+            "kind": "radar",
+            "summary": "Horodatages issus du collecteur local, distincts d’une publication Vinted." if history_summary is not None else "Fenêtre radar indisponible.",
+            "source": "listing_observations",
+            "value": f"premier { _format_optional_timestamp(timing.get('radar_first_seen_at')) } · dernier { _format_optional_timestamp(timing.get('radar_last_seen_at')) }",
+        },
+    }
+
+
+def _probe_is_degraded(latest_probe: dict[str, Any] | None) -> bool:
+    if not isinstance(latest_probe, dict):
+        return False
+    detail = latest_probe.get("detail") if isinstance(latest_probe.get("detail"), dict) else {}
+    reason = str(detail.get("reason") or "")
+    response_status = latest_probe.get("response_status")
+    if latest_probe.get("error_message") not in {None, ""}:
+        return True
+    if reason in {"anti_bot_challenge", "probe_exception"}:
+        return True
+    if reason.startswith("unexpected_http_") or reason.startswith("http_"):
+        return True
+    if response_status in {403, 429}:
+        return True
+    return isinstance(response_status, int) and response_status >= 500
+
+
+def _detail_probe_degradation_note(latest_probe: dict[str, Any] | None) -> str:
+    if not isinstance(latest_probe, dict):
+        return "La dernière probe item-page ne donnait pas un signal assez propre pour renforcer la lecture d’état."
+    detail = latest_probe.get("detail") if isinstance(latest_probe.get("detail"), dict) else {}
+    reason = str(detail.get("reason") or latest_probe.get("probe_outcome") or "unknown")
+    response_status = latest_probe.get("response_status")
+    if reason == "anti_bot_challenge":
+        return f"La dernière probe item-page a rencontré un challenge anti-bot (HTTP {response_status or 'n/a'}) ; l’historique radar redevient donc la base la plus prudente tant qu’une probe propre ne repasse pas."
+    if reason == "probe_exception":
+        return "La dernière probe item-page a échoué côté transport ; le radar garde la lecture, mais sans nouveau constat direct de page produit."
+    if reason.startswith("unexpected_http_") or reason.startswith("http_"):
+        return f"La dernière probe item-page s’est terminée sur HTTP {response_status or 'n/a'}, donc le radar ne la traite pas comme une preuve directe d’état."
+    return "La dernière probe item-page ne donnait pas un signal assez propre pour renforcer la lecture d’état."
+
+
+def _detail_state_tone(*, state_code: str, basis_kind: str, confidence_label: str) -> str:
+    if state_code in {"deleted", "unknown"}:
+        return "danger" if confidence_label == "low" else "warning"
+    if basis_kind == "inferred" or confidence_label == "low":
+        return "warning"
+    if state_code in {"active", "sold_observed"}:
+        return "success"
+    return "info"
+
+
+def _detail_score_band(score: float) -> str:
+    if score >= 80.0:
+        return "très fort"
+    if score >= 60.0:
+        return "solide"
+    if score >= 40.0:
+        return "intermédiaire"
+    return "encore modéré"
+
+
+def _detail_score_context_label(value: str) -> str:
+    labels = {
+        "catalog_brand_condition": "le même catalogue, la même marque et le même état",
+        "catalog_condition": "le même catalogue et le même état",
+        "catalog_brand": "le même catalogue et la même marque",
+        "catalog": "le même catalogue",
+        "root_condition": "la même racine et le même état",
+        "root": "la même racine",
+    }
+    return labels.get(value, value.replace("_", " "))
+
+
+def _detail_price_percentile_summary(value: Any) -> str:
+    if value is None:
+        return "sans percentile exploitable"
+    percentile = float(value)
+    if percentile >= 0.85:
+        return "plutôt haut placé en prix"
+    if percentile >= 0.65:
+        return "au-dessus du milieu de gamme"
+    if percentile >= 0.35:
+        return "dans la zone médiane des prix"
+    return "plutôt bas dans son groupe de prix"
 
 
 def _serialize_explorer_item(
@@ -839,6 +1227,57 @@ def _shared_shell_styles() -> str:
       background: rgba(212,162,103,0.14);
     }
     .button.disabled { opacity: 0.45; pointer-events: none; }
+    .story-hero {
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      margin-bottom: 18px;
+      border: 1px solid rgba(255,255,255,0.07);
+      background:
+        linear-gradient(135deg, rgba(212,162,103,0.12), rgba(255,255,255,0.02)),
+        rgba(255,255,255,0.02);
+      display: grid;
+      gap: 12px;
+    }
+    .story-hero h2 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.7rem, 2vw, 2.35rem);
+    }
+    .story-card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015));
+    }
+    .proof-stack, .provenance-grid {
+      display: grid;
+      gap: 14px;
+    }
+    .provenance-grid {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .proof-panel {
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      overflow: hidden;
+    }
+    .proof-panel summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .proof-panel summary::-webkit-details-marker { display: none; }
+    .proof-panel[open] summary {
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.02);
+    }
+    .proof-body {
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
     .button:focus-visible, .lens-link:focus-visible, .listing-link:focus-visible, .nav-link:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: 3px;
@@ -1102,6 +1541,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
         or latest_cycle.get("status")
         or freshness.get("latest_runtime_cycle_status")
     )
+    acquisition_status = str(freshness.get("acquisition_status") or "unknown")
     runtime_timing_line = None
     if freshness.get("current_runtime_next_resume_at"):
         runtime_timing_line = f"Prochaine reprise : {_format_optional_timestamp(freshness.get('current_runtime_next_resume_at'))}"
@@ -1111,6 +1551,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
     freshness_lines = [
         f"Dernière vue annonce : {_format_optional_timestamp(freshness.get('latest_listing_seen_at'))}",
         f"Runtime actuel : {_runtime_status_label(current_runtime_status)}",
+        f"Acquisition : {_acquisition_status_label(acquisition_status)}",
     ]
     if runtime_timing_line:
         freshness_lines.append(runtime_timing_line)
@@ -1183,6 +1624,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
     status_html = (
         '<div class="status-line" role="status" aria-live="polite">'
         f'<span class="pill {_runtime_status_tone(str(current_runtime_status or "idle"))}">{_escape(_runtime_status_label(str(current_runtime_status or "idle")))}</span>'
+        f'<span class="pill {_acquisition_status_tone(acquisition_status)}">{_escape(_acquisition_status_label(acquisition_status))}</span>'
         f'<span class="pill">Dernier scan {_escape(_format_optional_timestamp(freshness.get("latest_successful_scan_at")))}</span>'
         f'{"" if not runtime_timing_line else f"<span class=\"pill\">{_escape(runtime_timing_line)}</span>"}'
         '</div>'
@@ -1263,8 +1705,10 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
     diagnostics = payload["diagnostics"]
     notes = payload.get("notes") or {}
     heartbeat = summary.get("heartbeat") or {}
+    acquisition = payload.get("acquisition") or {}
 
     status = str(summary.get("status") or "idle")
+    acquisition_status = str(summary.get("acquisition_status") or acquisition.get("status") or "unknown")
     status_label = _runtime_status_label(status)
     current_mode = _runtime_mode_label(summary.get("mode") or latest_cycle.get("mode"))
     controller_rows = [
@@ -1321,6 +1765,41 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
         for cycle in recent_failures[:6]
     ) or '<li><strong>Aucun échec récent</strong><span>Le contrôleur n’a pas conservé de cycle en échec dans la fenêtre demandée.</span></li>'
 
+    acquisition_reasons = list(acquisition.get("reasons") or [])
+    acquisition_failures = list(acquisition.get("recent_scan_failures") or [])
+    probe_issue_examples = list(acquisition.get("probe_issue_examples") or [])
+    acquisition_rows = [
+        ("Statut acquisition", _acquisition_status_label(acquisition_status)),
+        ("Scans cassés récents", str(int(acquisition.get("recent_scan_failure_count") or 0))),
+        ("Cycle acquisition", str(acquisition.get("latest_cycle_id") or "aucun")),
+        ("Run discovery lié", str(acquisition.get("latest_discovery_run_id") or "aucun")),
+    ]
+    state_refresh_summary = acquisition.get("latest_state_refresh_summary") if isinstance(acquisition.get("latest_state_refresh_summary"), dict) else {}
+    if state_refresh_summary:
+        acquisition_rows.extend(
+            [
+                ("Probes dégradées", str(int(state_refresh_summary.get("degraded_probe_count") or 0))),
+                ("Probes inconclusives", str(int(state_refresh_summary.get("inconclusive_probe_count") or 0))),
+                ("Challenges anti-bot", str(int(state_refresh_summary.get("anti_bot_challenge_count") or 0))),
+            ]
+        )
+    acquisition_html = "".join(
+        f'<div class="fact"><span>{_escape(label)}</span><strong>{_escape(value)}</strong></div>'
+        for label, value in acquisition_rows
+    )
+    acquisition_reason_html = "".join(
+        f"<li><strong>{_escape(f'Raison {index + 1}')}</strong><span> — {_escape(_translate_acquisition_reason(reason))}</span></li>"
+        for index, reason in enumerate(acquisition_reasons[:4])
+    ) or '<li><strong>Aucun signal critique</strong><span> — La dernière discovery et le dernier state refresh paraissent sains.</span></li>'
+    acquisition_failure_html = "".join(
+        f"<li><strong>{_escape(str(item.get('catalog_path') or 'Catalogue inconnu'))}</strong><span> — {_escape(str(item.get('error_message') or item.get('response_status') or 'erreur inconnue'))}</span></li>"
+        for item in acquisition_failures[:4]
+    ) or '<li><strong>Aucun scan cassé</strong><span> — Le dernier run discovery ne garde pas d’échec de scan visible.</span></li>'
+    probe_issue_html = "".join(
+        f"<li><strong>{_escape(str(item.get('title') or item.get('listing_id') or 'annonce inconnue'))}</strong><span> — {_escape(str(item.get('reason') or item.get('probe_outcome') or 'unknown'))} · HTTP {_escape(str(item.get('response_status') or 'n/a'))}</span></li>"
+        for item in probe_issue_examples[:4]
+    ) or '<li><strong>Aucune probe dégradée</strong><span> — Les dernières probes persistées n’exposent pas de challenge ou panne critique.</span></li>'
+
     note_cards = "".join(
         f'<article class="note"><h3>{_escape(title)}</h3><p>{_escape(text)}</p></article>'
         for title, text in (
@@ -1371,6 +1850,7 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
     status_html = (
         '<div class="status-line" role="status" aria-live="polite">'
         f'<span class="pill {_runtime_status_tone(status)}">{_escape(status_label)}</span>'
+        f'<span class="pill {_acquisition_status_tone(acquisition_status)}">{_escape(_acquisition_status_label(acquisition_status))}</span>'
         f'<span class="pill">Phase {_escape(_runtime_phase_label(summary.get("phase")))}</span>'
         f'<span class="pill">Mode {_escape(str(current_mode))}</span>'
         '</div>'
@@ -1393,6 +1873,27 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
             <p>Cette vue répond à la question « que fait le radar maintenant ? » sans confondre attente saine, pause opérateur et dernier résultat de cycle.</p>
           </div>
           <div class="facts">{controller_html}</div>
+        </section>
+        <section class="panel" aria-labelledby="acquisition-title">
+          <div class="panel-head">
+            <h2 id="acquisition-title">Santé d’acquisition</h2>
+            <p>Le contrôleur peut être sain tout en lisant un marché partiel ou dégradé. Cette section garde visible la faiblesse discovery + probe du dernier cycle exploitable.</p>
+          </div>
+          <div class="facts">{acquisition_html}</div>
+          <div class="layout" style="margin-top:16px; gap:16px;">
+            <section class="panel" style="margin:0; padding:18px;" aria-labelledby="acquisition-reasons-title">
+              <div class="panel-head"><h3 id="acquisition-reasons-title">Pourquoi ce statut</h3></div>
+              <ul class="failure-list">{acquisition_reason_html}</ul>
+            </section>
+            <section class="panel" style="margin:0; padding:18px;" aria-labelledby="acquisition-failures-title">
+              <div class="panel-head"><h3 id="acquisition-failures-title">Scans discovery en échec</h3></div>
+              <ul class="failure-list">{acquisition_failure_html}</ul>
+            </section>
+            <section class="panel" style="margin:0; padding:18px;" aria-labelledby="probe-issues-title">
+              <div class="panel-head"><h3 id="probe-issues-title">Exemples de probes dégradées</h3></div>
+              <ul class="failure-list">{probe_issue_html}</ul>
+            </section>
+          </div>
         </section>
         <section class="panel" aria-labelledby="cycles-title">
           <div class="panel-head">
@@ -1448,12 +1949,15 @@ def render_listing_detail_html(detail: dict[str, Any]) -> str:
             "" if not explorer_context.get("back_api") else f'<a class="button secondary" href="{_escape(str(explorer_context["back_api"]))}">JSON explorateur</a>',
         )
     )
+    context_summary_pill = ""
+    if explorer_context.get("summary"):
+        context_summary_pill = f'<span class="pill info">{_escape(str(explorer_context["summary"]))}</span>'
     status_html = (
         '<div class="status-line">'
         f'<span class="pill {_escape(str(detail.get("state_code") or "unknown"))}">{_escape(_state_label(detail.get("state_code")))}</span>'
         f'<span class="pill">{_escape(_basis_label(detail.get("basis_kind")))}</span>'
         f'<span class="pill">Confiance {_escape(_confidence_label(detail.get("confidence_label")))}</span>'
-        f'{"" if not explorer_context.get("summary") else f"<span class=\"pill info\">{_escape(str(explorer_context["summary"]))}</span>"}'
+        f'{context_summary_pill}'
         '</div>'
     )
     body_html = f'<section class="panel">{detail_panel}</section>'
@@ -1462,7 +1966,7 @@ def render_listing_detail_html(detail: dict[str, Any]) -> str:
         title=f"Vinted Radar — annonce {int(detail['listing_id'])}",
         eyebrow="Fiche annonce",
         heading=str(detail.get("title") or f"Annonce {int(detail['listing_id'])}"),
-        intro="Une lecture détaillée de l’annonce suivie, avec le contexte explorateur conservé pour revenir au même angle d’analyse.",
+        intro="Une lecture produit d’abord, puis les preuves radar dépliables : l’état, le prix, la temporalité et la chronologie restent inspectables sans prendre toute la page.",
         diagnostics=diagnostics,
         body_html=body_html,
         hero_actions=hero_actions,
@@ -1696,6 +2200,30 @@ def _build_honesty_notes(overview: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
+    probe_issue_count = int(freshness.get("recent_probe_issue_count") or 0)
+    inconclusive_probe_count = int(freshness.get("recent_inconclusive_probe_count") or 0)
+    acquisition_status = str(freshness.get("acquisition_status") or "")
+    if probe_issue_count:
+        notes.append(
+            {
+                "slug": "degraded-state-refresh",
+                "level": "danger",
+                "title": "Probes item-page dégradées",
+                "count": probe_issue_count,
+                "description": f"{probe_issue_count} probes récentes ont rencontré un challenge anti-bot, une erreur HTTP, ou une panne transport ; l’historique radar redevient alors le signal le plus prudent.",
+            }
+        )
+    elif acquisition_status == "partial" or inconclusive_probe_count:
+        notes.append(
+            {
+                "slug": "partial-state-refresh",
+                "level": "warning",
+                "title": "Probes encore partielles",
+                "count": inconclusive_probe_count,
+                "description": f"{inconclusive_probe_count} probes récentes sont restées inconclusives ; la lecture continue, mais certaines annonces reposent surtout sur l’historique radar.",
+            }
+        )
+
     return notes
 
 
@@ -1719,6 +2247,26 @@ def _translate_overview_reason(reason: str, *, support_threshold: int) -> str:
     if reason == "No tracked listings are available for this comparison lens yet.":
         return "Aucune annonce suivie n’est encore disponible pour ce module de comparaison."
     return reason
+
+
+
+def _translate_acquisition_reason(reason: str) -> str:
+    patterns = (
+        (r"^(\d+) failed catalog scans remain visible on the latest discovery run\.$", "{count} scans discovery en échec restent visibles sur le dernier run lié."),
+        (r"^(\d+) state-refresh probes hit anti-bot or challenge-shaped pages\.$", "{count} probes de state refresh ont rencontré un anti-bot ou une page de challenge."),
+        (r"^(\d+) state-refresh probes failed on transport exceptions\.$", "{count} probes de state refresh ont échoué côté transport."),
+        (r"^(\d+) state-refresh probes ended on unexpected HTTP responses\.$", "{count} probes de state refresh se sont terminées sur des réponses HTTP inattendues."),
+        (r"^(\d+) latest state-refresh probes stayed inconclusive, so history remains the safer signal\.$", "{count} probes récentes sont restées inconclusives ; l’historique radar reste donc le signal le plus prudent."),
+    )
+    for pattern, template in patterns:
+        match = re.match(pattern, reason)
+        if match:
+            return template.format(count=match.group(1))
+    static = {
+        "No discovery run or runtime cycle is recorded yet.": "Aucun run discovery ni cycle runtime n’est encore enregistré.",
+        "Latest discovery and state-refresh signals look operationally healthy.": "Les derniers signaux discovery + state refresh paraissent opérationnellement sains.",
+    }
+    return static.get(reason, reason)
 
 
 
@@ -1880,6 +2428,8 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     results = payload["results"]
     diagnostics = payload["diagnostics"]
     notes = payload.get("notes") or {}
+    acquisition_status = str(notes.get("acquisition_status") or "unknown")
+    acquisition_reasons = list(notes.get("acquisition_reasons") or [])
     items = payload["items"]
     summary = payload.get("summary") or {}
     summary_inventory = summary.get("inventory") if isinstance(summary.get("inventory"), dict) else {}
@@ -1985,9 +2535,19 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
         f'<span class="pill">{_escape(str(results["total_listings"]))} annonces</span>'
         f'<span class="pill">Page {results["page"]}/{results["total_pages"] or 1}</span>'
         f'<span class="pill">Tri {_escape(str(selected_sort_label))}</span>'
+        f'<span class="pill {_acquisition_status_tone(acquisition_status)}">{_escape(_acquisition_status_label(acquisition_status))}</span>'
         f'<span class="pill">Support modules {int(summary_inventory.get("comparison_support_threshold") or 0)}+</span>'
         '</div>'
     )
+
+    acquisition_notice_html = ""
+    if acquisition_status in {"partial", "degraded"}:
+        acquisition_notice_html = (
+            f'<article class="note {_acquisition_status_tone(acquisition_status)}" style="margin-top:16px;">'
+            f'<div class="note-title"><strong>{_escape(_acquisition_status_label(acquisition_status))}</strong></div>'
+            f'<p class="muted">{_escape(_translate_acquisition_reason(str(acquisition_reasons[0] if acquisition_reasons else "Le radar garde la tranche visible, mais certaines probes ou certains scans récents restent fragiles.")))}</p>'
+            '</article>'
+        )
 
     hero_actions = f'<a class="button secondary" href="{_escape(diagnostics["explorer_api"] + _explorer_suffix_query(filters))}">JSON explorateur</a>'
 
@@ -2014,6 +2574,7 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
         </div>
       </form>
       <div class="status-line" style="margin-top:16px;">{active_filters_html}</div>
+      {acquisition_notice_html}
       <div class="cards" style="margin-top:16px;">
         {_metric_card("Résultats", _escape(str(summary_inventory.get('matched_listings', 0))), [f"{results['active_filter_count']} filtre(s) actifs", f"Corpus total {available['tracked_listings']}"])}
         {_metric_card("Lecture de vente", _escape(str(summary_inventory.get('sold_like_count', 0))), [f"Actives {summary_inventory.get('state_counts', {}).get('active', 0)}", f"Vendues-like {summary_inventory.get('state_counts', {}).get('sold_observed', 0) + summary_inventory.get('state_counts', {}).get('sold_probable', 0)}"])}
@@ -2186,13 +2747,15 @@ def _render_rankings_table(
 
 def _render_detail_panel(detail: dict[str, Any] | None) -> str:
     if detail is None:
-        return "<div><h2>Aucune fiche sélectionnée</h2><p class=\"subhead\">Choisis une annonce depuis l’explorateur pour lire son historique, ses scores et sa base d’inférence.</p></div>"
+        return '<div><h2>Aucune fiche sélectionnée</h2><p class="subhead">Choisis une annonce depuis l’explorateur pour lire son historique, ses scores et sa base d’inférence.</p></div>'
 
+    narrative = detail.get("narrative") if isinstance(detail.get("narrative"), dict) else {}
+    provenance = detail.get("provenance") if isinstance(detail.get("provenance"), dict) else {}
     state_explanation = detail.get("state_explanation") if isinstance(detail.get("state_explanation"), dict) else {}
     score_explanation = detail.get("score_explanation") if isinstance(detail.get("score_explanation"), dict) else {}
     score_context = score_explanation.get("context") if isinstance(score_explanation, dict) else None
     score_context_html = (
-        f"<li>Contexte { _escape(str(score_context.get('label') or 'inconnu')) } · pairs {score_context.get('sample_size', 0)} · percentile {score_context.get('price_percentile')}</li>"
+        f"<li>Contexte {_escape(_detail_score_context_label(str(score_context.get('label') or 'unknown')))} · pairs {score_context.get('sample_size', 0)} · lecture prix {_escape(_detail_price_percentile_summary(score_context.get('price_percentile')))}</li>"
         if score_context is not None
         else "<li>Aucun contexte premium assez solide pour cette annonce pour l’instant.</li>"
     )
@@ -2220,67 +2783,185 @@ def _render_detail_panel(detail: dict[str, Any] | None) -> str:
         if seller.get("profile_url")
         else f'<span class="link-muted">{_escape(str(seller.get("display") or "Vendeur non exposé"))}</span>'
     )
+    highlight_cards = narrative.get("highlights") if isinstance(narrative.get("highlights"), list) else []
+    highlight_html = "".join(
+        f'''
+        <article class="signal story-card">
+          <div class="section-title">
+            <span class="signal-label">{_escape(str(item.get("title") or "Lecture"))}</span>
+            <span class="badge {_escape(_detail_tone_class(str(item.get("tone") or "info")))}">{_escape(_detail_provenance_label(str(item.get("provenance") or "observed")))}</span>
+          </div>
+          <strong>{_escape(str(item.get("headline") or item.get("title") or ""))}</strong>
+          <p class="shell-copy">{_escape(str(item.get("body") or item.get("summary") or ""))}</p>
+        </article>
+        '''
+        for item in highlight_cards
+    )
+    risk_notes = narrative.get("risk_notes") if isinstance(narrative.get("risk_notes"), list) else []
+    risk_html = "".join(
+        f'''
+        <article class="note">
+          <div class="section-title">
+            <h3>{_escape(str(note.get("title") or "Point de prudence"))}</h3>
+            <span class="badge {_escape(_detail_tone_class(str(note.get("tone") or "info")))}">prudence</span>
+          </div>
+          <p>{_escape(str(note.get("body") or ""))}</p>
+        </article>
+        '''
+        for note in risk_notes
+    ) or '<div class="empty-state"><p>Aucun point de prudence supplémentaire ne remonte sur cette annonce.</p></div>'
+    provenance_cards = "".join(
+        f'''
+        <article class="fact">
+          <span>{_escape(str(item.get("label") or "Provenance"))}</span>
+          <strong>{_escape(str(item.get("summary") or "n/a"))}</strong>
+          <span class="link-muted">Source { _escape(str(item.get("source") or "n/a")) }</span>
+          <span class="link-muted">Valeur { _escape(str(item.get("value") or item.get("latest_probe") or "n/a")) }</span>
+        </article>
+        '''
+        for item in provenance.values()
+        if isinstance(item, dict)
+    )
+    public_fields_html = f'''
+      <div class="compact-grid">
+        <div class="signal"><span class="signal-label">Prix public</span><strong>{_escape(str(detail.get('price_display') or 'prix n/a'))}</strong><span class="link-muted">total affiché { _escape(str(detail.get('total_price_display') or 'n/a')) }</span></div>
+        <div class="signal"><span class="signal-label">Catalogue</span><strong>{_escape(str(detail.get('primary_catalog_path') or detail.get('root_title') or 'Catalogue inconnu'))}</strong><span class="link-muted">Marque { _escape(str(detail.get('brand') or 'Inconnue')) } · Taille { _escape(str(detail.get('size_label') or 'n/a')) } · État { _escape(str(detail.get('condition_label') or 'n/a')) }</span></div>
+        <div class="signal"><span class="signal-label">Vendeur visible</span>{seller_html}<span class="link-muted">Likes { _escape(str(detail.get('engagement', {}).get('visible_likes') if isinstance(detail.get('engagement'), dict) else 'n/a')) } · vues { _escape(str(detail.get('engagement', {}).get('visible_views') if isinstance(detail.get('engagement'), dict) else 'n/a')) }</span></div>
+      </div>
+    '''
 
     return f"""
-      <div>
-        <span class=\"eyebrow\">Fiche annonce</span>
-        <h2>{_escape(str(detail.get('title') or '(sans titre)'))}</h2>
+      <div class=\"story-hero\">
+        <span class=\"eyebrow\">Ce que le radar voit d’abord</span>
+        <h2>{_escape(str(narrative.get('headline') or detail.get('title') or '(sans titre)'))}</h2>
+        <p class=\"lead\">{_escape(str(narrative.get('summary') or 'Lecture narrative indisponible.'))}</p>
         <p class=\"subhead\">{_escape(str(detail.get('primary_catalog_path') or detail.get('root_title') or 'Catalogue inconnu'))}</p>
+        <div class=\"status-line\">
+          <span class=\"pill { _escape(str(detail.get('state_code') or 'unknown')) }\">{_escape(_state_label(detail.get('state_code')))}</span>
+          <span class=\"pill\">{_escape(_basis_label(detail.get('basis_kind')))}</span>
+          <span class=\"pill\">Confiance {_escape(_confidence_label(detail.get('confidence_label')))}</span>
+          <span class=\"pill info\">Demande {_escape(_format_score(detail.get('demand_score')))}</span>
+          <span class=\"pill info\">Premium {_escape(_format_score(detail.get('premium_score')))}</span>
+        </div>
+        <div class=\"signal\">
+          <span class=\"signal-label\">Contexte explorateur</span>
+          <strong>{_escape(str(explorer_context.get('summary') or 'Vue directe sans filtre mémorisé'))}</strong>
+          <p class=\"shell-copy\">{_escape(str(narrative.get('explorer_angle') or 'Le contexte actif reste visible pour comprendre pourquoi cette annonce a été ouverte depuis l’explorateur.'))}</p>
+          <div class=\"status-line\" style=\"margin-top:10px;\">{context_filter_html}</div>
+        </div>
       </div>
-      <div class=\"detail-meta\">
-        <span class=\"pill { _escape(str(detail.get('state_code') or 'unknown')) }\">{_escape(_state_label(detail.get('state_code')))}</span>
-        <span class=\"pill\">{_escape(_basis_label(detail.get('basis_kind')))}</span>
-        <span class=\"pill\">Confiance {_escape(_confidence_label(detail.get('confidence_label')))}</span>
-      </div>
-      <div class=\"signal\">
-        <span class=\"signal-label\">Contexte explorateur</span>
-        <strong>{_escape(str(explorer_context.get('summary') or 'Vue directe sans filtre mémorisé'))}</strong><br>
-        <div class=\"status-line\" style=\"margin-top:10px;\">{context_filter_html}</div>
-      </div>
-      <div class=\"detail-grid\">
-        {''.join(f'<div class="signal"><span class="signal-label">{_escape(item["label"])}</span>{_escape(str(item["value"]))}</div>' for item in detail['signals'])}
-      </div>
-      <div class=\"signal\">
-        <span class=\"signal-label\">Champs publics</span>
-        <strong>{_escape(str(detail.get('price_display') or 'prix n/a'))}</strong> · <span class=\"link-muted\">total affiché { _escape(str(detail.get('total_price_display') or 'n/a')) }</span><br>
-        <span class=\"link-muted\">Marque { _escape(str(detail.get('brand') or 'Inconnue')) } · Taille { _escape(str(detail.get('size_label') or 'n/a')) } · État { _escape(str(detail.get('condition_label') or 'n/a')) }</span>
-      </div>
-      <div class=\"signal\">
-        <span class=\"signal-label\">Vendeur visible</span>
-        {seller_html}<br>
-        <span class=\"link-muted\">La publication estimée vient du timestamp de l’image principale quand il existe. Le premier vu radar correspond au premier moment où ce collecteur a observé l’annonce.</span>
-      </div>
-      <div>
-        <h3>Repères temporels</h3>
-        <ul class=\"bullet-list\">
-          <li>Publication estimée : {_escape(str(timing.get('publication_estimated_at') or 'n/a'))}</li>
-          <li>Premier vu radar : {_escape(_format_optional_timestamp(timing.get('radar_first_seen_at')))}</li>
-          <li>Dernier vu radar : {_escape(_format_optional_timestamp(timing.get('radar_last_seen_at')))}</li>
-        </ul>
-      </div>
-      <div>
-        <h3>Base d’inférence</h3>
-        <ul class=\"bullet-list\">{''.join(f'<li>{_escape(reason)}</li>' for reason in state_reasons) or '<li>Aucune explication d’état disponible.</li>'}</ul>
-      </div>
-      <div>
-        <h3>Contexte de score</h3>
-        <ul class=\"bullet-list\">
-          {''.join(f'<li>{_escape(name.replace("_", " "))}: {_format_score(value)}</li>' for name, value in score_factors.items())}
-          {score_context_html}
-        </ul>
-      </div>
-      <div>
-        <h3>Chemin de transition</h3>
-        <div class=\"timeline\">{transitions_html}</div>
-      </div>
-      <div>
-        <h3>Timeline d’observation</h3>
-        <div class=\"timeline\">{history_html}</div>
-      </div>
+      <section class=\"stack\" aria-labelledby=\"story-title\">
+        <div class=\"panel-head\">
+          <h2 id=\"story-title\">Lecture utile avant la preuve</h2>
+          <p>{_escape(str(narrative.get('proof_guide') or 'La preuve détaillée reste disponible plus bas.'))}</p>
+        </div>
+        <div class=\"detail-grid\">{highlight_html}</div>
+      </section>
+      <section class=\"stack\" aria-labelledby=\"limits-title\">
+        <div class=\"panel-head\">
+          <h2 id=\"limits-title\">Repères et limites visibles</h2>
+          <p>Le produit garde ici les précautions qui empêchent la fiche de sur-promettre ce que le signal public ne prouve pas encore.</p>
+        </div>
+        <div class=\"note-grid\">{risk_html}</div>
+        <div class=\"provenance-grid\">{provenance_cards}</div>
+      </section>
+      <section class=\"stack\" aria-labelledby=\"proof-title\">
+        <div class=\"panel-head\">
+          <h2 id=\"proof-title\">Preuves techniques et détails</h2>
+          <p>Déplie seulement ce dont tu as besoin : la lecture produit reste devant, le raisonnement complet reste juste derrière.</p>
+        </div>
+        <div class=\"proof-stack\">
+          {_render_detail_proof_section('Preuve d’état', 'Pourquoi le radar classe cette annonce ainsi.', f'<ul class="bullet-list">{"".join(f"<li>{_escape(_detail_state_reason(reason))}</li>" for reason in state_reasons) or "<li>Aucune explication d’état disponible.</li>"}</ul>')}
+          {_render_detail_proof_section('Contexte de score', 'Décomposition du signal demande/premium et contexte de prix.', f'<ul class="bullet-list">{"".join(f"<li>{_escape(_detail_score_factor_label(name))}: {_format_score(value)}</li>" for name, value in score_factors.items())}{score_context_html}</ul>')}
+          {_render_detail_proof_section('Chronologie radar', 'Publication estimée, fenêtre radar, transitions et historique d’observation.', f'<div class="stack"><div>{public_fields_html}</div><div><h3>Repères temporels</h3><ul class="bullet-list"><li>Publication estimée : {_escape(str(timing.get("publication_estimated_at") or "n/a"))}</li><li>Premier vu radar : {_escape(_format_optional_timestamp(timing.get("radar_first_seen_at")))}</li><li>Dernier vu radar : {_escape(_format_optional_timestamp(timing.get("radar_last_seen_at")))}</li></ul></div><div><h3>Chemin de transition</h3><div class="timeline">{transitions_html}</div></div><div><h3>Timeline d’observation</h3><div class="timeline">{history_html}</div></div></div>')}
+        </div>
+      </section>
       <div class=\"api-links\">
         {'' if not detail.get('canonical_url') else f'<a class="button secondary" href="{_escape(str(detail["canonical_url"]))}" target="_blank" rel="noreferrer">Ouvrir l’annonce canonique</a>'}
       </div>
     """
+
+
+def _render_detail_proof_section(title: str, summary: str, body_html: str) -> str:
+    return f'''
+    <details class="proof-panel">
+      <summary>
+        <span>
+          <strong>{_escape(title)}</strong><br>
+          <span class="link-muted">{_escape(summary)}</span>
+        </span>
+        <span class="badge info">déplier</span>
+      </summary>
+      <div class="proof-body">{body_html}</div>
+    </details>
+    '''
+
+
+def _detail_tone_class(value: str) -> str:
+    if value in {"success", "warning", "danger"}:
+        return value
+    return "ok" if value == "observed" else "info"
+
+
+def _detail_provenance_label(value: str) -> str:
+    labels = {
+        "observed": "observé",
+        "inferred": "inféré",
+        "unknown": "incertain",
+        "estimated": "estimé",
+        "radar": "fenêtre radar",
+        "partial": "partiel",
+        "scored": "score radar",
+    }
+    return labels.get(value, value)
+
+
+def _detail_basis_phrase(value: str) -> str:
+    labels = {
+        "observed": "observée",
+        "inferred": "inférée",
+        "unknown": "incertaine",
+    }
+    return labels.get(value, value)
+
+
+def _detail_state_reason(reason: str) -> str:
+    translations = {
+        "Item page returned a distinct deletion signal": "La page produit a renvoyé un signal distinct de suppression.",
+        "Item page buy signal is closed, so the listing appears sold on the public page.": "Le signal public d’achat est fermé sur la page produit ; le radar lit donc l’annonce comme vendue.",
+        "Item page is still publicly buyable, which is direct active evidence.": "La page produit restait publiquement achetable : c’est un signal direct d’annonce encore active.",
+        "Item page is reachable but publicly unavailable without a distinct sold/deleted signal.": "La page produit reste atteignable mais publiquement indisponible, sans signal distinct de vente ou de suppression.",
+        "The latest item-page probe was inconclusive, so history remains the safer signal.": "La dernière probe de page produit était inconclusive ; l’historique radar reste donc la base la plus prudente.",
+        "The listing was observed in the latest successful scan of its primary catalog.": "L’annonce figurait dans le dernier scan réussi de son catalogue principal.",
+        "The listing was seen repeatedly before disappearing, which strengthens the sell-through signal.": "L’annonce a été vue plusieurs fois avant de disparaître, ce qui renforce le signal de vente.",
+        "The listing missed one follow-up scan after its last sighting, but that is not distinct enough to call sold or deleted.": "L’annonce a manqué un seul rescan après sa dernière apparition, ce qui ne suffit pas pour conclure à une vente ou une suppression.",
+        "The listing was seen recently, but there is no newer successful primary-catalog scan yet.": "L’annonce a été vue récemment, mais aucun scan plus récent du catalogue principal ne permet encore de confirmer ou contredire ce point.",
+        "The last sighting is too old and there is no distinct contrary evidence, so the current state stays unknown.": "La dernière apparition est trop ancienne et aucun signal contraire distinct ne permet de trancher ; l’état reste inconnu.",
+        "There is not enough direct or repeated absence evidence to classify the current state confidently.": "Le radar n’a pas encore assez de preuve directe ou d’absences répétées pour classer l’état avec confiance.",
+    }
+    for source, target in translations.items():
+        if reason.startswith(source):
+            return target
+    if reason.startswith("The primary catalog was rescanned ") and " times after the last sighting without seeing the listing again." in reason:
+        count = reason.removeprefix("The primary catalog was rescanned ").split(" times", 1)[0]
+        return f"Le catalogue principal a été rescanné {count} fois après la dernière apparition sans revoir l’annonce."
+    return reason
+
+
+def _detail_score_factor_label(value: str) -> str:
+    labels = {
+        "state": "état radar",
+        "confidence": "confiance",
+        "basis": "base de preuve",
+        "freshness": "fraîcheur",
+        "history_depth": "profondeur d’historique",
+        "follow_up_miss": "ratés de suivi",
+    }
+    return labels.get(value, value.replace("_", " "))
+
+
+def _detail_observation_label(count: int) -> str:
+    return f"{count} observation" if count == 1 else f"{count} observations"
 
 
 def _apply_filters(listing_scores: list[dict[str, Any]], filters: DashboardFilters) -> list[dict[str, Any]]:
@@ -2399,11 +3080,14 @@ def _build_transition_events(
             }
         )
     if isinstance(latest_probe, dict):
+        latest_probe_description = f"Résultat {latest_probe.get('probe_outcome') or 'unknown'} avec HTTP {latest_probe.get('response_status') or 'n/a'}."
+        if _probe_is_degraded(latest_probe):
+            latest_probe_description = _detail_probe_degradation_note(latest_probe)
         events.append(
             {
                 "label": "Dernière probe",
                 "timestamp": str(latest_probe.get("probed_at") or "unknown"),
-                "description": f"Résultat {latest_probe.get('probe_outcome') or 'unknown'} avec HTTP {latest_probe.get('response_status') or 'n/a'}.",
+                "description": latest_probe_description,
             }
         )
     events.append(
@@ -2726,6 +3410,26 @@ def _runtime_status_description(value: str) -> str:
         "failed": "Le contrôleur a gardé un dernier échec explicite. Vérifiez les cycles récents et l'horodatage de l'erreur.",
     }
     return descriptions.get(value, "État runtime non documenté.")
+
+
+def _acquisition_status_label(value: str) -> str:
+    labels = {
+        "healthy": "acquisition saine",
+        "partial": "acquisition partielle",
+        "degraded": "acquisition dégradée",
+        "unknown": "acquisition inconnue",
+    }
+    return labels.get(str(value or "unknown"), str(value or "unknown"))
+
+
+def _acquisition_status_tone(value: str) -> str:
+    if value == "healthy":
+        return "ok"
+    if value == "partial":
+        return "warning"
+    if value == "degraded":
+        return "danger"
+    return "info"
 
 
 def _format_optional_timestamp(value: Any) -> str:

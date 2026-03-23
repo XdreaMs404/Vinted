@@ -97,7 +97,7 @@ def verify(base_url: str, *, listing_id: int, timeout: float) -> list[CheckResul
             "listing-detail",
             f"/listings/{listing_id}",
             [
-                "Base d’inférence",
+                "Repères et limites visibles",
                 f'href="{prefix}/api/listings/{listing_id}"' if prefix else f'href="/api/listings/{listing_id}"',
             ],
         ),

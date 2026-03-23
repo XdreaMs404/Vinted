@@ -449,8 +449,10 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         tracked_listings: int = 0,
         freshness_counts: dict[str, object] | None = None,
         last_error: str | None = None,
+        state_refresh_summary: dict[str, object] | None = None,
     ) -> None:
         freshness_counts = freshness_counts or {}
+        state_refresh_summary = state_refresh_summary or {}
         finished_at = _utc_now()
         with self.connection:
             cycle_row = self.connection.execute(
@@ -463,7 +465,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 SET finished_at = ?, status = ?, phase = ?, discovery_run_id = ?,
                     state_probed_count = ?, tracked_listings = ?,
                     first_pass_only = ?, fresh_followup = ?, aging_followup = ?, stale_followup = ?,
-                    last_error = ?
+                    last_error = ?, state_refresh_summary_json = ?
                 WHERE cycle_id = ?
                 """,
                 (
@@ -478,6 +480,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     int(freshness_counts.get("aging-followup", 0) or 0),
                     int(freshness_counts.get("stale-followup", 0) or 0),
                     last_error,
+                    json.dumps(state_refresh_summary, ensure_ascii=False, sort_keys=True),
                     cycle_id,
                 ),
             )
@@ -634,6 +637,14 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         ).fetchone()
         totals = dict(totals_row) if totals_row is not None else {}
         latest_cycle = None if not recent_cycles else recent_cycles[0]
+        latest_probe_cycle = next(
+            (
+                cycle
+                for cycle in recent_cycles
+                if isinstance(cycle.get("state_refresh_summary"), dict) and cycle.get("state_refresh_summary")
+            ),
+            latest_cycle,
+        )
         controller = self.runtime_controller_state(now=generated_at)
         effective_status = None
         effective_phase = None
@@ -671,6 +682,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             effective_phase = latest_cycle.get("phase")
             effective_mode = latest_cycle.get("mode")
 
+        acquisition = self.acquisition_health(latest_cycle=latest_probe_cycle, limit=bounded_limit)
+
         return {
             "generated_at": generated_at,
             "db_path": str(self.db_path),
@@ -694,6 +707,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "recent_cycles": recent_cycles,
             "latest_failure": None if not recent_failures else recent_failures[0],
             "recent_failures": recent_failures,
+            "acquisition": acquisition,
             "totals": {
                 "total_cycles": int(totals.get("total_cycles") or 0),
                 "completed_cycles": int(totals.get("completed_cycles") or 0),
@@ -701,6 +715,88 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 "running_cycles": int(totals.get("running_cycles") or 0),
                 "interrupted_cycles": int(totals.get("interrupted_cycles") or 0),
             },
+        }
+
+    def acquisition_health(
+        self,
+        *,
+        latest_cycle: dict[str, object] | None = None,
+        limit: int = 5,
+    ) -> dict[str, object]:
+        bounded_limit = max(int(limit), 1)
+        cycle = latest_cycle
+        if cycle is None:
+            row = self.connection.execute(
+                "SELECT * FROM runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT 1"
+            ).fetchone()
+            cycle = None if row is None else self._hydrate_runtime_cycle_row(row)
+
+        discovery_run = None
+        if isinstance(cycle, dict) and cycle.get("discovery_run_id"):
+            discovery_run = self._resolve_run(str(cycle["discovery_run_id"]))
+        if discovery_run is None:
+            discovery_run = self.latest_run()
+
+        scan_failures: list[dict[str, object]] = []
+        if discovery_run is not None:
+            scan_failures = [
+                dict(row)
+                for row in self.connection.execute(
+                    """
+                    SELECT catalogs.path AS catalog_path, catalog_scans.page_number, catalog_scans.response_status, catalog_scans.error_message
+                    FROM catalog_scans
+                    JOIN catalogs ON catalogs.catalog_id = catalog_scans.catalog_id
+                    WHERE catalog_scans.run_id = ? AND catalog_scans.success = 0
+                    ORDER BY catalog_scans.fetched_at DESC, catalogs.path ASC, catalog_scans.page_number ASC
+                    LIMIT ?
+                    """,
+                    (discovery_run["run_id"], bounded_limit),
+                )
+            ]
+
+        state_refresh_summary = dict(cycle.get("state_refresh_summary") or {}) if isinstance(cycle, dict) else {}
+        degraded_listing_ids = state_refresh_summary.get("degraded_listing_ids") if isinstance(state_refresh_summary.get("degraded_listing_ids"), list) else []
+        probe_issue_examples = self._probe_issue_examples(degraded_listing_ids, limit=bounded_limit)
+
+        anti_bot_count = int(state_refresh_summary.get("anti_bot_challenge_count") or 0)
+        http_error_count = int(state_refresh_summary.get("http_error_count") or 0)
+        transport_error_count = int(state_refresh_summary.get("transport_error_count") or 0)
+        inconclusive_probe_count = int(state_refresh_summary.get("inconclusive_probe_count") or 0)
+        degraded_probe_count = int(state_refresh_summary.get("degraded_probe_count") or 0)
+
+        reasons: list[str] = []
+        status = "healthy"
+        if discovery_run is None and cycle is None:
+            status = "unknown"
+            reasons.append("No discovery run or runtime cycle is recorded yet.")
+        elif scan_failures or degraded_probe_count:
+            status = "degraded"
+            if scan_failures:
+                reasons.append(f"{len(scan_failures)} failed catalog scans remain visible on the latest discovery run.")
+            if anti_bot_count:
+                reasons.append(f"{anti_bot_count} state-refresh probes hit anti-bot or challenge-shaped pages.")
+            if transport_error_count:
+                reasons.append(f"{transport_error_count} state-refresh probes failed on transport exceptions.")
+            if http_error_count:
+                reasons.append(f"{http_error_count} state-refresh probes ended on unexpected HTTP responses.")
+        elif inconclusive_probe_count:
+            status = "partial"
+            reasons.append(f"{inconclusive_probe_count} latest state-refresh probes stayed inconclusive, so history remains the safer signal.")
+        else:
+            reasons.append("Latest discovery and state-refresh signals look operationally healthy.")
+
+        discovery_run_payload = None if discovery_run is None else dict(discovery_run)
+
+        return {
+            "status": status,
+            "latest_cycle_id": None if not isinstance(cycle, dict) else cycle.get("cycle_id"),
+            "latest_discovery_run_id": None if discovery_run_payload is None else discovery_run_payload.get("run_id"),
+            "latest_discovery_run_finished_at": None if discovery_run_payload is None else discovery_run_payload.get("finished_at"),
+            "recent_scan_failure_count": len(scan_failures),
+            "recent_scan_failures": scan_failures,
+            "latest_state_refresh_summary": state_refresh_summary,
+            "probe_issue_examples": probe_issue_examples,
+            "reasons": reasons,
         }
 
     def count_rows(self, table_name: str) -> int:
@@ -2002,6 +2098,11 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     "current_runtime_heartbeat_stale": False if controller is None else bool((controller.get("heartbeat") or {}).get("is_stale")),
                     "latest_runtime_cycle_status": None if latest_cycle is None else latest_cycle.get("status"),
                     "latest_runtime_cycle_started_at": None if latest_cycle is None else latest_cycle.get("started_at"),
+                    "acquisition_status": None if not isinstance(runtime, dict) else (runtime.get("acquisition") or {}).get("status"),
+                    "acquisition_reasons": [] if not isinstance(runtime, dict) else list((runtime.get("acquisition") or {}).get("reasons") or []),
+                    "recent_probe_issue_count": 0 if not isinstance(runtime, dict) else int(((runtime.get("acquisition") or {}).get("latest_state_refresh_summary") or {}).get("degraded_probe_count") or 0),
+                    "recent_inconclusive_probe_count": 0 if not isinstance(runtime, dict) else int(((runtime.get("acquisition") or {}).get("latest_state_refresh_summary") or {}).get("inconclusive_probe_count") or 0),
+                    "recent_probe_issues": [] if not isinstance(runtime, dict) else list((runtime.get("acquisition") or {}).get("probe_issue_examples") or []),
                     "recent_acquisition_failure_count": len(recent_failures),
                     "recent_acquisition_failures": recent_failures,
                 },
@@ -2384,6 +2485,39 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         """
         return cte_sql, [generated_at, generated_at]
 
+    def _probe_issue_examples(self, listing_ids: list[object], *, limit: int) -> list[dict[str, object]]:
+        examples: list[dict[str, object]] = []
+        seen: set[int] = set()
+        for raw_listing_id in listing_ids[: max(int(limit), 1)]:
+            try:
+                listing_id = int(raw_listing_id)
+            except (TypeError, ValueError):
+                continue
+            if listing_id in seen:
+                continue
+            seen.add(listing_id)
+            listing_row = self.connection.execute(
+                "SELECT listing_id, title, canonical_url FROM listings WHERE listing_id = ?",
+                (listing_id,),
+            ).fetchone()
+            latest_probe = self.latest_item_page_probe(listing_id)
+            if listing_row is None or latest_probe is None:
+                continue
+            detail = latest_probe.get("detail") if isinstance(latest_probe.get("detail"), dict) else {}
+            examples.append(
+                {
+                    "listing_id": listing_id,
+                    "title": listing_row["title"],
+                    "canonical_url": listing_row["canonical_url"],
+                    "probed_at": latest_probe.get("probed_at"),
+                    "probe_outcome": latest_probe.get("probe_outcome"),
+                    "response_status": latest_probe.get("response_status"),
+                    "reason": detail.get("reason"),
+                    "error_message": latest_probe.get("error_message"),
+                }
+            )
+        return examples
+
     def _hydrate_observation_row(self, row: sqlite3.Row) -> dict[str, object]:
         raw_payload = json.loads(row["raw_card_payload_json"]) if row["raw_card_payload_json"] else {}
         fallback = normalize_card_snapshot(
@@ -2413,7 +2547,9 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
     def _hydrate_runtime_cycle_row(self, row: sqlite3.Row) -> dict[str, object]:
         hydrated = dict(row)
         config_json = hydrated.pop("config_json", "{}")
+        state_refresh_summary_json = hydrated.pop("state_refresh_summary_json", "{}")
         hydrated["config"] = _deserialize_runtime_config(config_json)
+        hydrated["state_refresh_summary"] = _deserialize_runtime_config(state_refresh_summary_json)
         hydrated["freshness_counts"] = {
             "first-pass-only": int(hydrated.get("first_pass_only") or 0),
             "fresh-followup": int(hydrated.get("fresh_followup") or 0),
