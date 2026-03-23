@@ -142,8 +142,24 @@ class FailingDiscoveryService:
 class FakeStateRefreshService:
     def __init__(self, db_path: Path) -> None:
         self.repository = RadarRepository(db_path)
+        self.refresh_calls: list[dict[str, object]] = []
 
-    def refresh(self, *, limit: int = 10, listing_id: int | None = None, now: str | None = None) -> StateRefreshReport:
+    def refresh(
+        self,
+        *,
+        limit: int = 10,
+        listing_id: int | None = None,
+        now: str | None = None,
+        include_state_summary: bool = True,
+    ) -> StateRefreshReport:
+        self.refresh_calls.append(
+            {
+                "limit": limit,
+                "listing_id": listing_id,
+                "now": now,
+                "include_state_summary": include_state_summary,
+            }
+        )
         probed_ids = [9001] if limit else []
         return StateRefreshReport(
             probed_count=len(probed_ids),
@@ -201,6 +217,7 @@ class CapturingStateFactory:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.calls: list[dict[str, object]] = []
+        self.services: list[FakeStateRefreshService] = []
 
     def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
         self.calls.append(
@@ -211,7 +228,9 @@ class CapturingStateFactory:
                 "proxies": proxies,
             }
         )
-        return FakeStateRefreshService(self.db_path)
+        service = FakeStateRefreshService(self.db_path)
+        self.services.append(service)
+        return service
 
 
 class CapturingDiscoveryFactory:
@@ -339,6 +358,42 @@ def test_runtime_service_passes_proxy_pool_to_discovery_and_state_refresh_factor
     ]
 
 
+
+def test_runtime_service_skips_global_state_summary_during_runtime_cycles(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    discovery_factory = CapturingDiscoveryFactory(db_path)
+    state_factory = CapturingStateFactory(db_path)
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=state_factory,
+    )
+
+    report = runtime.run_cycle(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=3,
+        ),
+        mode="batch",
+    )
+
+    assert report.status == "completed"
+    assert len(state_factory.services) == 1
+    assert state_factory.services[0].refresh_calls == [
+        {
+            "limit": 3,
+            "listing_id": None,
+            "now": None,
+            "include_state_summary": False,
+        }
+    ]
+
+
+
 def test_runtime_service_passes_high_value_filters_to_discovery_service(tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     discovery_factory = CapturingDiscoveryFactory(db_path)
@@ -370,6 +425,35 @@ def test_runtime_service_passes_high_value_filters_to_discovery_service(tmp_path
     assert forwarded_options.min_price == 85.0
     assert forwarded_options.target_catalogs == (2001, 3001)
     assert forwarded_options.target_brands == ("Chanel", "Hermès")
+
+
+def test_runtime_service_defaults_to_bounded_discovery_options(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    discovery_factory = CapturingDiscoveryFactory(db_path)
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+    )
+
+    report = runtime.run_cycle(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=3,
+        ),
+        mode="batch",
+    )
+
+    assert report.status == "completed"
+    assert len(discovery_factory.services) == 1
+    forwarded_options = discovery_factory.services[0].last_options
+    assert forwarded_options is not None
+    assert forwarded_options.min_price == 30.0
+    assert forwarded_options.max_price == 0.0
 
 
 def test_runtime_service_continuous_mode_keeps_failed_cycle_visible_and_continues(tmp_path: Path) -> None:

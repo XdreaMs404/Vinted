@@ -1824,6 +1824,88 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         ).fetchall()
         return [int(row["price_amount_cents"]) for row in rows if row["price_amount_cents"] is not None]
 
+    def state_refresh_probe_targets(self, *, limit: int = 10, now: str | None = None) -> list[dict[str, object]]:
+        now_dt = _coerce_now(now)
+        generated_at = now_dt.replace(microsecond=0).isoformat()
+        rows = self.connection.execute(
+            """
+            WITH observation_summary AS (
+                SELECT
+                    listing_observations.listing_id,
+                    COUNT(*) AS observation_count,
+                    MAX(listing_observations.observed_at) AS last_seen_at
+                FROM listing_observations
+                GROUP BY listing_observations.listing_id
+            ),
+            follow_up_miss AS (
+                SELECT
+                    observation_summary.listing_id,
+                    COUNT(DISTINCT scans.run_id) AS follow_up_miss_count
+                FROM observation_summary
+                JOIN listings ON listings.listing_id = observation_summary.listing_id
+                LEFT JOIN catalog_scans AS scans
+                  ON scans.catalog_id = listings.primary_catalog_id
+                 AND scans.success = 1
+                 AND scans.fetched_at > observation_summary.last_seen_at
+                LEFT JOIN listing_observations AS observations
+                  ON observations.listing_id = observation_summary.listing_id
+                 AND observations.run_id = scans.run_id
+                WHERE observations.run_id IS NULL
+                GROUP BY observation_summary.listing_id
+            ),
+            latest_probe AS (
+                SELECT listing_id, probed_at
+                FROM (
+                    SELECT
+                        item_page_probes.listing_id,
+                        item_page_probes.probed_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY item_page_probes.listing_id
+                            ORDER BY item_page_probes.probed_at DESC, item_page_probes.probe_id DESC
+                        ) AS probe_rank
+                    FROM item_page_probes
+                )
+                WHERE probe_rank = 1
+            )
+            SELECT
+                observation_summary.listing_id,
+                listings.canonical_url,
+                observation_summary.observation_count,
+                observation_summary.last_seen_at,
+                CASE
+                    WHEN (julianday(?) - julianday(observation_summary.last_seen_at)) * 24.0 < 0 THEN 0.0
+                    ELSE ROUND((julianday(?) - julianday(observation_summary.last_seen_at)) * 24.0, 2)
+                END AS last_seen_age_hours,
+                (
+                    CASE WHEN listings.title IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.brand IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.size_label IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.condition_label IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.price_amount_cents IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.total_price_amount_cents IS NOT NULL THEN 1 ELSE 0 END +
+                    CASE WHEN listings.image_url IS NOT NULL THEN 1 ELSE 0 END
+                ) AS signal_completeness,
+                COALESCE(follow_up_miss.follow_up_miss_count, 0) AS follow_up_miss_count,
+                latest_probe.probed_at AS latest_probe_at
+            FROM observation_summary
+            JOIN listings ON listings.listing_id = observation_summary.listing_id
+            LEFT JOIN follow_up_miss ON follow_up_miss.listing_id = observation_summary.listing_id
+            LEFT JOIN latest_probe ON latest_probe.listing_id = observation_summary.listing_id
+            WHERE listings.canonical_url IS NOT NULL
+              AND (latest_probe.probed_at IS NULL OR latest_probe.probed_at < observation_summary.last_seen_at)
+              AND (COALESCE(follow_up_miss.follow_up_miss_count, 0) > 0 OR observation_summary.observation_count = 1)
+            ORDER BY
+                COALESCE(follow_up_miss.follow_up_miss_count, 0) DESC,
+                CASE WHEN observation_summary.observation_count = 1 THEN 1 ELSE 0 END DESC,
+                last_seen_age_hours DESC,
+                signal_completeness DESC,
+                observation_summary.listing_id ASC
+            LIMIT ?
+            """,
+            (generated_at, generated_at, max(int(limit), 0)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def listing_state_inputs(self, *, now: str | None = None, listing_id: int | None = None) -> list[dict[str, object]]:
         now_dt = _coerce_now(now)
         observation_filter = ""

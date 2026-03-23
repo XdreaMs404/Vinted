@@ -7,7 +7,7 @@ from typing import Callable
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.parsers.item_page import parse_item_page_probe
 from vinted_radar.repository import RadarRepository
-from vinted_radar.state_machine import evaluate_listing_state, summarize_state_evaluations
+from vinted_radar.state_machine import STATE_ORDER, evaluate_listing_state, summarize_state_evaluations
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,10 +30,20 @@ class StateRefreshService:
         self.http_client = http_client
         self.now_provider = now_provider or _utc_now
 
-    def refresh(self, *, limit: int = 10, listing_id: int | None = None, now: str | None = None) -> StateRefreshReport:
+    def refresh(
+        self,
+        *,
+        limit: int = 10,
+        listing_id: int | None = None,
+        now: str | None = None,
+        include_state_summary: bool = True,
+    ) -> StateRefreshReport:
         reference_now = now or self.now_provider()
-        inputs = self.repository.listing_state_inputs(now=reference_now, listing_id=listing_id)
-        targets = _select_probe_targets(inputs, limit=limit, listing_id=listing_id)
+        if listing_id is None:
+            targets = self.repository.state_refresh_probe_targets(limit=limit, now=reference_now)
+        else:
+            inputs = self.repository.listing_state_inputs(now=reference_now, listing_id=listing_id)
+            targets = _select_probe_targets(inputs, limit=limit, listing_id=listing_id)
         probed_listing_ids: list[int] = []
         probe_records: list[dict[str, object]] = []
 
@@ -92,9 +102,12 @@ class StateRefreshService:
                 )
             probed_listing_ids.append(listing_id_value)
 
-        refreshed_inputs = self.repository.listing_state_inputs(now=reference_now, listing_id=listing_id)
-        evaluations = [evaluate_listing_state(input_row, now=reference_now) for input_row in refreshed_inputs]
-        summary = summarize_state_evaluations(evaluations, generated_at=reference_now)
+        if include_state_summary:
+            refreshed_inputs = self.repository.listing_state_inputs(now=reference_now, listing_id=listing_id)
+            evaluations = [evaluate_listing_state(input_row, now=reference_now) for input_row in refreshed_inputs]
+            summary = summarize_state_evaluations(evaluations, generated_at=reference_now)
+        else:
+            summary = _skipped_state_summary(reference_now)
         probe_summary = _build_probe_summary(
             probe_records,
             requested_limit=limit,
@@ -106,6 +119,25 @@ class StateRefreshService:
             probed_listing_ids=probed_listing_ids,
             probe_summary=probe_summary,
         )
+
+
+def _skipped_state_summary(generated_at: str) -> dict[str, object]:
+    return {
+        "generated_at": generated_at,
+        "status": "skipped",
+        "overall": {
+            "tracked_listings": 0,
+            **{state: 0 for state in STATE_ORDER},
+            "high_confidence": 0,
+            "medium_confidence": 0,
+            "low_confidence": 0,
+            "observed_basis": 0,
+            "inferred_basis": 0,
+            "unknown_basis": 0,
+        },
+        "by_root": [],
+    }
+
 
 
 def build_default_state_refresh_service(

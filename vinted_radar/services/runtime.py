@@ -136,7 +136,7 @@ class RadarRuntimeService:
                 proxies=list(options.proxies) or None,
             )
             try:
-                state_report = state_refresh_service.refresh(limit=options.state_refresh_limit)
+                state_report = state_refresh_service.refresh(limit=options.state_refresh_limit, include_state_summary=False)
             finally:
                 state_refresh_service.repository.close()
 
