@@ -13,6 +13,7 @@ from vinted_radar.dashboard import (
     build_runtime_payload,
 )
 from vinted_radar.repository import RadarRepository
+from vinted_radar.serving import RouteContext
 
 
 def _seed_dashboard_db(db_path: Path) -> None:
@@ -159,12 +160,19 @@ def test_dashboard_payload_uses_sql_overview_contract_and_honesty_notes(tmp_path
         "estimated-publication",
     ]
     assert [item["listing_id"] for item in payload["featured_listings"]] == [9003, 9001, 9004, 9002]
+    assert payload["featured_listings"][0]["detail_href"] == "/listings/9003"
     assert payload["featured_listings"][0]["detail_api"] == "/api/listings/9003"
     assert payload["featured_listings"][0]["explorer_href"] == "/explorer?q=9003"
     assert payload["diagnostics"]["dashboard_api"] == "/api/dashboard"
     assert payload["diagnostics"]["runtime"] == "/runtime"
     assert payload["diagnostics"]["runtime_api"] == "/api/runtime"
     assert payload["diagnostics"]["explorer_api"] == "/api/explorer"
+    assert payload["diagnostics"]["listing_detail_examples"] == [
+        "/listings/9003",
+        "/listings/9001",
+        "/listings/9004",
+        "/listings/9002",
+    ]
 
 
 def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> None:
@@ -189,6 +197,7 @@ def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> Non
     assert payload["items"][0]["visible_likes_display"] == "41"
     assert payload["items"][0]["seller_display"] == "claire"
     assert payload["items"][0]["estimated_publication_at"] == "2024-03-23T10:00:00+00:00"
+    assert payload["items"][0]["detail_href"] == "/listings/9003"
     assert payload["filters"]["available"]["catalogs"][1]["catalog_id"] == 2001
     assert payload["filters"]["available"]["brands"][1]["value"] == "Maje"
 
@@ -216,7 +225,7 @@ def test_explorer_payload_applies_sql_brand_condition_and_sort_filters(tmp_path:
     assert [item["listing_id"] for item in payload["items"]] == [9001]
     assert payload["items"][0]["seller_display"] == "alice"
     assert payload["items"][0]["visible_views_display"] == "120"
-    assert payload["notes"]["estimated_publication"].startswith("Estimated publication uses the main image timestamp")
+    assert payload["notes"]["estimated_publication"].startswith("La publication estimée")
 
 
 
@@ -246,21 +255,21 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     explorer_api_status, explorer_api_body, explorer_api_headers = _call_app(app, "/api/explorer", "q=robe&page_size=2&sort=favourite_desc")
     runtime_page_status, runtime_page_body, runtime_page_headers = _call_app(app, "/runtime")
     runtime_status, runtime_body, runtime_headers = _call_app(app, "/api/runtime")
+    detail_page_status, detail_page_body, detail_page_headers = _call_app(app, "/listings/9002")
     detail_status, detail_body, detail_headers = _call_app(app, "/api/listings/9002")
     health_status, health_body, _ = _call_app(app, "/health")
 
     assert html_status == "200 OK"
     assert html_headers["Content-Type"].startswith("text/html")
     html_text = html_body.decode("utf-8")
-    assert "Vue d’ensemble du marché" in html_text
+    assert "Vinted Radar" in html_text
+    assert "Navigation principale du produit" in html_text
     assert '<html lang="fr">' in html_text
-    assert "<style>" in html_text
+    assert "Ce qui bouge maintenant sur le radar Vinted." in html_text
     assert "Niveau d’honnêteté du signal" in html_text
     assert "Comparaisons à lire avec contexte" in html_text
-    assert "Explorer les annonces" in html_text
-    assert "Runtime actuel : planifié" in html_text
     assert "JSON aperçu" in html_text
-    assert "JSON détail" in html_text
+    assert 'aria-current="page">Accueil<' in html_text
 
     assert api_status == "200 OK"
     assert api_headers["Content-Type"].startswith("application/json")
@@ -273,9 +282,13 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
 
     assert explorer_status == "200 OK"
     assert explorer_headers["Content-Type"].startswith("text/html")
-    assert b"Listing explorer separated from the dashboard summary" in explorer_body
-    assert b"Estimated publication" in explorer_body
-    assert b"Back to dashboard" in explorer_body
+    explorer_text = explorer_body.decode("utf-8")
+    assert "Navigation principale du produit" in explorer_text
+    assert "Filtres d’exploration" in explorer_text
+    assert "Annonces du corpus" in explorer_text
+    assert "JSON explorateur" in explorer_text
+    assert "class=\"explorer-item\"" in explorer_text
+    assert "min-width: 1320px" not in explorer_text
 
     assert explorer_api_status == "200 OK"
     assert explorer_api_headers["Content-Type"].startswith("application/json")
@@ -291,9 +304,10 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert runtime_page_status == "200 OK"
     assert runtime_page_headers["Content-Type"].startswith("text/html")
     runtime_page_text = runtime_page_body.decode("utf-8")
-    assert "Runtime du radar" in runtime_page_text
+    assert "Navigation principale du produit" in runtime_page_text
     assert "Le contrôleur vivant du radar" in runtime_page_text
     assert "Cycles récents" in runtime_page_text
+    assert "JSON runtime" in runtime_page_text
 
     assert runtime_status == "200 OK"
     assert runtime_headers["Content-Type"].startswith("application/json")
@@ -303,6 +317,14 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert runtime_payload["next_resume_at"] == "2026-03-19T12:05:00+00:00"
     assert runtime_payload["latest_cycle"]["status"] == "completed"
     assert runtime_payload["latest_cycle"]["discovery_run_id"] == "run-3"
+
+    assert detail_page_status == "200 OK"
+    assert detail_page_headers["Content-Type"].startswith("text/html")
+    detail_page_text = detail_page_body.decode("utf-8")
+    assert "Navigation principale du produit" in detail_page_text
+    assert "Fiche annonce" in detail_page_text
+    assert "Base d’inférence" in detail_page_text
+    assert "sold_probable" in detail_page_text
 
     assert detail_status == "200 OK"
     assert detail_headers["Content-Type"].startswith("application/json")
@@ -316,3 +338,57 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert health_payload["tracked_listings"] == 4
     assert health_payload["current_runtime_status"] == "scheduled"
     assert health_payload["latest_runtime_cycle"]["status"] == "completed"
+    assert health_payload["serving"]["home"] == "/"
+    assert health_payload["serving"]["detail_example"] == "/listings/1"
+
+
+def test_dashboard_application_supports_base_path_links_and_prefixed_routes(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+    route_context = RouteContext.from_options(base_path="/radar", public_base_url="https://radar.example.com/radar")
+
+    with RadarRepository(db_path) as repository:
+        dashboard_payload = build_dashboard_payload(
+            repository,
+            filters=DashboardFilters(),
+            now="2026-03-19T12:00:00+00:00",
+            route_context=route_context,
+        )
+        explorer_payload = build_explorer_payload(
+            repository,
+            filters=ExplorerFilters(page_size=2),
+            now="2026-03-19T12:00:00+00:00",
+            route_context=route_context,
+        )
+        runtime_payload = build_runtime_payload(
+            repository,
+            now="2026-03-19T12:00:00+00:00",
+            route_context=route_context,
+        )
+
+    assert dashboard_payload["diagnostics"]["home"] == "/radar/"
+    assert dashboard_payload["featured_listings"][0]["detail_href"] == "/radar/listings/9003"
+    assert explorer_payload["diagnostics"]["explorer"] == "/radar/explorer"
+    assert explorer_payload["items"][0]["detail_api"] == "/radar/api/listings/9003"
+    assert runtime_payload["diagnostics"]["runtime"] == "/radar/runtime"
+
+    app = DashboardApplication(
+        db_path,
+        now="2026-03-19T12:00:00+00:00",
+        base_path="/radar",
+        public_base_url="https://radar.example.com/radar",
+    )
+    prefixed_status, prefixed_body, _ = _call_app(app, "/radar/")
+    prefixed_detail_status, prefixed_detail_body, _ = _call_app(app, "/radar/listings/9002")
+    prefixed_health_status, prefixed_health_body, _ = _call_app(app, "/radar/health")
+
+    assert prefixed_status == "200 OK"
+    assert b'Navigation principale du produit' in prefixed_body
+    assert b'href="/radar/explorer"' in prefixed_body
+    assert b'href="/radar/runtime"' in prefixed_body
+    assert prefixed_detail_status == "200 OK"
+    assert b'href="/radar/api/listings/9002"' in prefixed_detail_body
+    assert prefixed_health_status == "200 OK"
+    prefixed_health = json.loads(prefixed_health_body)
+    assert prefixed_health["serving"]["base_path"] == "/radar"
+    assert prefixed_health["serving"]["public_base_url"] == "https://radar.example.com/radar"

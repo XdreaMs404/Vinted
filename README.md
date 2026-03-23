@@ -50,6 +50,7 @@ This keeps the radar alive locally and serves the French market overview home fr
 - French market overview home: `http://127.0.0.1:8765/`
 - Dedicated runtime page: `http://127.0.0.1:8765/runtime`
 - SQL-backed listing explorer: `http://127.0.0.1:8765/explorer`
+- HTML listing detail route: `http://127.0.0.1:8765/listings/<id>`
 
 ### Focused diagnostics
 
@@ -72,11 +73,55 @@ This keeps the radar alive locally and serves the French market overview home fr
 - French overview home: `http://127.0.0.1:8765/`
 - Dedicated runtime page: `http://127.0.0.1:8765/runtime`
 - SQL-backed explorer: `http://127.0.0.1:8765/explorer`
+- HTML listing detail route: `http://127.0.0.1:8765/listings/<id>`
 - JSON overview payload (compat dashboard endpoint): `http://127.0.0.1:8765/api/dashboard`
 - JSON explorer payload: `http://127.0.0.1:8765/api/explorer`
 - JSON runtime payload: `http://127.0.0.1:8765/api/runtime`
 - JSON listing detail payload: `http://127.0.0.1:8765/api/listings/<id>`
 - Health check: `http://127.0.0.1:8765/health`
+
+## Proxy / VPS serving contract
+
+Use `--base-path` when the product sits behind a reverse-proxy path prefix, and use `--public-base-url` when CLI output and operator docs should advertise the external URL rather than the bind address.
+
+Example: local process bound on localhost, product exposed remotely at `/radar`:
+
+```bash
+python -m vinted_radar.cli dashboard \
+  --db data/vinted-radar.db \
+  --host 127.0.0.1 \
+  --port 8782 \
+  --base-path /radar \
+  --public-base-url https://radar.example.com/radar
+```
+
+The same contract applies to `batch --dashboard` and `continuous --dashboard`.
+
+Once the server is up, verify the real product routes through the same base URL the operator will share:
+
+```bash
+python scripts/verify_vps_serving.py \
+  --base-url https://radar.example.com/radar \
+  --listing-id <id>
+```
+
+What this contract guarantees:
+
+- generated links point to the mounted product shell instead of assuming `/`
+- `/`, `/explorer`, `/runtime`, `/listings/<id>`, and `/health` stay reachable through the advertised base URL
+- JSON diagnostics remain available at `/api/dashboard`, `/api/explorer`, `/api/runtime`, and `/api/listings/<id>` behind the same prefix
+
+If you install the dashboard as a systemd service on the VPS, pass the same values through `install_services.sh` so the service and the CLI advertise the same mounted product shell:
+
+```bash
+sudo DASHBOARD_HOST=127.0.0.1 \
+  DASHBOARD_PORT=8782 \
+  DASHBOARD_BASE_PATH=/radar \
+  DASHBOARD_PUBLIC_BASE_URL=https://radar.example.com/radar \
+  bash install_services.sh
+```
+
+Then run the same smoke check against the public URL prefix before treating the deployment as usable.
 
 ## Runtime diagnostics
 

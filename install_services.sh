@@ -9,8 +9,20 @@ SCRAPER_STATE_REFRESH_LIMIT="${SCRAPER_STATE_REFRESH_LIMIT:-10}"
 SCRAPER_INTERVAL_SECONDS="${SCRAPER_INTERVAL_SECONDS:-1800}"
 DASHBOARD_HOST="${DASHBOARD_HOST:-127.0.0.1}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8765}"
-SERVICE_USER="${SERVICE_USER:-$(stat -c '%U' "$APP_DIR")}"
+DASHBOARD_BASE_PATH="${DASHBOARD_BASE_PATH:-}"
+DASHBOARD_PUBLIC_BASE_URL="${DASHBOARD_PUBLIC_BASE_URL:-}"
+SERVICE_USER="${SERVICE_USER:-$(stat -c '%U' "$APP_DIR")}" 
 SERVICE_GROUP="${SERVICE_GROUP:-$(id -gn "$SERVICE_USER")}" 
+
+DASHBOARD_BASE_PATH_ARG=""
+if [ -n "$DASHBOARD_BASE_PATH" ]; then
+  DASHBOARD_BASE_PATH_ARG=" --base-path $DASHBOARD_BASE_PATH"
+fi
+
+DASHBOARD_PUBLIC_BASE_URL_ARG=""
+if [ -n "$DASHBOARD_PUBLIC_BASE_URL" ]; then
+  DASHBOARD_PUBLIC_BASE_URL_ARG=" --public-base-url $DASHBOARD_PUBLIC_BASE_URL"
+fi
 
 echo "=========================================="
 echo "Vinted Radar - Systemd Installer"
@@ -21,6 +33,12 @@ echo "Database: $DB_PATH"
 echo "Service user: $SERVICE_USER:$SERVICE_GROUP"
 echo "Scraper interval: ${SCRAPER_INTERVAL_SECONDS}s"
 echo "Dashboard bind: ${DASHBOARD_HOST}:${DASHBOARD_PORT}"
+if [ -n "$DASHBOARD_BASE_PATH" ]; then
+  echo "Dashboard base path: $DASHBOARD_BASE_PATH"
+fi
+if [ -n "$DASHBOARD_PUBLIC_BASE_URL" ]; then
+  echo "Dashboard public base URL: $DASHBOARD_PUBLIC_BASE_URL"
+fi
 echo
 
 if [ "$EUID" -ne 0 ]; then
@@ -73,7 +91,7 @@ User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$APP_DIR
 Environment=PYTHONUNBUFFERED=1
-ExecStart=$VENV_PYTHON -m vinted_radar.cli dashboard --db $DB_PATH --host $DASHBOARD_HOST --port $DASHBOARD_PORT
+ExecStart=$VENV_PYTHON -m vinted_radar.cli dashboard --db $DB_PATH --host $DASHBOARD_HOST --port $DASHBOARD_PORT$DASHBOARD_BASE_PATH_ARG$DASHBOARD_PUBLIC_BASE_URL_ARG
 Restart=on-failure
 RestartSec=15
 NoNewPrivileges=true
@@ -99,11 +117,17 @@ echo "=========================================="
 echo "Installation complete"
 echo "=========================================="
 echo "Dashboard bind: http://${DASHBOARD_HOST}:${DASHBOARD_PORT}"
+if [ -n "$DASHBOARD_PUBLIC_BASE_URL" ]; then
+  echo "Advertised product URL: $DASHBOARD_PUBLIC_BASE_URL"
+elif [ -n "$DASHBOARD_BASE_PATH" ]; then
+  echo "Advertised product path prefix: $DASHBOARD_BASE_PATH"
+fi
 if [ "$DASHBOARD_HOST" = "127.0.0.1" ]; then
   echo "Dashboard is bound to localhost only. Use SSH tunneling or a reverse proxy for remote access."
 else
   echo "Dashboard is exposed on a non-localhost interface. Add auth / reverse proxy controls before internet exposure."
 fi
+echo "Smoke check: python scripts/verify_vps_serving.py --base-url ${DASHBOARD_PUBLIC_BASE_URL:-http://${DASHBOARD_HOST}:${DASHBOARD_PORT}${DASHBOARD_BASE_PATH}} --listing-id <id>"
 echo
 echo "Useful commands:"
 echo " - Scraper logs:   journalctl -u vinted-scraper.service -f"

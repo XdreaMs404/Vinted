@@ -76,7 +76,7 @@ This milestone is complete only when all are true:
 - [x] **S02: Runtime Truth + Pause/Resume Surface** `risk:high` `depends:[S01]`
   > After this: the product can truthfully show running, paused, scheduled, failed, elapsed pause time, next resume timing, and recent errors through the runtime page, API, and CLI on the same live DB.
 
-- [ ] **S03: Responsive French Product Shell + VPS Serving Path** `risk:high` `depends:[S01,S02]`
+- [x] **S03: Responsive French Product Shell + VPS Serving Path** `risk:high` `depends:[S01,S02]`
   > After this: the live radar is served through a production-style VPS path and opens as a coherent French-first responsive product on phone and desktop, with clear navigation across overview, explorer, detail, and runtime.
 
 - [ ] **S04: Full Explorer + Comparative Intelligence** `risk:high` `depends:[S01,S03]`

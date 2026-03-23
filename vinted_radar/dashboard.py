@@ -12,6 +12,7 @@ from wsgiref.simple_server import WSGIServer, make_server
 
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import load_listing_scores
+from vinted_radar.serving import RouteContext, normalize_base_path
 from vinted_radar.state_machine import STATE_ORDER
 
 DEFAULT_LIMIT = 10
@@ -125,45 +126,54 @@ class DashboardServerHandle:
 
 
 class DashboardApplication:
-    def __init__(self, db_path: str | Path, *, now: str | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        now: str | None = None,
+        base_path: str | None = None,
+        public_base_url: str | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.now = now
+        self.route_context = RouteContext.from_options(base_path=base_path, public_base_url=public_base_url)
 
     def __call__(self, environ: dict[str, Any], start_response) -> list[bytes]:
-        path = environ.get("PATH_INFO") or "/"
+        route_context = self._request_route_context(environ)
+        path = self._request_path(environ, route_context=route_context)
         params = parse_qs(environ.get("QUERY_STRING", ""), keep_blank_values=False)
 
         if path in {"", "/"}:
             filters = DashboardFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
-                payload = build_dashboard_payload(repository, filters=filters, now=self.now)
+                payload = build_dashboard_payload(repository, filters=filters, now=self.now, route_context=route_context)
             body = render_dashboard_html(payload)
             return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
 
         if path == "/api/dashboard":
             filters = DashboardFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
-                payload = build_dashboard_payload(repository, filters=filters, now=self.now)
+                payload = build_dashboard_payload(repository, filters=filters, now=self.now, route_context=route_context)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
         if path == "/explorer":
             filters = ExplorerFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
-                payload = build_explorer_payload(repository, filters=filters, now=self.now)
+                payload = build_explorer_payload(repository, filters=filters, now=self.now, route_context=route_context)
             body = render_explorer_html(payload)
             return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
 
         if path == "/api/explorer":
             filters = ExplorerFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
-                payload = build_explorer_payload(repository, filters=filters, now=self.now)
+                payload = build_explorer_payload(repository, filters=filters, now=self.now, route_context=route_context)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
         if path == "/runtime":
             with RadarRepository(self.db_path) as repository:
-                payload = build_runtime_payload(repository, now=self.now)
+                payload = build_runtime_payload(repository, now=self.now, route_context=route_context)
             body = render_runtime_html(payload)
             return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
 
@@ -173,14 +183,23 @@ class DashboardApplication:
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
+        if path.startswith("/listings/"):
+            listing_id = _parse_int(path.rsplit("/", 1)[-1])
+            if listing_id is None:
+                return _respond(start_response, "404 Not Found", "Not Found", content_type="text/plain; charset=utf-8")
+            with RadarRepository(self.db_path) as repository:
+                detail = build_listing_detail_payload(repository, listing_id=listing_id, now=self.now, route_context=route_context)
+            if detail is None:
+                return _respond(start_response, "404 Not Found", "Not Found", content_type="text/plain; charset=utf-8")
+            body = render_listing_detail_html(detail)
+            return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
+
         if path.startswith("/api/listings/"):
             listing_id = _parse_int(path.rsplit("/", 1)[-1])
             if listing_id is None:
                 return _respond(start_response, "404 Not Found", json.dumps({"error": "listing_not_found"}), content_type="application/json; charset=utf-8")
             with RadarRepository(self.db_path) as repository:
-                listing_scores = load_listing_scores(repository, now=self.now)
-                listing = _find_listing(listing_scores, listing_id)
-                detail = build_listing_detail_payload(repository, listing, now=self.now) if listing is not None else None
+                detail = build_listing_detail_payload(repository, listing_id=listing_id, now=self.now, route_context=route_context)
             if detail is None:
                 return _respond(start_response, "404 Not Found", json.dumps({"error": "listing_not_found", "listing_id": listing_id}), content_type="application/json; charset=utf-8")
             body = json.dumps(detail, ensure_ascii=False, indent=2, sort_keys=True)
@@ -200,6 +219,15 @@ class DashboardApplication:
                     "current_runtime_status": runtime_status.get("status"),
                     "runtime_controller": runtime_status.get("controller"),
                     "latest_runtime_cycle": runtime_status["latest_cycle"],
+                    "serving": {
+                        "base_path": route_context.base_path or "/",
+                        "public_base_url": route_context.public_base_url,
+                        "home": route_context.path("/"),
+                        "explorer": route_context.path("/explorer"),
+                        "runtime": route_context.path("/runtime"),
+                        "detail_example": route_context.path("/listings/1"),
+                        "health": route_context.path("/health"),
+                    },
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -209,6 +237,27 @@ class DashboardApplication:
 
         return _respond(start_response, "404 Not Found", "Not Found", content_type="text/plain; charset=utf-8")
 
+    def _request_route_context(self, environ: dict[str, Any]) -> RouteContext:
+        if self.route_context.base_path or self.route_context.public_base_url:
+            return self.route_context
+        base_path = normalize_base_path(
+            environ.get("SCRIPT_NAME") or environ.get("HTTP_X_FORWARDED_PREFIX")
+        )
+        return RouteContext.from_options(base_path=base_path)
+
+    def _request_path(self, environ: dict[str, Any], *, route_context: RouteContext) -> str:
+        path = environ.get("PATH_INFO") or "/"
+        prefixes = [route_context.base_path, normalize_base_path(environ.get("SCRIPT_NAME"))]
+        for prefix in prefixes:
+            if not prefix:
+                continue
+            if path == prefix:
+                return "/"
+            if path.startswith(prefix + "/"):
+                stripped = path[len(prefix) :]
+                return stripped or "/"
+        return path
+
 
 def serve_dashboard(
     db_path: str | Path,
@@ -216,8 +265,10 @@ def serve_dashboard(
     host: str = "127.0.0.1",
     port: int = 8765,
     now: str | None = None,
+    base_path: str | None = None,
+    public_base_url: str | None = None,
 ) -> None:
-    application = DashboardApplication(db_path, now=now)
+    application = DashboardApplication(db_path, now=now, base_path=base_path, public_base_url=public_base_url)
     with make_server(host, port, application) as server:
         server.serve_forever()
 
@@ -228,8 +279,10 @@ def start_dashboard_server(
     host: str = "127.0.0.1",
     port: int = 8765,
     now: str | None = None,
+    base_path: str | None = None,
+    public_base_url: str | None = None,
 ) -> DashboardServerHandle:
-    application = DashboardApplication(db_path, now=now)
+    application = DashboardApplication(db_path, now=now, base_path=base_path, public_base_url=public_base_url)
     server = make_server(host, port, application)
     thread = Thread(target=server.serve_forever, name=f"dashboard-{port}", daemon=True)
     thread.start()
@@ -241,11 +294,13 @@ def build_dashboard_payload(
     *,
     filters: DashboardFilters,
     now: str | None = None,
+    route_context: RouteContext | None = None,
 ) -> dict[str, Any]:
+    route_context = route_context or RouteContext()
     comparison_limit = max(1, min(int(filters.limit), SEGMENT_LIMIT))
     overview = repository.overview_snapshot(now=now, comparison_limit=comparison_limit)
     featured_page = repository.listing_explorer_page(page=1, page_size=4, sort="last_seen_desc", now=now)
-    featured_listings = [_serialize_overview_listing_item(item) for item in featured_page["items"]]
+    featured_listings = [_serialize_overview_listing_item(item, route_context=route_context) for item in featured_page["items"]]
 
     return {
         "generated_at": overview["generated_at"],
@@ -265,17 +320,22 @@ def build_dashboard_payload(
                 "listing_id": filters.listing_id,
             },
         },
+        "serving": {
+            "base_path": route_context.base_path or "/",
+            "public_base_url": route_context.public_base_url,
+        },
         "honesty_notes": _build_honesty_notes(overview),
         "featured_listings": featured_listings,
         "diagnostics": {
-            "home": "/",
-            "dashboard_api": "/api/dashboard",
-            "runtime": "/runtime",
-            "runtime_api": "/api/runtime",
-            "explorer": "/explorer",
-            "explorer_api": "/api/explorer",
-            "health": "/health",
-            "listing_detail_examples": [item["detail_api"] for item in featured_listings],
+            "home": route_context.path("/"),
+            "dashboard_api": route_context.path("/api/dashboard"),
+            "runtime": route_context.path("/runtime"),
+            "runtime_api": route_context.path("/api/runtime"),
+            "explorer": route_context.path("/explorer"),
+            "explorer_api": route_context.path("/api/explorer"),
+            "health": route_context.path("/health"),
+            "listing_detail_examples": [item["detail_href"] for item in featured_listings],
+            "listing_detail_api_examples": [item["detail_api"] for item in featured_listings],
         },
     }
 
@@ -285,7 +345,9 @@ def build_explorer_payload(
     *,
     filters: ExplorerFilters,
     now: str | None = None,
+    route_context: RouteContext | None = None,
 ) -> dict[str, Any]:
+    route_context = route_context or RouteContext()
     generated_at = _generated_at(now)
     options = repository.explorer_filter_options()
     page = repository.listing_explorer_page(
@@ -299,10 +361,14 @@ def build_explorer_payload(
         page_size=filters.page_size,
         now=now,
     )
-    items = [_serialize_explorer_item(item) for item in page["items"]]
+    items = [_serialize_explorer_item(item, route_context=route_context) for item in page["items"]]
     return {
         "generated_at": generated_at,
         "db_path": str(repository.db_path),
+        "serving": {
+            "base_path": route_context.base_path or "/",
+            "public_base_url": route_context.public_base_url,
+        },
         "filters": {
             "selected": {
                 "root": filters.root or "all",
@@ -325,16 +391,19 @@ def build_explorer_payload(
             "has_previous_page": page["has_previous_page"],
             "has_next_page": page["has_next_page"],
             "has_results": bool(items),
-            "empty_reason": None if items else "No tracked listings match the current explorer filters.",
+            "empty_reason": None if items else "Aucune annonce suivie ne correspond aux filtres actuels de l’explorateur.",
         },
         "items": items,
         "notes": {
-            "estimated_publication": "Estimated publication uses the main image timestamp as a temporal signal. It is useful, but it is not an exact publication date.",
-            "scalability": "Explorer results are filtered, sorted, and paged in SQL before only the current page receives observation/probe aggregation.",
+            "estimated_publication": "La publication estimée s'appuie sur le timestamp de l'image principale. C'est un signal utile, pas une date de publication exacte.",
+            "scalability": "Les résultats de l’explorateur sont filtrés, triés et paginés en SQL avant l’enrichissement du seul lot courant avec l’historique et les probes.",
         },
         "diagnostics": {
-            "explorer_api": "/api/explorer",
-            "dashboard": "/",
+            "home": route_context.path("/"),
+            "explorer": route_context.path("/explorer"),
+            "explorer_api": route_context.path("/api/explorer"),
+            "dashboard": route_context.path("/"),
+            "runtime": route_context.path("/runtime"),
         },
     }
 
@@ -345,7 +414,9 @@ def build_runtime_payload(
     *,
     now: str | None = None,
     limit: int = 8,
+    route_context: RouteContext | None = None,
 ) -> dict[str, Any]:
+    route_context = route_context or RouteContext()
     generated_at = _generated_at(now)
     runtime = repository.runtime_status(limit=limit, now=now)
     controller = runtime.get("controller") or {}
@@ -354,6 +425,10 @@ def build_runtime_payload(
     return {
         "generated_at": generated_at,
         "db_path": str(repository.db_path),
+        "serving": {
+            "base_path": route_context.base_path or "/",
+            "public_base_url": route_context.public_base_url,
+        },
         "runtime": runtime,
         "summary": {
             "status": runtime.get("status"),
@@ -378,11 +453,12 @@ def build_runtime_payload(
         "recent_failures": runtime.get("recent_failures") or [],
         "totals": runtime.get("totals") or {},
         "diagnostics": {
-            "home": "/",
-            "dashboard_api": "/api/dashboard",
-            "runtime": "/runtime",
-            "runtime_api": "/api/runtime",
-            "health": "/health",
+            "home": route_context.path("/"),
+            "dashboard_api": route_context.path("/api/dashboard"),
+            "runtime": route_context.path("/runtime"),
+            "runtime_api": route_context.path("/api/runtime"),
+            "health": route_context.path("/health"),
+            "explorer": route_context.path("/explorer"),
         },
         "notes": {
             "scheduled": "Un runtime 'scheduled' attend la prochaine fenêtre de reprise enregistrée en base. Ce n'est pas un run terminé : c'est une attente saine et suivie.",
@@ -395,14 +471,17 @@ def build_runtime_payload(
 
 def build_listing_detail_payload(
     repository: RadarRepository,
-    listing: dict[str, Any] | None,
     *,
+    listing_id: int,
     now: str | None = None,
+    route_context: RouteContext | None = None,
 ) -> dict[str, Any] | None:
+    route_context = route_context or RouteContext()
+    listing_scores = load_listing_scores(repository, now=now)
+    listing = _find_listing(listing_scores, listing_id)
     if listing is None:
         return None
 
-    listing_id = int(listing["listing_id"])
     history = repository.listing_history(listing_id, now=now, limit=12)
     summary = None if history is None else history["summary"]
     latest_probe = listing.get("latest_probe")
@@ -439,6 +518,19 @@ def build_listing_detail_payload(
         "score_explanation": listing.get("score_explanation"),
         "latest_probe": latest_probe,
         "history": history,
+        "serving": {
+            "base_path": route_context.base_path or "/",
+            "public_base_url": route_context.public_base_url,
+        },
+        "diagnostics": {
+            "home": route_context.path("/"),
+            "explorer": route_context.path("/explorer"),
+            "runtime": route_context.path("/runtime"),
+            "detail_href": route_context.path(f"/listings/{listing_id}"),
+            "detail_api": route_context.path(f"/api/listings/{listing_id}"),
+            "dashboard_api": route_context.path("/api/dashboard"),
+            "runtime_api": route_context.path("/api/runtime"),
+        },
         "engagement": {
             "visible_likes": listing.get("favourite_count"),
             "visible_views": listing.get("view_count"),
@@ -447,37 +539,38 @@ def build_listing_detail_payload(
             "user_id": listing.get("user_id"),
             "login": seller_login,
             "profile_url": seller_profile_url,
-            "display": seller_login or "Seller not exposed on the current card payload",
+            "display": seller_login or "Vendeur non exposé sur la carte actuelle",
         },
         "timing": {
             "publication_estimated_at": estimated_publication_at,
-            "publication_signal_label": None if estimated_publication_at is None else "Main image timestamp estimate",
+            "publication_signal_label": None if estimated_publication_at is None else "Estimation via le timestamp de l'image principale",
             "radar_first_seen_at": radar_first_seen_at,
             "radar_last_seen_at": radar_last_seen_at,
         },
         "signals": [
-            {"label": "Observation runs", "value": str(listing.get("observation_count") or 0)},
-            {"label": "Freshness", "value": str(listing.get("freshness_bucket") or "unknown")},
-            {"label": "Follow-up misses", "value": str(listing.get("follow_up_miss_count") or 0)},
-            {"label": "Visible likes", "value": _format_optional_int(listing.get("favourite_count"))},
-            {"label": "Visible views", "value": _format_optional_int(listing.get("view_count"))},
-            {"label": "Estimated publication", "value": estimated_publication_at or "n/a"},
-            {"label": "Radar first seen", "value": _format_optional_timestamp(radar_first_seen_at)},
-            {"label": "Demand score", "value": _format_score(listing.get("demand_score"))},
-            {"label": "Premium score", "value": _format_score(listing.get("premium_score"))},
+            {"label": "Observations", "value": str(listing.get("observation_count") or 0)},
+            {"label": "Fraîcheur", "value": _freshness_label(listing.get("freshness_bucket") or "unknown")},
+            {"label": "Ratés de suivi", "value": str(listing.get("follow_up_miss_count") or 0)},
+            {"label": "Likes visibles", "value": _format_optional_int(listing.get("favourite_count"))},
+            {"label": "Vues visibles", "value": _format_optional_int(listing.get("view_count"))},
+            {"label": "Publication estimée", "value": estimated_publication_at or "n/a"},
+            {"label": "Premier vu radar", "value": _format_optional_timestamp(radar_first_seen_at)},
+            {"label": "Score demande", "value": _format_score(listing.get("demand_score"))},
+            {"label": "Score premium", "value": _format_score(listing.get("premium_score"))},
         ],
         "transitions": transitions,
     }
 
 
-def _serialize_explorer_item(item: dict[str, Any]) -> dict[str, Any]:
+def _serialize_explorer_item(item: dict[str, Any], *, route_context: RouteContext | None = None) -> dict[str, Any]:
+    route_context = route_context or RouteContext()
     listing_id = int(item["listing_id"])
     estimated_publication_at = _format_unix_timestamp(item.get("created_at_ts"))
     seller_login = item.get("user_login")
     seller_profile_url = item.get("user_profile_url")
     latest_probe_outcome = item.get("latest_probe_outcome")
     latest_probe_status = item.get("latest_probe_response_status")
-    latest_probe_display = "Not probed"
+    latest_probe_display = "Aucune probe"
     if latest_probe_outcome:
         latest_probe_display = str(latest_probe_outcome)
         if latest_probe_status is not None:
@@ -491,18 +584,431 @@ def _serialize_explorer_item(item: dict[str, Any]) -> dict[str, Any]:
             "visible_likes_display": _format_optional_int(item.get("favourite_count")),
             "visible_views_display": _format_optional_int(item.get("view_count")),
             "estimated_publication_at": estimated_publication_at,
-            "estimated_publication_note": None if estimated_publication_at is None else "Main image timestamp estimate",
+            "estimated_publication_note": None if estimated_publication_at is None else "Estimation via le timestamp de l'image principale",
             "radar_first_seen_display": _format_optional_timestamp(item.get("first_seen_at")),
             "radar_last_seen_display": _format_optional_timestamp(item.get("last_seen_at")),
-            "seller_display": seller_login or "Seller not exposed",
+            "seller_display": seller_login or "Vendeur non exposé",
             "seller_profile_url": seller_profile_url,
             "latest_probe_display": latest_probe_display,
-            "explorer_href": f"/explorer?q={listing_id}",
+            "explorer_href": route_context.path("/explorer") + _suffix_query(DashboardFilters(query=str(listing_id)), include_listing=False),
             "canonical_href": item.get("canonical_url"),
-            "detail_api": f"/api/listings/{listing_id}",
+            "detail_href": route_context.path(f"/listings/{listing_id}"),
+            "detail_api": route_context.path(f"/api/listings/{listing_id}"),
         }
     )
     return payload
+
+
+
+def _render_product_nav(diagnostics: dict[str, Any], *, current: str) -> str:
+    entries = [
+        ("home", "Accueil", diagnostics.get("home")),
+        ("explorer", "Explorateur", diagnostics.get("explorer")),
+        ("runtime", "Runtime", diagnostics.get("runtime")),
+    ]
+    nav_items: list[str] = []
+    for key, label, href in entries:
+        if not href:
+            continue
+        current_attr = ' aria-current="page"' if current == key else ""
+        current_class = " current" if current == key else ""
+        nav_items.append(
+            f'<a class="button secondary nav-link{current_class}" href="{_escape(str(href))}"{current_attr}>{_escape(label)}</a>'
+        )
+    if current == "detail" and diagnostics.get("detail_href"):
+        nav_items.append(
+            f'<a class="button secondary nav-link current" href="{_escape(str(diagnostics["detail_href"]))}" aria-current="page">Fiche annonce</a>'
+        )
+    return '<nav class="product-nav" aria-label="Navigation principale du produit">' + "".join(nav_items) + "</nav>"
+
+
+
+def _shared_shell_styles() -> str:
+    return """
+    :root {
+      --bg: #0f1115;
+      --bg-soft: #171b20;
+      --panel: rgba(23, 27, 32, 0.94);
+      --panel-strong: rgba(19, 23, 28, 0.98);
+      --ink: #f5efe6;
+      --muted: #c4b7a3;
+      --line: rgba(255,255,255,0.08);
+      --accent: #d4a267;
+      --accent-soft: rgba(212,162,103,0.16);
+      --success: #8fd3a7;
+      --warning: #ffcf7d;
+      --danger: #ff947f;
+      --shadow: 0 28px 84px rgba(0,0,0,0.38);
+      --radius-lg: 28px;
+      --radius-md: 22px;
+      --radius-sm: 16px;
+    }
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; -webkit-font-smoothing: antialiased; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(212,162,103,0.14), transparent 26%),
+        radial-gradient(circle at bottom right, rgba(143,211,167,0.08), transparent 24%),
+        linear-gradient(180deg, #131519 0%, #0f1115 100%);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: radial-gradient(circle at center, black, transparent 82%);
+      opacity: 0.36;
+    }
+    a { color: inherit; }
+    .skip-link {
+      position: absolute;
+      left: 16px;
+      top: -56px;
+      background: var(--panel-strong);
+      color: var(--ink);
+      padding: 11px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      z-index: 30;
+      text-decoration: none;
+    }
+    .skip-link:focus { top: 16px; }
+    .shell {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 24px;
+      position: relative;
+    }
+    .hero, .panel, .metric, .module, .note, .listing-card, .explorer-item, .cycle-card, .signal {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+    .hero {
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      display: grid;
+      gap: 18px;
+      margin-bottom: 20px;
+      background:
+        linear-gradient(135deg, rgba(212,162,103,0.18), rgba(255,255,255,0.02)),
+        var(--panel);
+    }
+    .brand-row, .hero-actions, .product-nav, .button-row, .feature-actions, .module-actions, .status-line, .listing-stats, .pagination, .api-links, .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .brand {
+      text-transform: uppercase;
+      letter-spacing: 0.24em;
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    h1, h2, h3 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      text-wrap: balance;
+    }
+    h1 { font-size: clamp(2.2rem, 5vw, 4.3rem); line-height: 0.98; max-width: 13ch; }
+    h2 { font-size: clamp(1.35rem, 2.4vw, 2.1rem); line-height: 1.08; }
+    h3 { font-size: 1.08rem; line-height: 1.22; }
+    p { margin: 0; }
+    .lead, .subhead, .muted, .listing-meta, .shell-copy, .panel-head p, .note p, .timeline-item span, .metric ul, .fact span, .link-muted {
+      color: var(--muted);
+      line-height: 1.6;
+      text-wrap: pretty;
+    }
+    .button {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 11px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(212,162,103,0.34);
+      background: linear-gradient(135deg, rgba(212,162,103,0.24), rgba(212,162,103,0.08));
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+    }
+    .button:hover { transform: translateY(-1px); border-color: rgba(212,162,103,0.56); }
+    .button:active { transform: scale(0.96); }
+    .button.secondary {
+      background: rgba(255,255,255,0.04);
+      border-color: var(--line);
+      color: var(--muted);
+    }
+    .button.secondary.current {
+      color: var(--ink);
+      border-color: rgba(212,162,103,0.34);
+      background: rgba(212,162,103,0.14);
+    }
+    .button.disabled { opacity: 0.45; pointer-events: none; }
+    .button:focus-visible, .lens-link:focus-visible, .listing-link:focus-visible, .nav-link:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+    .cards, .stats, .metrics, .detail-grid, .facts, .compact-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .cards, .metrics { margin-bottom: 20px; }
+    .metric, .explorer-item, .cycle-card, .signal, .fact {
+      border-radius: var(--radius-md);
+      padding: 18px;
+    }
+    .metric-label, .signal-label, .fact span {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 11px;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .metric-value {
+      font-size: 1.9rem;
+      font-family: Georgia, "Times New Roman", serif;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 10px;
+    }
+    .metric ul, .bullet-list {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 6px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.42fr) minmax(300px, 0.92fr);
+      gap: 20px;
+      align-items: start;
+    }
+    .stack, .note-list, .note-grid, .listing-grid, .timeline, .explorer-grid, .cycle-grid {
+      display: grid;
+      gap: 14px;
+    }
+    .panel {
+      border-radius: var(--radius-lg);
+      padding: 22px;
+    }
+    .panel-head {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .module-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    .module, .note, .listing-card {
+      border-radius: var(--radius-md);
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .module-header { display: grid; gap: 10px; }
+    .badge, .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 32px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+    .badge.ok, .pill.success { color: var(--success); }
+    .badge.warning, .pill.warning { color: var(--warning); }
+    .badge.danger, .pill.danger { color: var(--danger); }
+    .pill.info { color: var(--accent); }
+    .pill.active { color: var(--success); }
+    .pill.sold_observed, .pill.sold_probable { color: var(--warning); }
+    .pill.deleted { color: var(--danger); }
+    .pill.unavailable_non_conclusive, .pill.unknown { color: var(--muted); }
+    .lens-list {
+      display: grid;
+      gap: 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .lens-row {
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.07);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .lens-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+    }
+    .lens-link, .listing-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .explorer-item {
+      display: grid;
+      gap: 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+    }
+    .explorer-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: start;
+    }
+    .meta-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .meta-block {
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.03);
+      padding: 14px;
+      display: grid;
+      gap: 6px;
+    }
+    .meta-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 11px;
+    }
+    .filters {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      align-items: end;
+    }
+    label {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      color: var(--ink);
+      padding: 12px 14px;
+      font: inherit;
+    }
+    .timeline-item {
+      border-left: 2px solid rgba(212,162,103,0.34);
+      padding-left: 14px;
+      display: grid;
+      gap: 4px;
+    }
+    .timeline-item strong { color: var(--ink); }
+    .empty-state {
+      border-radius: var(--radius-md);
+      padding: 18px;
+      border: 1px dashed rgba(255,255,255,0.12);
+      color: var(--muted);
+      background: rgba(255,255,255,0.02);
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    @media (max-width: 1024px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .shell { padding: 16px; }
+      .hero, .panel, .metric, .explorer-item, .cycle-card, .listing-card, .module, .note { padding: 16px; }
+      .hero-actions, .product-nav, .brand-row, .lens-top, .explorer-head { flex-direction: column; align-items: stretch; }
+      .button, .nav-link { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { scroll-behavior: auto; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
+    """
+
+
+
+def _render_product_shell(
+    *,
+    page_key: str,
+    title: str,
+    eyebrow: str,
+    heading: str,
+    intro: str,
+    diagnostics: dict[str, Any],
+    body_html: str,
+    hero_actions: str = "",
+    status_html: str = "",
+    main_id: str = "product-main",
+) -> str:
+    nav_html = _render_product_nav(diagnostics, current=page_key)
+    actions_html = f'<div class="hero-actions">{hero_actions}</div>' if hero_actions else ""
+    status_block = status_html or ""
+    return f'''<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_escape(title)}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23131115'/%3E%3Cpath d='M17 46V18h12.5c9.6 0 16.5 5.3 16.5 14 0 8.5-6.5 14-15.9 14H17Zm8-6h4.3c5.1 0 8.7-3 8.7-8s-3.7-8-9-8H25v16Z' fill='%23d4a267'/%3E%3C/svg%3E">
+  <style>{_shared_shell_styles()}</style>
+</head>
+<body>
+  <a class="skip-link" href="#{_escape(main_id)}">Aller au contenu</a>
+  <main id="{_escape(main_id)}" class="shell">
+    <header class="hero">
+      <div class="brand-row">
+        <span class="brand">Vinted Radar</span>
+        <span class="eyebrow">{_escape(eyebrow)}</span>
+      </div>
+      <h1>{_escape(heading)}</h1>
+      <p class="lead">{_escape(intro)}</p>
+      {status_block}
+      {nav_html}
+      {actions_html}
+    </header>
+    {body_html}
+  </main>
+</body>
+</html>'''
 
 
 
@@ -516,7 +1022,12 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
     recent_failures = freshness.get("recent_acquisition_failures") or []
     runtime = payload.get("runtime") or {}
     latest_cycle = runtime.get("latest_cycle") or {}
-    current_runtime_status = freshness.get("current_runtime_status") or runtime.get("status") or latest_cycle.get("status") or freshness.get("latest_runtime_cycle_status")
+    current_runtime_status = (
+        freshness.get("current_runtime_status")
+        or runtime.get("status")
+        or latest_cycle.get("status")
+        or freshness.get("latest_runtime_cycle_status")
+    )
     runtime_timing_line = None
     if freshness.get("current_runtime_next_resume_at"):
         runtime_timing_line = f"Prochaine reprise : {_format_optional_timestamp(freshness.get('current_runtime_next_resume_at'))}"
@@ -580,7 +1091,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
         )
         + "</ul>"
         if recent_failures
-        else '<p class="muted">Aucune panne récente d’acquisition n’est remontée dans le dernier run connu.</p>'
+        else '<div class="empty-state"><p>Aucune panne récente d’acquisition n’est remontée dans le dernier run connu.</p></div>'
     )
 
     diagnostics_links = [
@@ -595,269 +1106,83 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
         for label, href in diagnostics_links
     )
 
-    return f'''<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinted Radar — aperçu du marché</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230e1620'/%3E%3Cpath d='M18 46V18h14.5c9.6 0 15.5 5.2 15.5 14s-5.9 14-15.2 14H18Zm8-6h5c5 0 8.6-3.1 8.6-8s-3.7-8-8.8-8H26v16Z' fill='%2387c7ff'/%3E%3C/svg%3E">
-  <style>
-    :root {{
-      --bg: #08131e;
-      --bg-soft: #0f2030;
-      --panel: rgba(12, 26, 39, 0.92);
-      --panel-strong: rgba(10, 20, 31, 0.97);
-      --ink: #f3f7fb;
-      --muted: #b7c8d8;
-      --line: rgba(255,255,255,0.10);
-      --accent: #87c7ff;
-      --accent-strong: #3aa2ff;
-      --accent-soft: rgba(135, 199, 255, 0.16);
-      --success: #73d6a6;
-      --warning: #ffcf74;
-      --danger: #ff8a7a;
-      --shadow: 0 26px 80px rgba(0, 0, 0, 0.30);
-      --radius-lg: 28px;
-      --radius-md: 22px;
-      --radius-sm: 16px;
-    }}
-    * {{ box-sizing: border-box; }}
-    html {{ color-scheme: dark; }}
-    body {{
-      margin: 0;
-      min-height: 100vh;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at top left, rgba(58,162,255,0.23), transparent 28%),
-        radial-gradient(circle at bottom right, rgba(115,214,166,0.12), transparent 26%),
-        linear-gradient(180deg, #08131e 0%, #09111a 100%);
-      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-      -webkit-font-smoothing: antialiased;
-    }}
-    body::before {{
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background-image:
-        linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px);
-      background-size: 28px 28px;
-      mask-image: radial-gradient(circle at center, black, transparent 82%);
-      opacity: 0.34;
-    }}
-    a {{ color: inherit; }}
-    .skip-link {{
-      position: absolute;
-      left: 16px;
-      top: -64px;
-      background: var(--panel-strong);
-      color: var(--ink);
-      padding: 12px 16px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      z-index: 10;
-      text-decoration: none;
-    }}
-    .skip-link:focus {{ top: 16px; }}
-    .shell {{ max-width: 1440px; margin: 0 auto; padding: 28px; position: relative; }}
-    .hero, .panel, .module, .note, .metric, .listing-card {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(16px);
-    }}
-    .hero {{
-      border-radius: var(--radius-lg);
-      padding: 30px;
-      display: grid;
-      gap: 20px;
-      background:
-        linear-gradient(135deg, rgba(135,199,255,0.22), rgba(255,255,255,0.03)),
-        var(--panel);
-      margin-bottom: 22px;
-    }}
-    .eyebrow {{
-      text-transform: uppercase;
-      letter-spacing: 0.18em;
-      font-size: 12px;
-      color: var(--accent);
-      font-weight: 700;
-    }}
-    h1, h2, h3 {{
-      margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
-      font-weight: 600;
-      text-wrap: balance;
-    }}
-    h1 {{ font-size: clamp(2.3rem, 5vw, 4.4rem); line-height: 0.96; max-width: 12ch; }}
-    h2 {{ font-size: clamp(1.45rem, 2.1vw, 2.1rem); line-height: 1.04; }}
-    h3 {{ font-size: 1.08rem; line-height: 1.2; }}
-    p {{ margin: 0; }}
-    .lead {{ max-width: 76ch; color: var(--muted); line-height: 1.65; text-wrap: pretty; }}
-    .nav-links, .button-row, .feature-actions, .module-actions {{
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-    }}
-    .button {{
-      min-height: 42px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 11px 16px;
-      border-radius: 999px;
-      border: 1px solid rgba(135,199,255,0.34);
-      background: linear-gradient(135deg, rgba(135,199,255,0.24), rgba(58,162,255,0.08));
-      color: var(--ink);
-      text-decoration: none;
-      font-weight: 600;
-      transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
-      font-variant-numeric: tabular-nums;
-    }}
-    .button:hover {{ transform: translateY(-1px); border-color: rgba(135,199,255,0.6); }}
-    .button:active {{ transform: scale(0.96); }}
-    .button.secondary {{ background: rgba(255,255,255,0.04); border-color: var(--line); color: var(--muted); }}
-    .button:focus-visible, .lens-link:focus-visible, .listing-link:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 3px; }}
-    .cards {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 22px; }}
-    .metric {{ border-radius: var(--radius-md); padding: 22px; }}
-    .metric-label {{ color: var(--muted); text-transform: uppercase; letter-spacing: 0.15em; font-size: 11px; margin-bottom: 12px; }}
-    .metric-value {{ font-size: 1.95rem; font-family: Georgia, "Times New Roman", serif; margin-bottom: 10px; font-variant-numeric: tabular-nums; }}
-    .metric ul {{ margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--muted); line-height: 1.45; text-wrap: pretty; }}
-    .layout {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.92fr); gap: 22px; align-items: start; }}
-    .stack {{ display: grid; gap: 22px; }}
-    .panel {{ border-radius: var(--radius-lg); padding: 24px; }}
-    .panel-head {{ display: grid; gap: 8px; margin-bottom: 18px; }}
-    .panel-head p, .muted {{ color: var(--muted); line-height: 1.6; text-wrap: pretty; }}
-    .module-grid {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }}
-    .module {{ border-radius: var(--radius-md); padding: 18px; display: grid; gap: 16px; }}
-    .module-header {{ display: grid; gap: 10px; }}
-    .badge-row, .lens-badges {{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }}
-    .badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-height: 32px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.04);
-      font-size: 12px;
-      color: var(--muted);
-      font-variant-numeric: tabular-nums;
-    }}
-    .badge.ok {{ color: var(--success); }}
-    .badge.warning {{ color: var(--warning); }}
-    .badge.danger {{ color: var(--danger); }}
-    .lens-list {{ display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }}
-    .lens-row {{
-      border-radius: var(--radius-sm);
-      background: rgba(255,255,255,0.035);
-      border: 1px solid rgba(255,255,255,0.07);
-      padding: 14px;
-      display: grid;
-      gap: 10px;
-    }}
-    .lens-top {{ display: flex; justify-content: space-between; gap: 12px; align-items: start; }}
-    .lens-top strong {{ font-size: 1rem; }}
-    .lens-meta {{ color: var(--muted); line-height: 1.5; text-wrap: pretty; }}
-    .lens-link, .listing-link {{ color: var(--accent); text-decoration: none; font-weight: 600; }}
-    .note-list {{ display: grid; gap: 12px; }}
-    .note {{ border-radius: var(--radius-md); padding: 16px; display: grid; gap: 8px; }}
-    .note.warning {{ border-color: rgba(255, 207, 116, 0.28); background: rgba(255, 207, 116, 0.08); }}
-    .note.danger {{ border-color: rgba(255, 138, 122, 0.24); background: rgba(255, 138, 122, 0.08); }}
-    .note.info {{ border-color: rgba(135, 199, 255, 0.26); background: rgba(135, 199, 255, 0.07); }}
-    .note-title {{ display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }}
-    .note-title strong {{ font-size: 1rem; }}
-    .note-title span {{ color: var(--muted); font-variant-numeric: tabular-nums; }}
-    .listing-grid {{ display: grid; gap: 14px; }}
-    .listing-card {{ border-radius: var(--radius-md); padding: 18px; display: grid; gap: 12px; }}
-    .listing-meta {{ color: var(--muted); line-height: 1.55; text-wrap: pretty; }}
-    .listing-stats {{ display: flex; gap: 8px; flex-wrap: wrap; }}
-    .failure-list {{ margin: 0; padding-left: 18px; display: grid; gap: 10px; color: var(--muted); line-height: 1.5; }}
-    .failure-list strong {{ color: var(--ink); display: block; margin-bottom: 3px; }}
-    @media (max-width: 1080px) {{ .layout {{ grid-template-columns: 1fr; }} }}
-    @media (max-width: 680px) {{
-      .shell {{ padding: 18px; }}
-      .hero, .panel, .metric {{ padding: 18px; }}
-      .module-grid {{ grid-template-columns: 1fr; }}
-      .lens-top {{ flex-direction: column; }}
-    }}
-  </style>
-</head>
-<body>
-  <a class="skip-link" href="#contenu-principal">Aller au contenu</a>
-  <main id="contenu-principal" class="shell">
-    <header class="hero">
-      <span class="eyebrow">Vue d’ensemble du marché</span>
-      <h1>Ce qui bouge maintenant sur le radar Vinted.</h1>
-      <p class="lead">Cette page d’accueil privilégie un aperçu français, lisible et honnête. Le contenu principal vient directement du contrat SQL du dépôt : volumes suivis, fraîcheur réelle, niveaux de confiance, zones fragiles et premiers comparatifs catégories / marques / prix / états / statuts de vente.</p>
-      <nav class="nav-links" aria-label="Raccourcis d’exploration">
-        <a class="button" href="{_escape(diagnostics['explorer'])}">Explorer les annonces</a>
-        <a class="button secondary" href="{_escape(diagnostics['runtime'])}">Ouvrir le runtime</a>
-        <a class="button secondary" href="{_escape(diagnostics['dashboard_api'])}">Ouvrir le JSON aperçu</a>
-        <a class="button secondary" href="{_escape(diagnostics['health'])}">Vérifier la santé</a>
-      </nav>
-    </header>
+    status_html = (
+        '<div class="status-line" role="status" aria-live="polite">'
+        f'<span class="pill {_runtime_status_tone(str(current_runtime_status or "idle"))}">{_escape(_runtime_status_label(str(current_runtime_status or "idle")))}</span>'
+        f'<span class="pill">Dernier scan {_escape(_format_optional_timestamp(freshness.get("latest_successful_scan_at")))}</span>'
+        f'{"" if not runtime_timing_line else f"<span class=\"pill\">{_escape(runtime_timing_line)}</span>"}'
+        '</div>'
+    )
 
+    hero_actions = "".join(
+        [
+            f'<a class="button secondary" href="{_escape(diagnostics["dashboard_api"])}">JSON aperçu</a>',
+            f'<a class="button secondary" href="{_escape(diagnostics["health"])}">Santé</a>',
+        ]
+    )
+
+    body_html = f"""
     <section class="cards" aria-label="Indicateurs clés">{cards_html}</section>
-
     <div class="layout">
       <div class="stack">
         <section class="panel" aria-labelledby="modules-title">
           <div class="panel-head">
             <h2 id="modules-title">Comparaisons à lire avec contexte</h2>
-            <p>Chaque module garde les raisons de support faible, de signal partiel et d’estimation. Rien n’est lissé : les cartes fragiles restent visibles pour que le doute soit lisible, pas caché.</p>
+            <p>Les modules principaux restent visibles même quand le support est fragile. Le doute ne disparaît pas derrière la mise en page.</p>
           </div>
           <div class="module-grid">{modules_html}</div>
         </section>
-
         <section class="panel" aria-labelledby="listings-title">
           <div class="panel-head">
-            <h2 id="listings-title">Exemples d’annonces pour aller plus loin</h2>
-            <p>Ces cartes ouvrent des chemins concrets vers l’explorateur, la fiche JSON détaillée et la page publique quand elle est encore disponible.</p>
+            <h2 id="listings-title">Annonces à ouvrir ensuite</h2>
+            <p>Chaque carte ouvre l’explorateur, la fiche HTML ou le JSON de preuve sans quitter le shell du produit.</p>
           </div>
           {featured_html}
         </section>
       </div>
-
       <aside class="stack" aria-label="Contexte et honnêteté">
         <section class="panel" aria-labelledby="honesty-title">
           <div class="panel-head">
             <h2 id="honesty-title">Niveau d’honnêteté du signal</h2>
-            <p>Ces notes résument les zones d’inférence, de dégradation et d’approximation qui comptent le plus pour interpréter la page correctement.</p>
+            <p>Approximation, inférence et support faible restent lisibles pour garder une lecture crédible du marché.</p>
           </div>
           <div class="note-list">{notes_html}</div>
         </section>
-
         <section class="panel" aria-labelledby="runtime-title">
           <div class="panel-head">
             <h2 id="runtime-title">Fraîcheur et incidents récents</h2>
-            <p>Dernier scan réussi : {_escape(_format_optional_timestamp(freshness.get('latest_successful_scan_at')))} · runtime actuel : {_escape(_runtime_status_label(current_runtime_status))}.</p>
+            <p>Le marché affiché ici reflète la dernière vérité persistée, pas une reconstruction optimiste côté navigateur.</p>
           </div>
           {failure_html}
         </section>
-
         <section class="panel" aria-labelledby="diag-title">
           <div class="panel-head">
             <h2 id="diag-title">Surfaces de diagnostic</h2>
-            <p>Pour diagnostiquer une régression, comparez d’abord cette page avec les JSON publics correspondants : même source, symptômes plus faciles à tracer.</p>
+            <p>Quand une route semble incohérente, compare d’abord le HTML et son JSON jumeau sur la même base d’URL.</p>
           </div>
           <div class="button-row">{diagnostics_html}</div>
         </section>
       </aside>
     </div>
-  </main>
-</body>
-</html>'''
+    """
+
+    return _render_product_shell(
+        page_key="home",
+        title="Vinted Radar — aperçu du marché",
+        eyebrow="Aperçu du marché",
+        heading="Ce qui bouge maintenant sur le radar Vinted.",
+        intro="Une lecture française, large et honnête du marché: volumes suivis, fraîcheur réelle, confiance, segments à surveiller et chemins directs vers l’exploration détaillée.",
+        diagnostics=diagnostics,
+        body_html=body_html,
+        hero_actions=hero_actions,
+        status_html=status_html,
+        main_id="overview-main",
+    )
 
 
 
 def render_runtime_html(payload: dict[str, Any]) -> str:
     summary = payload["summary"]
-    runtime = payload["runtime"]
     latest_cycle = payload.get("latest_cycle") or {}
     recent_cycles = payload.get("recent_cycles") or []
     recent_failures = payload.get("recent_failures") or []
@@ -867,7 +1192,6 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
 
     status = str(summary.get("status") or "idle")
     status_label = _runtime_status_label(status)
-    status_class = _runtime_status_tone(status)
     current_mode = _runtime_mode_label(summary.get("mode") or latest_cycle.get("mode"))
     controller_rows = [
         ("Statut courant", status_label),
@@ -893,25 +1217,30 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
         controller_rows.append(("Erreur horodatée", _format_optional_timestamp(summary.get("last_error_at"))))
 
     controller_html = "".join(
-        f"<div class=\"fact\"><span>{_escape(label)}</span><strong>{_escape(value)}</strong></div>"
+        f'<div class="fact"><span>{_escape(label)}</span><strong>{_escape(value)}</strong></div>'
         for label, value in controller_rows
     )
 
-    cycle_rows_html = "".join(
-        f"""
-        <tr>
-          <td><strong>{_escape(str(cycle.get('cycle_id') or 'n/a'))}</strong></td>
-          <td>{_escape(str(cycle.get('mode') or 'n/a'))}</td>
-          <td><span class=\"pill { _runtime_status_tone(str(cycle.get('status') or 'idle')) }\">{_escape(_runtime_status_label(str(cycle.get('status') or 'idle')))}</span></td>
-          <td>{_escape(_runtime_phase_label(cycle.get('phase')))}</td>
-          <td>{_escape(_format_optional_timestamp(cycle.get('started_at')))}</td>
-          <td>{_escape(_format_optional_timestamp(cycle.get('finished_at')))}</td>
-          <td>{_escape(str(cycle.get('tracked_listings') or 0))}</td>
-          <td>{_escape(str(cycle.get('state_probed_count') or 0))}</td>
-        </tr>
-        """
+    cycle_cards = "".join(
+        f'''
+        <article class="cycle-card">
+          <div class="explorer-head">
+            <div>
+              <h3>Cycle {_escape(str(cycle.get('cycle_id') or 'n/a'))}</h3>
+              <p class="subhead">{_escape(_runtime_phase_label(cycle.get('phase')))} · {_escape(str(cycle.get('mode') or 'n/a'))}</p>
+            </div>
+            <span class="pill {_runtime_status_tone(str(cycle.get('status') or 'idle'))}">{_escape(_runtime_status_label(str(cycle.get('status') or 'idle')))}</span>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-block"><span class="meta-label">Démarré</span><strong>{_escape(_format_optional_timestamp(cycle.get('started_at')))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Terminé</span><strong>{_escape(_format_optional_timestamp(cycle.get('finished_at')))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Annonces</span><strong>{_escape(str(cycle.get('tracked_listings') or 0))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Probes</span><strong>{_escape(str(cycle.get('state_probed_count') or 0))}</strong></div>
+          </div>
+        </article>
+        '''
         for cycle in recent_cycles
-    ) or "<tr><td colspan='8'>Aucun cycle runtime enregistré.</td></tr>"
+    ) or '<div class="empty-state"><p>Aucun cycle runtime enregistré.</p></div>'
 
     failures_html = "".join(
         f"<li><strong>{_escape(str(cycle.get('cycle_id') or 'cycle inconnu'))}</strong><span>{_escape(str(cycle.get('last_error') or 'erreur inconnue'))}</span></li>"
@@ -919,7 +1248,7 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
     ) or '<li><strong>Aucun échec récent</strong><span>Le contrôleur n’a pas conservé de cycle en échec dans la fenêtre demandée.</span></li>'
 
     note_cards = "".join(
-        f"<article class=\"note\"><h3>{_escape(title)}</h3><p>{_escape(text)}</p></article>"
+        f'<article class="note"><h3>{_escape(title)}</h3><p>{_escape(text)}</p></article>'
         for title, text in (
             ("Planifié", str(notes.get("scheduled") or "")),
             ("En pause", str(notes.get("paused") or "")),
@@ -928,196 +1257,140 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
     )
 
     totals = payload.get("totals") or {}
+    metrics_html = "".join(
+        (
+            _metric_card(
+                "Statut courant",
+                _escape(status_label),
+                [
+                    _runtime_status_description(status),
+                    f"Mode {current_mode}",
+                ],
+            ),
+            _metric_card(
+                "Dernier heartbeat",
+                _escape(_format_optional_timestamp(summary.get("updated_at"))),
+                [
+                    f"Âge {_format_seconds_duration(heartbeat.get('age_seconds'))}",
+                    f"Périmé {'oui' if heartbeat.get('is_stale') else 'non'}",
+                ],
+            ),
+            _metric_card(
+                "Pause / reprise",
+                _escape(_format_optional_timestamp(summary.get("next_resume_at") or summary.get("paused_at"))),
+                [
+                    f"Pause {_format_seconds_duration(summary.get('elapsed_pause_seconds'))}",
+                    f"Reprise {_format_seconds_duration(summary.get('next_resume_in_seconds'))}",
+                ],
+            ),
+            _metric_card(
+                "Historique",
+                _escape(str(totals.get("total_cycles") or 0)),
+                [
+                    f"Complétés {totals.get('completed_cycles') or 0}",
+                    f"Échecs {totals.get('failed_cycles') or 0}",
+                ],
+            ),
+        )
+    )
 
-    return f'''<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinted Radar — runtime</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b1118'/%3E%3Cpath d='M16 46V18h15.5c9.6 0 16.5 5.4 16.5 14 0 8.6-6.6 14-16 14H16Zm8-6h5c5.1 0 8.8-3.1 8.8-8s-3.7-8-9.1-8H24v16Z' fill='%237ec6ff'/%3E%3C/svg%3E">
-  <style>
-    :root {{
-      --bg: #0b1118;
-      --panel: rgba(13, 24, 35, 0.94);
-      --ink: #f4f7fb;
-      --muted: #b4c2cf;
-      --line: rgba(255,255,255,0.10);
-      --accent: #7ec6ff;
-      --accent-strong: #3b9dff;
-      --success: #72d1a4;
-      --warning: #ffcf74;
-      --danger: #ff8c7b;
-      --radius-lg: 28px;
-      --radius-md: 20px;
-      --radius-sm: 14px;
-      --shadow: 0 24px 72px rgba(0,0,0,0.34);
-    }}
-    * {{ box-sizing: border-box; }}
-    html {{ color-scheme: dark; -webkit-font-smoothing: antialiased; }}
-    body {{
-      margin: 0;
-      min-height: 100vh;
-      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at top right, rgba(59,157,255,0.18), transparent 26%),
-        radial-gradient(circle at bottom left, rgba(114,209,164,0.10), transparent 24%),
-        linear-gradient(180deg, #0b1118 0%, #0a0f15 100%);
-    }}
-    a {{ color: inherit; }}
-    .skip-link {{ position: absolute; left: 16px; top: -48px; background: #000; color: #fff; padding: 10px 14px; border-radius: 999px; text-decoration: none; z-index: 20; }}
-    .skip-link:focus {{ top: 16px; }}
-    .shell {{ max-width: 1380px; margin: 0 auto; padding: 28px; }}
-    .hero, .panel, .metric, .note {{ background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(16px); }}
-    .hero {{ border-radius: var(--radius-lg); padding: 28px; display: grid; gap: 16px; margin-bottom: 22px; }}
-    .eyebrow {{ text-transform: uppercase; letter-spacing: 0.18em; font-size: 12px; color: var(--accent); font-weight: 700; }}
-    h1, h2, h3 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; text-wrap: balance; }}
-    h1 {{ font-size: clamp(2.1rem, 4.8vw, 4rem); line-height: 0.98; max-width: 12ch; }}
-    h2 {{ font-size: clamp(1.35rem, 2.2vw, 2rem); line-height: 1.06; }}
-    p {{ margin: 0; color: var(--muted); line-height: 1.6; text-wrap: pretty; }}
-    .nav {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-    .button {{ min-height: 42px; display: inline-flex; align-items: center; justify-content: center; padding: 11px 16px; border-radius: 999px; text-decoration: none; font-weight: 600; border: 1px solid rgba(126,198,255,0.34); background: linear-gradient(135deg, rgba(126,198,255,0.24), rgba(59,157,255,0.08)); transition: transform 140ms ease, border-color 140ms ease; font-variant-numeric: tabular-nums; }}
-    .button.secondary {{ background: rgba(255,255,255,0.04); border-color: var(--line); color: var(--muted); }}
-    .button:hover {{ transform: translateY(-1px); border-color: rgba(126,198,255,0.58); }}
-    .button:active {{ transform: scale(0.96); }}
-    .button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 3px; }}
-    .status-line {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
-    .pill {{ display: inline-flex; align-items: center; min-height: 34px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }}
-    .pill.success {{ color: var(--success); }}
-    .pill.warning {{ color: var(--warning); }}
-    .pill.danger {{ color: var(--danger); }}
-    .pill.info {{ color: var(--accent); }}
-    .metrics {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 22px; }}
-    .metric {{ border-radius: var(--radius-md); padding: 20px; }}
-    .metric-label {{ color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; font-size: 11px; margin-bottom: 10px; }}
-    .metric-value {{ font-size: 1.8rem; font-family: Georgia, "Times New Roman", serif; font-variant-numeric: tabular-nums; margin-bottom: 8px; }}
-    .layout {{ display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr); gap: 22px; align-items: start; }}
-    .stack {{ display: grid; gap: 22px; }}
-    .panel {{ border-radius: var(--radius-lg); padding: 24px; }}
-    .panel-head {{ display: grid; gap: 8px; margin-bottom: 18px; }}
-    .facts {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }}
-    .fact {{ border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); padding: 14px; display: grid; gap: 8px; }}
-    .fact span {{ color: var(--muted); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }}
-    .fact strong {{ font-size: 1rem; line-height: 1.45; font-variant-numeric: tabular-nums; }}
-    .note-grid {{ display: grid; gap: 12px; }}
-    .note {{ border-radius: var(--radius-md); padding: 16px; }}
-    .note p {{ margin-top: 6px; }}
-    .failure-list {{ margin: 0; padding-left: 18px; display: grid; gap: 10px; color: var(--muted); }}
-    .failure-list strong {{ color: var(--ink); display: block; margin-bottom: 2px; }}
-    .table-wrap {{ overflow: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-md); }}
-    table {{ width: 100%; border-collapse: collapse; min-width: 960px; }}
-    th, td {{ padding: 13px 14px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; font-variant-numeric: tabular-nums; }}
-    th {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; background: rgba(255,255,255,0.02); }}
-    @media (max-width: 1040px) {{ .layout {{ grid-template-columns: 1fr; }} }}
-    @media (max-width: 720px) {{ .shell {{ padding: 18px; }} .hero, .panel, .metric {{ padding: 18px; }} }}
-    @media (prefers-reduced-motion: reduce) {{ * {{ scroll-behavior: auto; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }} }}
-  </style>
-</head>
-<body>
-  <a class="skip-link" href="#runtime-main">Aller au contenu runtime</a>
-  <main id="runtime-main" class="shell">
-    <header class="hero">
-      <span class="eyebrow">Runtime du radar</span>
-      <h1>Le contrôleur vivant du radar, sans deviner à partir du dernier cycle.</h1>
-      <p>Cette page lit le contrôleur SQLite en direct : statut courant, heartbeat, pause, prochaine reprise, erreur récente et séparation nette entre l'état actuel et l'historique immuable des cycles.</p>
-      <div class="status-line" role="status" aria-live="polite">
-        <span class="pill {status_class}">{_escape(status_label)}</span>
-        <span class="pill">Phase {_escape(_runtime_phase_label(summary.get('phase')))}</span>
-        <span class="pill">Mode {_escape(str(current_mode))}</span>
-      </div>
-      <nav class="nav" aria-label="Raccourcis runtime">
-        <a class="button" href="{_escape(diagnostics['home'])}">Retour à l’aperçu</a>
-        <a class="button secondary" href="{_escape(diagnostics['runtime_api'])}">JSON runtime</a>
-        <a class="button secondary" href="{_escape(diagnostics['dashboard_api'])}">JSON aperçu</a>
-        <a class="button secondary" href="{_escape(diagnostics['health'])}">Santé</a>
-      </nav>
-    </header>
+    status_html = (
+        '<div class="status-line" role="status" aria-live="polite">'
+        f'<span class="pill {_runtime_status_tone(status)}">{_escape(status_label)}</span>'
+        f'<span class="pill">Phase {_escape(_runtime_phase_label(summary.get("phase")))}</span>'
+        f'<span class="pill">Mode {_escape(str(current_mode))}</span>'
+        '</div>'
+    )
 
-    <section class="metrics" aria-label="Indicateurs runtime">
-      <article class="metric">
-        <div class="metric-label">Statut courant</div>
-        <div class="metric-value">{_escape(status_label)}</div>
-        <p>{_escape(_runtime_status_description(status))}</p>
-      </article>
-      <article class="metric">
-        <div class="metric-label">Dernier heartbeat</div>
-        <div class="metric-value">{_escape(_format_optional_timestamp(summary.get('updated_at')))}</div>
-        <p>Âge { _escape(_format_seconds_duration(heartbeat.get('age_seconds'))) } · stale { _escape('oui' if heartbeat.get('is_stale') else 'non') }</p>
-      </article>
-      <article class="metric">
-        <div class="metric-label">Pause / reprise</div>
-        <div class="metric-value">{_escape(_format_optional_timestamp(summary.get('next_resume_at') or summary.get('paused_at')))}</div>
-        <p>Pause { _escape(_format_seconds_duration(summary.get('elapsed_pause_seconds'))) } · reprise { _escape(_format_seconds_duration(summary.get('next_resume_in_seconds'))) }</p>
-      </article>
-      <article class="metric">
-        <div class="metric-label">Historique</div>
-        <div class="metric-value">{_escape(str(totals.get('total_cycles') or 0))}</div>
-        <p>Complétés { _escape(str(totals.get('completed_cycles') or 0)) } · échecs { _escape(str(totals.get('failed_cycles') or 0)) }</p>
-      </article>
-    </section>
+    hero_actions = "".join(
+        [
+            f'<a class="button secondary" href="{_escape(diagnostics["runtime_api"])}">JSON runtime</a>',
+            f'<a class="button secondary" href="{_escape(diagnostics["health"])}">Santé</a>',
+        ]
+    )
 
+    body_html = f"""
+    <section class="metrics" aria-label="Indicateurs runtime">{metrics_html}</section>
     <div class="layout">
       <div class="stack">
         <section class="panel" aria-labelledby="controller-title">
           <div class="panel-head">
             <h2 id="controller-title">État courant du contrôleur</h2>
-            <p>Ce bloc répond à la question « que fait le runtime maintenant ? » sans confondre attente saine, pause opérateur et dernier résultat de cycle.</p>
+            <p>Cette vue répond à la question « que fait le radar maintenant ? » sans confondre attente saine, pause opérateur et dernier résultat de cycle.</p>
           </div>
           <div class="facts">{controller_html}</div>
         </section>
-
         <section class="panel" aria-labelledby="cycles-title">
           <div class="panel-head">
             <h2 id="cycles-title">Cycles récents</h2>
-            <p>Les cycles restent l'historique immuable. Le contrôleur au-dessus représente l'état vivant du scheduler.</p>
+            <p>Les cycles restent l’historique immuable. Le contrôleur au-dessus reste la vérité vivante du scheduler.</p>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Cycle</th>
-                  <th>Mode</th>
-                  <th>Statut</th>
-                  <th>Phase</th>
-                  <th>Démarré</th>
-                  <th>Terminé</th>
-                  <th>Annonces</th>
-                  <th>Probes</th>
-                </tr>
-              </thead>
-              <tbody>{cycle_rows_html}</tbody>
-            </table>
-          </div>
+          <div class="cycle-grid">{cycle_cards}</div>
         </section>
       </div>
-
       <aside class="stack">
         <section class="panel" aria-labelledby="failures-title">
           <div class="panel-head">
             <h2 id="failures-title">Échecs récents</h2>
-            <p>Un échec reste visible ici même si la boucle peut repartir ensuite en `scheduled`.</p>
+            <p>Un échec reste lisible ici même si la boucle repart ensuite en `scheduled`.</p>
           </div>
           <ul class="failure-list">{failures_html}</ul>
         </section>
-
         <section class="panel" aria-labelledby="semantics-title">
           <div class="panel-head">
             <h2 id="semantics-title">Sémantique du runtime</h2>
-            <p>Ces définitions évitent les faux positifs du type « completed = runtime terminé » alors que le scheduler attend simplement la prochaine fenêtre.</p>
+            <p>Ces définitions évitent les faux positifs du type « terminé » alors que le scheduler attend simplement la prochaine fenêtre.</p>
           </div>
           <div class="note-grid">{note_cards}</div>
         </section>
       </aside>
     </div>
-  </main>
-</body>
-</html>'''
+    """
+
+    return _render_product_shell(
+        page_key="runtime",
+        title="Vinted Radar — runtime",
+        eyebrow="Runtime",
+        heading="Le contrôleur vivant du radar, sans deviner à partir du dernier cycle.",
+        intro="Statut courant, heartbeat, pause, prochaine reprise, erreurs récentes et séparation nette entre l’état actuel et l’historique immuable des cycles.",
+        diagnostics=diagnostics,
+        body_html=body_html,
+        hero_actions=hero_actions,
+        status_html=status_html,
+        main_id="runtime-main",
+    )
 
 
 
-def _serialize_overview_listing_item(item: dict[str, Any]) -> dict[str, Any]:
-    return _serialize_explorer_item(item)
+def render_listing_detail_html(detail: dict[str, Any]) -> str:
+    diagnostics = detail.get("diagnostics") if isinstance(detail.get("diagnostics"), dict) else {}
+    detail_panel = _render_detail_panel(detail)
+    hero_actions = f'<a class="button secondary" href="{_escape(str(diagnostics.get("detail_api") or "#"))}">JSON détail</a>'
+    status_html = (
+        '<div class="status-line">'
+        f'<span class="pill {_escape(str(detail.get("state_code") or "unknown"))}">{_escape(_state_label(detail.get("state_code")))}</span>'
+        f'<span class="pill">{_escape(_basis_label(detail.get("basis_kind")))}</span>'
+        f'<span class="pill">Confiance {_escape(_confidence_label(detail.get("confidence_label")))}</span>'
+        '</div>'
+    )
+    body_html = f'<section class="panel">{detail_panel}</section>'
+    return _render_product_shell(
+        page_key="detail",
+        title=f"Vinted Radar — annonce {int(detail['listing_id'])}",
+        eyebrow="Fiche annonce",
+        heading=str(detail.get("title") or f"Annonce {int(detail['listing_id'])}"),
+        intro="Une lecture détaillée de l’annonce suivie, dans le même shell que l’accueil, l’explorateur et le runtime.",
+        diagnostics=diagnostics,
+        body_html=body_html,
+        hero_actions=hero_actions,
+        status_html=status_html,
+        main_id="listing-main",
+    )
+
+
+
+def _serialize_overview_listing_item(item: dict[str, Any], *, route_context: RouteContext | None = None) -> dict[str, Any]:
+    return _serialize_explorer_item(item, route_context=route_context)
 
 
 
@@ -1338,6 +1611,7 @@ def _render_featured_listing_cards(featured_listings: list[dict[str, Any]]) -> s
               <p class="listing-meta">Publication estimée : {_escape(str(item.get("estimated_publication_at") or "n/a"))} · { _escape(str(item.get("estimated_publication_note") or "Aucune estimation publique supplémentaire.")) }</p>
               <div class="feature-actions">
                 <a class="button" href="{_escape(str(item.get("explorer_href") or "/explorer"))}">Ouvrir dans l’explorateur</a>
+                <a class="button secondary" href="{_escape(str(item.get("detail_href") or "#"))}">Détail</a>
                 <a class="button secondary" href="{_escape(str(item.get("detail_api") or "#"))}">JSON détail</a>
                 {canonical_link}
               </div>
@@ -1412,195 +1686,138 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
         page_size=int(selected["page_size"]),
     )
 
-    root_options = "".join(_option_html(item["value"], item["label"], selected["root"]) for item in available["roots"])
-    catalog_options = "".join(_option_html(item["value"], item["label"], selected["catalog_id"]) for item in available["catalogs"])
-    brand_options = "".join(_option_html(item["value"], item["label"], selected["brand"]) for item in available["brands"])
-    condition_options = "".join(_option_html(item["value"], item["label"], selected["condition"]) for item in available["conditions"])
-    sort_options = "".join(_option_html(item["value"], item["label"], selected["sort"]) for item in available["sorts"])
-    selected_sort_label = next((item["label"] for item in available["sorts"] if item["value"] == selected["sort"]), str(selected["sort"]))
+    root_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["root"]) for item in available["roots"])
+    catalog_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["catalog_id"]) for item in available["catalogs"])
+    brand_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["brand"]) for item in available["brands"])
+    condition_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["condition"]) for item in available["conditions"])
+    sort_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["sort"]) for item in available["sorts"])
     page_size_options = "".join(_option_html(str(value), str(value), selected["page_size"]) for value in (25, 50, 100))
+    selected_sort_label = next((_localized_explorer_option_label(item["label"]) for item in available["sorts"] if item["value"] == selected["sort"]), str(selected["sort"]))
 
-    if items:
-        rows_html = "".join(
-            f"""
-            <tr>
-              <td><strong>{int(item['listing_id'])}</strong></td>
-              <td>
-                <div><strong>{_escape(str(item.get('title') or '(untitled)'))}</strong></div>
-                <div class=\"link-muted\">{_escape(str(item.get('brand') or 'Unknown brand'))}</div>
-                <div class=\"link-muted\">{'<a class="link-muted" href="' + _escape(str(item.get('seller_profile_url'))) + '" target="_blank" rel="noreferrer">' + _escape(str(item.get('seller_display') or 'Seller not exposed')) + '</a>' if item.get('seller_profile_url') else _escape(str(item.get('seller_display') or 'Seller not exposed'))}</div>
-              </td>
-              <td>{_escape(str(item.get('primary_catalog_path') or item.get('root_title') or 'Unknown'))}</td>
-              <td>
-                <div>{_escape(str(item.get('price_display') or 'price n/a'))}</div>
-                <div class=\"link-muted\">total {_escape(str(item.get('total_price_display') or 'n/a'))}</div>
-              </td>
-              <td>{_escape(str(item.get('visible_likes_display') or 'n/a'))}</td>
-              <td>{_escape(str(item.get('visible_views_display') or 'n/a'))}</td>
-              <td>
-                <div>{_escape(str(item.get('estimated_publication_at') or 'n/a'))}</div>
-                <div class=\"link-muted\">{_escape(str(item.get('estimated_publication_note') or 'No image timestamp signal'))}</div>
-              </td>
-              <td>
-                <div>{_escape(str(item.get('radar_first_seen_display') or 'n/a'))}</div>
-                <div class=\"link-muted\">last {_escape(str(item.get('radar_last_seen_display') or 'n/a'))}</div>
-              </td>
-              <td>
-                <div>{_escape(str(item.get('freshness_bucket') or 'unknown'))}</div>
-                <div class=\"link-muted\">{_escape(str(item.get('observation_count') or 0))} obs</div>
-              </td>
-              <td>{_escape(str(item.get('latest_probe_display') or 'Not probed'))}</td>
-              <td>
-                <div class=\"actions\">
-                  <a class=\"button secondary\" href=\"{_escape(str(item.get('explorer_href') or '/explorer'))}\">Explorer</a>
-                  <a class=\"button secondary\" href=\"{_escape(str(item.get('detail_api')))}\">JSON</a>
-                  {'' if not item.get('canonical_href') else f'<a class="button secondary" href="{_escape(str(item.get("canonical_href")))}" target="_blank" rel="noreferrer">Vinted</a>'}
-                </div>
-              </td>
-            </tr>
-            """
-            for item in items
-        )
-    else:
-        rows_html = "<tr><td colspan='10'>No tracked listings match the current explorer filters.</td></tr>"
+    explorer_cards = "".join(
+        f'''
+        <article class="explorer-item">
+          <div class="explorer-head">
+            <div>
+              <h3>{_escape(str(item.get('title') or 'Annonce sans titre'))}</h3>
+              <p class="subhead">#{int(item['listing_id'])} · {_escape(str(item.get('brand') or 'Marque inconnue'))}</p>
+            </div>
+            <div class="listing-stats">
+              <span class="badge ok">{_escape(str(item.get('price_display') or 'prix n/a'))}</span>
+              <span class="badge">{_escape(_freshness_label(item.get('freshness_bucket')))}</span>
+              <span class="badge">Likes {_escape(str(item.get('visible_likes_display') or 'n/a'))}</span>
+              <span class="badge">Vues {_escape(str(item.get('visible_views_display') or 'n/a'))}</span>
+            </div>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-block">
+              <span class="meta-label">Catalogue</span>
+              <strong>{_escape(str(item.get('primary_catalog_path') or item.get('root_title') or 'Catalogue inconnu'))}</strong>
+            </div>
+            <div class="meta-block">
+              <span class="meta-label">Vendeur visible</span>
+              <strong>{'<a class="listing-link" href="' + _escape(str(item.get('seller_profile_url'))) + '" target="_blank" rel="noreferrer">' + _escape(str(item.get('seller_display') or 'Vendeur non exposé')) + '</a>' if item.get('seller_profile_url') else _escape(str(item.get('seller_display') or 'Vendeur non exposé'))}</strong>
+            </div>
+            <div class="meta-block">
+              <span class="meta-label">Publication estimée</span>
+              <strong>{_escape(str(item.get('estimated_publication_at') or 'n/a'))}</strong>
+              <span class="link-muted">{_escape(str(item.get('estimated_publication_note') or 'Signal indisponible'))}</span>
+            </div>
+            <div class="meta-block">
+              <span class="meta-label">Radar</span>
+              <strong>{_escape(str(item.get('radar_first_seen_display') or 'n/a'))}</strong>
+              <span class="link-muted">Dernière vue {_escape(str(item.get('radar_last_seen_display') or 'n/a'))}</span>
+            </div>
+            <div class="meta-block">
+              <span class="meta-label">Dernière probe</span>
+              <strong>{_escape(str(item.get('latest_probe_display') or 'Aucune probe'))}</strong>
+              <span class="link-muted">{_escape(str(item.get('observation_count') or 0))} observations</span>
+            </div>
+            <div class="meta-block">
+              <span class="meta-label">Total affiché</span>
+              <strong>{_escape(str(item.get('total_price_display') or 'n/a'))}</strong>
+              <span class="link-muted">Condition {_escape(str(item.get('condition_label') or 'n/a'))}</span>
+            </div>
+          </div>
+          <div class="actions">
+            <a class="button secondary" href="{_escape(str(item.get('detail_href') or '#'))}">Ouvrir la fiche</a>
+            <a class="button secondary" href="{_escape(str(item.get('detail_api') or '#'))}">JSON</a>
+            <a class="button secondary" href="{_escape(str(item.get('explorer_href') or diagnostics['explorer']))}">Vue ciblée</a>
+            {'' if not item.get('canonical_href') else f'<a class="button secondary" href="{_escape(str(item.get("canonical_href")))}" target="_blank" rel="noreferrer">Vinted</a>'}
+          </div>
+        </article>
+        '''
+        for item in items
+    ) or f'<div class="empty-state"><p>{_escape(str(results.get("empty_reason") or "Aucune annonce suivie ne correspond à ces filtres."))}</p></div>'
 
-    previous_href = _explorer_query(filters, overrides={"page": max(filters.page - 1, 1)})
-    next_href = _explorer_query(filters, overrides={"page": filters.page + 1})
+    previous_href = _explorer_query(filters, base_href=diagnostics["explorer"], overrides={"page": max(filters.page - 1, 1)})
+    next_href = _explorer_query(filters, base_href=diagnostics["explorer"], overrides={"page": filters.page + 1})
 
-    return f"""<!doctype html>
-<html lang=\"fr\">
-<head>
-  <meta charset=\"utf-8\">
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>Vinted Radar — explorateur</title>
-  <link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2315100f'/%3E%3Cpath d='M17 46V18h12.5c9.6 0 16.5 5.3 16.5 14 0 8.5-6.5 14-15.9 14H17Zm8-6h4.3c5.1 0 8.7-3 8.7-8s-3.7-8-9-8H25v16Z' fill='%23d5a15b'/%3E%3C/svg%3E'>
-  <style>
-    :root {{
-      --bg: #11100d;
-      --panel: rgba(29, 25, 20, 0.92);
-      --ink: #f3ece0;
-      --muted: #c9baa4;
-      --accent: #d5a15b;
-      --line: rgba(255,255,255,0.08);
-      --shadow: 0 24px 70px rgba(0,0,0,0.42);
-      --radius: 22px;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{ margin: 0; color: var(--ink); background: linear-gradient(180deg, #15120f 0%, #0f0d0b 100%); font-family: \"Avenir Next\", \"Segoe UI\", sans-serif; min-height: 100vh; }}
-    .shell {{ max-width: 1520px; margin: 0 auto; padding: 32px; }}
-    .panel {{ background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; margin-bottom: 22px; }}
-    h1, h2 {{ font-family: \"Iowan Old Style\", \"Palatino Linotype\", Georgia, serif; margin: 0; }}
-    .eyebrow {{ text-transform: uppercase; letter-spacing: 0.22em; font-size: 12px; color: var(--accent); }}
-    .subhead, .link-muted {{ color: var(--muted); }}
-    .filters {{ display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; }}
-    label {{ display: grid; gap: 8px; color: var(--muted); font-size: 0.92rem; }}
-    input, select {{ width: 100%; border: 1px solid rgba(255,255,255,0.09); border-radius: 14px; background: rgba(255,255,255,0.04); color: var(--ink); padding: 12px 14px; font: inherit; }}
-    .actions, .api-links, .pagination {{ display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
-    .button {{ appearance: none; border: 1px solid rgba(213,161,91,0.35); border-radius: 999px; padding: 12px 16px; background: linear-gradient(135deg, rgba(213,161,91,0.26), rgba(213,161,91,0.08)); color: var(--ink); cursor: pointer; text-decoration: none; font-weight: 600; }}
-    .button.secondary {{ background: rgba(255,255,255,0.03); border-color: var(--line); color: var(--muted); }}
-    .button.disabled {{ opacity: 0.45; pointer-events: none; }}
-    .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 16px; }}
-    .stat {{ padding: 16px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); }}
-    .table-wrap {{ overflow: auto; border: 1px solid var(--line); border-radius: 18px; }}
-    table {{ width: 100%; border-collapse: collapse; min-width: 1320px; }}
-    th, td {{ padding: 13px 14px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }}
-    th {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); background: rgba(255,255,255,0.02); }}
-    .notes {{ display: grid; gap: 8px; margin-top: 14px; }}
-    .notes p {{ margin: 0; color: var(--muted); line-height: 1.55; }}
-  </style>
-</head>
-<body>
-  <main class=\"shell\">
-    <section class=\"panel\">
-      <span class=\"eyebrow\">SQL-backed explorer</span>
-      <h1>Listing explorer separated from the dashboard summary.</h1>
-      <p class=\"subhead\">This surface filters, sorts, and pages tracked listings in SQLite first, then enriches only the current page with observation history and latest probe context. Use the dashboard for market summary and ranking proof; use this explorer for broad corpus browsing.</p>
-      <div class=\"notes\">
-        <p>{_escape(str(notes.get('scalability') or ''))}</p>
-        <p>{_escape(str(notes.get('estimated_publication') or ''))}</p>
+    status_html = (
+        '<div class="status-line">'
+        f'<span class="pill">{_escape(str(results["total_listings"]))} annonces</span>'
+        f'<span class="pill">Page {results["page"]}/{results["total_pages"] or 1}</span>'
+        f'<span class="pill">Tri { _escape(str(selected_sort_label)) }</span>'
+        '</div>'
+    )
+
+    hero_actions = f'<a class="button secondary" href="{_escape(diagnostics["explorer_api"] + _explorer_suffix_query(filters))}">JSON explorateur</a>'
+
+    body_html = f"""
+    <section class="panel" aria-labelledby="filters-title">
+      <div class="panel-head">
+        <h2 id="filters-title">Filtres d’exploration</h2>
+        <p>Cette route parcourt le corpus réel côté SQL puis n’enrichit que la page visible. Le shell reste le même que sur l’accueil et le runtime.</p>
       </div>
-      <div class=\"api-links\" style=\"margin-top:16px;\">
-        <a class=\"button secondary\" href=\"/\">Back to dashboard</a>
-        <a class=\"button secondary\" href=\"{_escape(diagnostics['explorer_api'] + _explorer_suffix_query(filters))}\">Explorer payload</a>
-      </div>
-    </section>
-
-    <section class=\"panel\">
-      <form method=\"get\" class=\"filters\">
-        <label>
-          Root
-          <select name=\"root\">{root_options}</select>
-        </label>
-        <label>
-          Catalog
-          <select name=\"catalog_id\">{catalog_options}</select>
-        </label>
-        <label>
-          Brand
-          <select name=\"brand\">{brand_options}</select>
-        </label>
-        <label>
-          Condition
-          <select name=\"condition\">{condition_options}</select>
-        </label>
-        <label>
-          Search
-          <input type=\"search\" name=\"q\" value=\"{_escape(selected['q'])}\" placeholder=\"Title, brand, seller, listing ID\">
-        </label>
-        <label>
-          Sort
-          <select name=\"sort\">{sort_options}</select>
-        </label>
-        <label>
-          Page size
-          <select name=\"page_size\">{page_size_options}</select>
-        </label>
-        <input type=\"hidden\" name=\"page\" value=\"1\">
-        <div class=\"actions\">
-          <button class=\"button\" type=\"submit\">Apply filters</button>
-          <a class=\"button secondary\" href=\"/explorer\">Reset</a>
+      <form method="get" class="filters">
+        <label>Racine<select name="root">{root_options}</select></label>
+        <label>Catalogue<select name="catalog_id">{catalog_options}</select></label>
+        <label>Marque<select name="brand">{brand_options}</select></label>
+        <label>État<select name="condition">{condition_options}</select></label>
+        <label>Recherche<input type="search" name="q" value="{_escape(selected['q'])}" placeholder="Titre, marque, vendeur, ID annonce"></label>
+        <label>Tri<select name="sort">{sort_options}</select></label>
+        <label>Taille de page<select name="page_size">{page_size_options}</select></label>
+        <input type="hidden" name="page" value="1">
+        <div class="actions">
+          <button class="button" type="submit">Appliquer</button>
+          <a class="button secondary" href="{_escape(diagnostics['explorer'])}">Réinitialiser</a>
         </div>
       </form>
-      <div class=\"stats\">
-        <div class=\"stat\"><strong>{results['total_listings']}</strong><br><span class=\"link-muted\">matching tracked listings</span></div>
-        <div class=\"stat\"><strong>{results['page']}</strong><br><span class=\"link-muted\">current page / {results['total_pages'] or 0}</span></div>
-        <div class=\"stat\"><strong>{available['tracked_listings']}</strong><br><span class=\"link-muted\">tracked listings in DB</span></div>
-        <div class=\"stat\"><strong>{_escape(str(selected_sort_label))}</strong><br><span class=\"link-muted\">active SQL sort</span></div>
+      <div class="stats" style="margin-top:16px;">
+        <div class="metric"><div class="metric-label">Résultats</div><div class="metric-value">{results['total_listings']}</div><p>annonces correspondant aux filtres actifs</p></div>
+        <div class="metric"><div class="metric-label">Page</div><div class="metric-value">{results['page']}</div><p>sur {results['total_pages'] or 1}</p></div>
+        <div class="metric"><div class="metric-label">Corpus</div><div class="metric-value">{available['tracked_listings']}</div><p>annonces suivies dans la base</p></div>
+        <div class="metric"><div class="metric-label">Note</div><div class="metric-value">SQL</div><p>{_escape(str(notes.get('scalability') or ''))}</p></div>
       </div>
     </section>
 
-    <section class=\"panel\">
-      <div class=\"table-wrap\">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Listing</th>
-              <th>Catalog</th>
-              <th>Price</th>
-              <th>Likes</th>
-              <th>Views</th>
-              <th>Estimated publication</th>
-              <th>Radar timing</th>
-              <th>Freshness</th>
-              <th>Latest probe</th>
-              <th>Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows_html}
-          </tbody>
-        </table>
+    <section class="panel" aria-labelledby="results-title">
+      <div class="panel-head">
+        <h2 id="results-title">Annonces du corpus</h2>
+        <p>{_escape(str(notes.get('estimated_publication') or ''))}</p>
       </div>
-      <div class=\"pagination\" style=\"margin-top:16px;\">
-        <a class=\"button secondary{' disabled' if not results['has_previous_page'] else ''}\" href=\"{_escape(previous_href)}\">Previous</a>
-        <span class=\"link-muted\">Page {results['page']} of {results['total_pages'] or 1}</span>
-        <a class=\"button secondary{' disabled' if not results['has_next_page'] else ''}\" href=\"{_escape(next_href)}\">Next</a>
+      <div class="explorer-grid">{explorer_cards}</div>
+      <div class="pagination" style="margin-top:16px;">
+        <a class="button secondary{' disabled' if not results['has_previous_page'] else ''}" href="{_escape(previous_href)}">Page précédente</a>
+        <span class="link-muted">Page {results['page']} sur {results['total_pages'] or 1}</span>
+        <a class="button secondary{' disabled' if not results['has_next_page'] else ''}" href="{_escape(next_href)}">Page suivante</a>
       </div>
     </section>
-  </main>
-</body>
-</html>"""
+    """
+
+    return _render_product_shell(
+        page_key="explorer",
+        title="Vinted Radar — explorateur",
+        eyebrow="Explorateur",
+        heading="Parcourir le corpus sans quitter le shell du produit.",
+        intro="Filtres, tri et pagination restent côté SQL. La page sert la vue utile du moment, avec une lecture mobile et desktop sur la même structure.",
+        diagnostics=diagnostics,
+        body_html=body_html,
+        hero_actions=hero_actions,
+        status_html=status_html,
+        main_id="explorer-main",
+    )
+
 
 
 def _render_filter_form(payload: dict[str, Any]) -> str:
@@ -1638,8 +1855,8 @@ def _render_filter_form(payload: dict[str, Any]) -> str:
           <select name=\"limit\">{''.join(_option_html(str(value), str(value), selected['limit']) for value in (5, 10, 15, 24))}</select>
         </label>
         <div class=\"actions\">
-          <button class=\"button\" type=\"submit\">Apply filters</button>
-          <a class=\"button secondary\" href=\"/\">Reset</a>
+          <button class=\"button\" type=\"submit\">Appliquer</button>
+          <a class=\"button secondary\" href=\"/\">Réinitialiser</a>
         </div>
       </form>
     """
@@ -1687,7 +1904,7 @@ def _render_rankings_table(
               <td><strong>{listing_id}</strong></td>
               <td>
                 <div><strong>{_escape(str(row.get('title') or '(untitled)'))}</strong></div>
-                <div class=\"link-muted\">{_escape(str(row.get('brand') or 'Unknown brand'))}</div>
+                <div class=\"link-muted\">{_escape(str(row.get('brand') or 'Marque inconnue'))}</div>
               </td>
               <td>{_escape(str(row.get('primary_catalog_path') or row.get('root_title') or 'Unknown'))}</td>
               <td><span class=\"pill {state_code}\">{_escape(state_code)}</span></td>
@@ -1730,21 +1947,21 @@ def _render_rankings_table(
 
 def _render_detail_panel(detail: dict[str, Any] | None) -> str:
     if detail is None:
-        return "<div><h2>No detail selected</h2><p class=\"subhead\">Pick a ranking row to inspect its history, score factors, and inference basis.</p></div>"
+        return "<div><h2>Aucune fiche sélectionnée</h2><p class=\"subhead\">Choisis une annonce depuis l’explorateur pour lire son historique, ses scores et sa base d’inférence.</p></div>"
 
     state_explanation = detail.get("state_explanation") if isinstance(detail.get("state_explanation"), dict) else {}
     score_explanation = detail.get("score_explanation") if isinstance(detail.get("score_explanation"), dict) else {}
     score_context = score_explanation.get("context") if isinstance(score_explanation, dict) else None
     score_context_html = (
-        f"<li>Context { _escape(str(score_context.get('label') or 'unknown')) } · peers {score_context.get('sample_size', 0)} · percentile {score_context.get('price_percentile')}</li>"
+        f"<li>Contexte { _escape(str(score_context.get('label') or 'inconnu')) } · pairs {score_context.get('sample_size', 0)} · percentile {score_context.get('price_percentile')}</li>"
         if score_context is not None
-        else "<li>No trustworthy premium context sample for this listing yet.</li>"
+        else "<li>Aucun contexte premium assez solide pour cette annonce pour l’instant.</li>"
     )
     history_rows = detail["history"]["timeline"] if detail.get("history") else []
     history_html = "".join(
-        f"<div class=\"timeline-item\"><strong>{_escape(str(row.get('observed_at') or 'unknown'))}</strong><span>{_escape(_format_money(row.get('price_amount_cents'), row.get('price_currency')))} · {_escape(str(row.get('catalog_path') or 'Unknown catalog'))} · sightings {row.get('sighting_count', 0)}</span></div>"
+        f"<div class=\"timeline-item\"><strong>{_escape(str(row.get('observed_at') or 'inconnu'))}</strong><span>{_escape(_format_money(row.get('price_amount_cents'), row.get('price_currency')))} · {_escape(str(row.get('catalog_path') or 'Catalogue inconnu'))} · apparitions {row.get('sighting_count', 0)}</span></div>"
         for row in history_rows
-    ) or "<div class=\"timeline-item\"><span>No observation timeline recorded.</span></div>"
+    ) or "<div class=\"timeline-item\"><span>Aucune timeline d’observation enregistrée.</span></div>"
     transitions_html = "".join(
         f"<div class=\"timeline-item\"><strong>{_escape(str(item['label']))}</strong><span>{_escape(str(item['timestamp']))}</span><br><span>{_escape(str(item['description']))}</span></div>"
         for item in detail["transitions"]
@@ -1754,64 +1971,64 @@ def _render_detail_panel(detail: dict[str, Any] | None) -> str:
     seller = detail.get("seller") if isinstance(detail.get("seller"), dict) else {}
     timing = detail.get("timing") if isinstance(detail.get("timing"), dict) else {}
     seller_html = (
-        f'<a class="link-muted" href="{_escape(str(seller.get("profile_url")))}" target="_blank" rel="noreferrer">{_escape(str(seller.get("login") or seller.get("display") or "Seller not exposed"))}</a>'
+        f'<a class="link-muted" href="{_escape(str(seller.get("profile_url")))}" target="_blank" rel="noreferrer">{_escape(str(seller.get("login") or seller.get("display") or "Vendeur non exposé"))}</a>'
         if seller.get("profile_url")
-        else f'<span class="link-muted">{_escape(str(seller.get("display") or "Seller not exposed"))}</span>'
+        else f'<span class="link-muted">{_escape(str(seller.get("display") or "Vendeur non exposé"))}</span>'
     )
 
     return f"""
       <div>
-        <span class=\"eyebrow\">Listing detail</span>
-        <h2>{_escape(str(detail.get('title') or '(untitled)'))}</h2>
-        <p class=\"subhead\">{_escape(str(detail.get('primary_catalog_path') or detail.get('root_title') or 'Unknown catalog'))}</p>
+        <span class=\"eyebrow\">Fiche annonce</span>
+        <h2>{_escape(str(detail.get('title') or '(sans titre)'))}</h2>
+        <p class=\"subhead\">{_escape(str(detail.get('primary_catalog_path') or detail.get('root_title') or 'Catalogue inconnu'))}</p>
       </div>
       <div class=\"detail-meta\">
-        <span class=\"pill { _escape(str(detail.get('state_code') or 'unknown')) }\">{_escape(str(detail.get('state_code') or 'unknown'))}</span>
-        <span class=\"pill\">{_escape(str(detail.get('basis_kind') or 'unknown'))}</span>
-        <span class=\"pill\">{_escape(str(detail.get('confidence_label') or 'unknown'))} confidence</span>
+        <span class=\"pill { _escape(str(detail.get('state_code') or 'unknown')) }\">{_escape(_state_label(detail.get('state_code')))}</span>
+        <span class=\"pill\">{_escape(_basis_label(detail.get('basis_kind')))}</span>
+        <span class=\"pill\">Confiance {_escape(_confidence_label(detail.get('confidence_label')))}</span>
       </div>
       <div class=\"detail-grid\">
         {''.join(f'<div class="signal"><span class="signal-label">{_escape(item["label"])}</span>{_escape(str(item["value"]))}</div>' for item in detail['signals'])}
       </div>
       <div class=\"signal\">
-        <span class=\"signal-label\">Public fields</span>
-        <strong>{_escape(str(detail.get('price_display') or 'price n/a'))}</strong> · <span class=\"link-muted\">total displayed { _escape(str(detail.get('total_price_display') or 'n/a')) }</span><br>
-        <span class=\"link-muted\">Brand { _escape(str(detail.get('brand') or 'Unknown')) } · Size { _escape(str(detail.get('size_label') or 'n/a')) } · Condition { _escape(str(detail.get('condition_label') or 'n/a')) }</span>
+        <span class=\"signal-label\">Champs publics</span>
+        <strong>{_escape(str(detail.get('price_display') or 'prix n/a'))}</strong> · <span class=\"link-muted\">total affiché { _escape(str(detail.get('total_price_display') or 'n/a')) }</span><br>
+        <span class=\"link-muted\">Marque { _escape(str(detail.get('brand') or 'Inconnue')) } · Taille { _escape(str(detail.get('size_label') or 'n/a')) } · État { _escape(str(detail.get('condition_label') or 'n/a')) }</span>
       </div>
       <div class=\"signal\">
-        <span class=\"signal-label\">Visible seller</span>
+        <span class=\"signal-label\">Vendeur visible</span>
         {seller_html}<br>
-        <span class=\"link-muted\">Estimated publication comes from the main image timestamp when present. Radar first seen is the first moment this collector observed the listing.</span>
+        <span class=\"link-muted\">La publication estimée vient du timestamp de l’image principale quand il existe. Le premier vu radar correspond au premier moment où ce collecteur a observé l’annonce.</span>
       </div>
       <div>
-        <h3>Timing</h3>
+        <h3>Repères temporels</h3>
         <ul class=\"bullet-list\">
-          <li>Estimated publication: {_escape(str(timing.get('publication_estimated_at') or 'n/a'))}</li>
-          <li>Radar first seen: {_escape(_format_optional_timestamp(timing.get('radar_first_seen_at')))}</li>
-          <li>Radar last seen: {_escape(_format_optional_timestamp(timing.get('radar_last_seen_at')))}</li>
+          <li>Publication estimée : {_escape(str(timing.get('publication_estimated_at') or 'n/a'))}</li>
+          <li>Premier vu radar : {_escape(_format_optional_timestamp(timing.get('radar_first_seen_at')))}</li>
+          <li>Dernier vu radar : {_escape(_format_optional_timestamp(timing.get('radar_last_seen_at')))}</li>
         </ul>
       </div>
       <div>
-        <h3>Inference basis</h3>
-        <ul class=\"bullet-list\">{''.join(f'<li>{_escape(reason)}</li>' for reason in state_reasons) or '<li>No state explanation available.</li>'}</ul>
+        <h3>Base d’inférence</h3>
+        <ul class=\"bullet-list\">{''.join(f'<li>{_escape(reason)}</li>' for reason in state_reasons) or '<li>Aucune explication d’état disponible.</li>'}</ul>
       </div>
       <div>
-        <h3>Score context</h3>
+        <h3>Contexte de score</h3>
         <ul class=\"bullet-list\">
           {''.join(f'<li>{_escape(name.replace("_", " "))}: {_format_score(value)}</li>' for name, value in score_factors.items())}
           {score_context_html}
         </ul>
       </div>
       <div>
-        <h3>Transition path</h3>
+        <h3>Chemin de transition</h3>
         <div class=\"timeline\">{transitions_html}</div>
       </div>
       <div>
-        <h3>Observation timeline</h3>
+        <h3>Timeline d’observation</h3>
         <div class=\"timeline\">{history_html}</div>
       </div>
       <div class=\"api-links\">
-        {'' if not detail.get('canonical_url') else f'<a class="button secondary" href="{_escape(str(detail["canonical_url"]))}" target="_blank" rel="noreferrer">Open canonical listing</a>'}
+        {'' if not detail.get('canonical_url') else f'<a class="button secondary" href="{_escape(str(detail["canonical_url"]))}" target="_blank" rel="noreferrer">Ouvrir l’annonce canonique</a>'}
       </div>
     """
 
@@ -1863,16 +2080,16 @@ def _build_filter_options(listing_scores: list[dict[str, Any]]) -> dict[str, lis
             )
             entry["count"] += 1
 
-    root_options = [{"value": "all", "label": "All roots"}] + [
+    root_options = [{"value": "all", "label": "Toutes les racines"}] + [
         {"value": root, "label": f"{root} ({count})"}
         for root, count in sorted(roots.items())
     ]
-    state_options = [{"value": "all", "label": "All states"}] + [
+    state_options = [{"value": "all", "label": "Tous les statuts"}] + [
         {"value": state, "label": f"{state} ({states[state]})"}
         for state in STATE_ORDER
         if state in states
     ]
-    catalog_options = [{"value": "", "label": "All catalogs"}] + sorted(catalogs.values(), key=lambda item: str(item["label"]))
+    catalog_options = [{"value": "", "label": "Tous les catalogues"}] + sorted(catalogs.values(), key=lambda item: str(item["label"]))
     return {"roots": root_options, "states": state_options, "catalogs": catalog_options}
 
 
@@ -1906,44 +2123,44 @@ def _build_transition_events(
     latest_probe: dict[str, Any] | None,
 ) -> list[dict[str, str]]:
     events: list[dict[str, str]] = []
-    catalog_path = str(listing.get("primary_catalog_path") or listing.get("root_title") or "the tracked catalog")
+    catalog_path = str(listing.get("primary_catalog_path") or listing.get("root_title") or "le catalogue suivi")
     if history_summary is not None:
         events.append(
             {
-                "label": "First seen",
+                "label": "Premier signal radar",
                 "timestamp": str(history_summary.get("first_seen_at") or "unknown"),
-                "description": f"Entered tracking from {catalog_path}.",
+                "description": f"Entrée dans le suivi depuis {catalog_path}.",
             }
         )
         events.append(
             {
-                "label": "Last observed",
+                "label": "Dernière observation",
                 "timestamp": str(history_summary.get("last_seen_at") or "unknown"),
-                "description": f"Last visible card snapshot in {catalog_path} ({history_summary.get('freshness_bucket', 'unknown')}).",
+                "description": f"Dernière carte visible dans {catalog_path} ({_freshness_label(history_summary.get('freshness_bucket', 'unknown'))}).",
             }
         )
     follow_up_miss_count = int(listing.get("follow_up_miss_count") or 0)
     if follow_up_miss_count:
         events.append(
             {
-                "label": "Follow-up misses",
+                "label": "Ratés de suivi",
                 "timestamp": str(listing.get("state_explanation", {}).get("evaluated_at") or "unknown"),
-                "description": f"Missed {follow_up_miss_count} successful primary-catalog rescans after the last sighting.",
+                "description": f"{follow_up_miss_count} rescans réussis du catalogue principal n'ont plus revu l'annonce après sa dernière apparition.",
             }
         )
     if isinstance(latest_probe, dict):
         events.append(
             {
-                "label": "Latest probe",
+                "label": "Dernière probe",
                 "timestamp": str(latest_probe.get("probed_at") or "unknown"),
-                "description": f"Probe outcome {latest_probe.get('probe_outcome') or 'unknown'} with HTTP {latest_probe.get('response_status') or 'n/a'}.",
+                "description": f"Résultat {latest_probe.get('probe_outcome') or 'unknown'} avec HTTP {latest_probe.get('response_status') or 'n/a'}.",
             }
         )
     events.append(
         {
-            "label": "Current state",
+            "label": "État courant",
             "timestamp": str(listing.get("state_explanation", {}).get("evaluated_at") or "unknown"),
-            "description": f"Classified as {listing.get('state_code')} on a {listing.get('basis_kind')} basis with {listing.get('confidence_label')} confidence.",
+            "description": f"Classée {listing.get('state_code')} sur une base {listing.get('basis_kind')} avec confiance {listing.get('confidence_label')}.",
         }
     )
     return events
@@ -1978,6 +2195,81 @@ def _option_html(value: str | int | None, label: str, selected_value: str | int 
     return f"<option value=\"{_escape(current)}\"{selected}>{_escape(label)}</option>"
 
 
+_EXPLORER_OPTION_LABELS = {
+    "All roots": "Toutes les racines",
+    "All catalogs": "Tous les catalogues",
+    "All brands": "Toutes les marques",
+    "All conditions": "Tous les états",
+    "Recently seen": "Dernière vue radar",
+    "Price ↓": "Prix ↓",
+    "Price ↑": "Prix ↑",
+    "Visible likes ↓": "Likes visibles ↓",
+    "Visible views ↓": "Vues visibles ↓",
+    "Estimated publication ↓": "Publication estimée ↓",
+    "Radar first seen ↓": "Premier vu radar ↓",
+}
+
+
+_STATE_LABELS = {
+    "active": "actif",
+    "sold_observed": "vendu observé",
+    "sold_probable": "vendu probable",
+    "unavailable_non_conclusive": "indisponible",
+    "deleted": "supprimée",
+    "unknown": "inconnu",
+}
+
+
+_BASIS_LABELS = {
+    "observed": "observé",
+    "inferred": "inféré",
+    "unknown": "inconnu",
+}
+
+
+_CONFIDENCE_LABELS = {
+    "high": "haute",
+    "medium": "moyenne",
+    "low": "basse",
+    "unknown": "inconnue",
+}
+
+
+_FRESHNESS_LABELS = {
+    "first-pass-only": "premier passage",
+    "fresh-followup": "suivi frais",
+    "aging-followup": "suivi vieillissant",
+    "stale-followup": "suivi ancien",
+    "unknown": "inconnu",
+}
+
+
+
+def _localized_explorer_option_label(label: str) -> str:
+    return _EXPLORER_OPTION_LABELS.get(label, label)
+
+
+
+def _state_label(value: Any) -> str:
+    return _STATE_LABELS.get(str(value or "unknown"), str(value or "unknown"))
+
+
+
+def _basis_label(value: Any) -> str:
+    return _BASIS_LABELS.get(str(value or "unknown"), str(value or "unknown"))
+
+
+
+def _confidence_label(value: Any) -> str:
+    return _CONFIDENCE_LABELS.get(str(value or "unknown"), str(value or "unknown"))
+
+
+
+def _freshness_label(value: Any) -> str:
+    return _FRESHNESS_LABELS.get(str(value or "unknown"), str(value or "unknown"))
+
+
+
 def _suffix_query(
     filters: DashboardFilters,
     *,
@@ -1995,11 +2287,16 @@ def _suffix_query(
     return "?" + urlencode(params)
 
 
-def _explorer_query(filters: ExplorerFilters, *, overrides: dict[str, Any] | None = None) -> str:
+def _explorer_query(
+    filters: ExplorerFilters,
+    *,
+    base_href: str = "/explorer",
+    overrides: dict[str, Any] | None = None,
+) -> str:
     params = filters.to_query_dict(overrides=overrides)
     if not params:
-        return "/explorer"
-    return "/explorer?" + urlencode(params)
+        return base_href
+    return base_href + "?" + urlencode(params)
 
 
 def _explorer_suffix_query(filters: ExplorerFilters, *, overrides: dict[str, Any] | None = None) -> str:

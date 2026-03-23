@@ -40,8 +40,23 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
                 config={"state_refresh_limit": 4},
             )
 
-    def fake_serve_dashboard(*, db_path: Path, host: str, port: int, now: str | None = None) -> None:
-        captured["dashboard"] = {"db_path": db_path, "host": host, "port": port, "now": now}
+    def fake_serve_dashboard(
+        *,
+        db_path: Path,
+        host: str,
+        port: int,
+        now: str | None = None,
+        base_path: str | None = None,
+        public_base_url: str | None = None,
+    ) -> None:
+        captured["dashboard"] = {
+            "db_path": db_path,
+            "host": host,
+            "port": port,
+            "now": now,
+            "base_path": base_path,
+            "public_base_url": public_base_url,
+        }
 
     monkeypatch.setattr("vinted_radar.cli.RadarRuntimeService", FakeRuntimeService)
     monkeypatch.setattr("vinted_radar.cli.serve_dashboard", fake_serve_dashboard)
@@ -89,6 +104,7 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
     assert "Dashboard URL: http://127.0.0.1:8766" in result.stdout
     assert "Runtime: http://127.0.0.1:8766/runtime" in result.stdout
     assert "Runtime API: http://127.0.0.1:8766/api/runtime" in result.stdout
+    assert "Listing detail: http://127.0.0.1:8766/listings/<id>" in result.stdout
     assert captured["db_path"] == tmp_path / "runtime.db"
     assert captured["mode"] == "batch"
     assert captured["options"].min_price == 75.0
@@ -100,6 +116,8 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
         "host": "127.0.0.1",
         "port": 8766,
         "now": None,
+        "base_path": "",
+        "public_base_url": None,
     }
 
 
@@ -198,6 +216,7 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
     assert result.exit_code == 0
     assert "Dashboard URL: http://127.0.0.1:8770" in result.stdout
     assert "Runtime: http://127.0.0.1:8770/runtime" in result.stdout
+    assert "Listing detail: http://127.0.0.1:8770/listings/<id>" in result.stdout
     assert "Cycle: cycle-1" in result.stdout
     assert "Last error: RuntimeError: boom" in result.stdout
     assert "Cycle: cycle-2" in result.stdout

@@ -14,6 +14,7 @@ from vinted_radar.scoring import build_listing_score_detail, build_market_summar
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
 from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
 from vinted_radar.services.state_refresh import build_default_state_refresh_service
+from vinted_radar.serving import build_dashboard_urls
 from vinted_radar.state_machine import evaluate_listing_state, summarize_state_evaluations
 
 app = typer.Typer(add_completion=False, help="Local-first Vinted Homme/Femme radar CLI.")
@@ -70,6 +71,8 @@ def batch_run(
     dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard after the batch cycle completes."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
+    base_path: str = typer.Option("", "--base-path", help="Optional route prefix when the dashboard is mounted behind a reverse proxy (example: /radar)."),
+    public_base_url: str | None = typer.Option(None, "--public-base-url", help="Optional external base URL prefix advertised to operators and used for absolute dashboard links (example: https://radar.example.com/radar)."),
 ) -> None:
     proxies = tuple(proxy) if proxy else ()
     runtime_service = RadarRuntimeService(db)
@@ -97,15 +100,9 @@ def batch_run(
     if not dashboard:
         return
 
-    typer.echo(f"Dashboard URL: http://{host}:{port}")
-    typer.echo(f"Overview home: http://{host}:{port}/")
-    typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
-    typer.echo(f"Explorer: http://{host}:{port}/explorer")
-    typer.echo(f"Runtime: http://{host}:{port}/runtime")
-    typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
-    typer.echo(f"Health: http://{host}:{port}/health")
+    _echo_dashboard_urls(host=host, port=port, base_path=base_path, public_base_url=public_base_url)
     try:
-        serve_dashboard(db_path=db, host=host, port=port)
+        serve_dashboard(db_path=db, host=host, port=port, base_path=base_path, public_base_url=public_base_url)
     except KeyboardInterrupt:
         typer.echo("Dashboard server stopped.")
 
@@ -129,6 +126,8 @@ def continuous_run(
     dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard alongside the continuous loop."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
+    base_path: str = typer.Option("", "--base-path", help="Optional route prefix when the dashboard is mounted behind a reverse proxy (example: /radar)."),
+    public_base_url: str | None = typer.Option(None, "--public-base-url", help="Optional external base URL prefix advertised to operators and used for absolute dashboard links (example: https://radar.example.com/radar)."),
 ) -> None:
     proxies = tuple(proxy) if proxy else ()
     runtime_service = RadarRuntimeService(db)
@@ -147,14 +146,14 @@ def continuous_run(
     )
     dashboard_server = None
     if dashboard:
-        dashboard_server = start_dashboard_server(db_path=db, host=host, port=port)
-        typer.echo(f"Dashboard URL: http://{host}:{port}")
-        typer.echo(f"Overview home: http://{host}:{port}/")
-        typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
-        typer.echo(f"Explorer: http://{host}:{port}/explorer")
-        typer.echo(f"Runtime: http://{host}:{port}/runtime")
-        typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
-        typer.echo(f"Health: http://{host}:{port}/health")
+        dashboard_server = start_dashboard_server(
+            db_path=db,
+            host=host,
+            port=port,
+            base_path=base_path,
+            public_base_url=public_base_url,
+        )
+        _echo_dashboard_urls(host=host, port=port, base_path=base_path, public_base_url=public_base_url)
 
     typer.echo(f"Database: {db}")
     typer.echo(f"Continuous interval: {interval_seconds:.1f}s")
@@ -716,20 +715,36 @@ def dashboard(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server."),
+    base_path: str = typer.Option("", "--base-path", help="Optional route prefix when the dashboard is mounted behind a reverse proxy (example: /radar)."),
+    public_base_url: str | None = typer.Option(None, "--public-base-url", help="Optional external base URL prefix advertised to operators and used for absolute dashboard links (example: https://radar.example.com/radar)."),
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic rendering."),
 ) -> None:
-    typer.echo(f"Dashboard URL: http://{host}:{port}")
-    typer.echo(f"Overview home: http://{host}:{port}/")
-    typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
-    typer.echo(f"Explorer: http://{host}:{port}/explorer")
-    typer.echo(f"Runtime: http://{host}:{port}/runtime")
-    typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
-    typer.echo(f"Health: http://{host}:{port}/health")
+    _echo_dashboard_urls(host=host, port=port, base_path=base_path, public_base_url=public_base_url)
     typer.echo(f"Database: {db}")
     try:
-        serve_dashboard(db_path=db, host=host, port=port, now=now)
+        serve_dashboard(db_path=db, host=host, port=port, now=now, base_path=base_path, public_base_url=public_base_url)
     except KeyboardInterrupt:
         typer.echo("Dashboard server stopped.")
+
+
+def _echo_dashboard_urls(
+    *,
+    host: str,
+    port: int,
+    base_path: str = "",
+    public_base_url: str | None = None,
+) -> None:
+    urls = build_dashboard_urls(host, port, base_path=base_path, public_base_url=public_base_url)
+    typer.echo(f"Dashboard URL: {urls['dashboard'].rstrip('/')}")
+    typer.echo(f"Overview home: {urls['home']}")
+    typer.echo(f"Dashboard API: {urls['dashboard_api']}")
+    typer.echo(f"Explorer: {urls['explorer']}")
+    typer.echo(f"Runtime: {urls['runtime']}")
+    typer.echo(f"Runtime API: {urls['runtime_api']}")
+    typer.echo(f"Listing detail: {urls['detail']}")
+    typer.echo(f"Listing detail API: {urls['detail_api']}")
+    typer.echo(f"Health: {urls['health']}")
+
 
 
 def _build_runtime_options(
