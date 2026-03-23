@@ -173,17 +173,39 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         response_status: int | None,
         success: bool,
         listing_count: int,
+        api_listing_count: int | None | object = _UNSET,
+        accepted_listing_count: int | None | object = _UNSET,
+        filtered_out_count: int | None | object = _UNSET,
+        accepted_ratio: float | None | object = _UNSET,
+        min_price_seen_cents: int | None = None,
+        max_price_seen_cents: int | None = None,
         pagination_total_pages: int | None,
         next_page_url: str | None,
         error_message: str | None,
     ) -> None:
+        resolved_api_listing_count = listing_count if api_listing_count is _UNSET else api_listing_count
+        resolved_accepted_listing_count = None if accepted_listing_count is _UNSET else accepted_listing_count
+        resolved_filtered_out_count = filtered_out_count
+        if resolved_filtered_out_count is _UNSET and resolved_api_listing_count is not None and resolved_accepted_listing_count is not None:
+            resolved_filtered_out_count = resolved_api_listing_count - resolved_accepted_listing_count
+        elif resolved_filtered_out_count is _UNSET:
+            resolved_filtered_out_count = None
+
+        resolved_accepted_ratio = accepted_ratio
+        if resolved_accepted_ratio is _UNSET and resolved_api_listing_count is not None and resolved_accepted_listing_count is not None:
+            resolved_accepted_ratio = None if resolved_api_listing_count == 0 else resolved_accepted_listing_count / resolved_api_listing_count
+        elif resolved_accepted_ratio is _UNSET:
+            resolved_accepted_ratio = None
+
         with self.connection:
             self.connection.execute(
                 """
                 INSERT INTO catalog_scans (
                     run_id, catalog_id, page_number, requested_url, fetched_at, response_status,
-                    success, listing_count, pagination_total_pages, next_page_url, error_message
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    success, listing_count, api_listing_count, accepted_listing_count,
+                    filtered_out_count, accepted_ratio, min_price_seen_cents,
+                    max_price_seen_cents, pagination_total_pages, next_page_url, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -193,7 +215,13 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     fetched_at,
                     response_status,
                     int(success),
-                    listing_count,
+                    resolved_api_listing_count if resolved_api_listing_count is not None else listing_count,
+                    resolved_api_listing_count,
+                    resolved_accepted_listing_count,
+                    resolved_filtered_out_count,
+                    resolved_accepted_ratio,
+                    min_price_seen_cents,
+                    max_price_seen_cents,
                     pagination_total_pages,
                     next_page_url,
                     error_message,

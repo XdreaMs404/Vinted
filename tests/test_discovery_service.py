@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from vinted_radar.http import FetchedPage
 from vinted_radar.repository import RadarRepository
 from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryService, _build_api_catalog_url
@@ -221,7 +223,7 @@ def test_discovery_service_empty_page_stops_pagination(tmp_path: Path) -> None:
 def test_discovery_service_filters_out_low_value_and_non_target_brands(tmp_path: Path) -> None:
     catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
 
-    women_api_url = _build_api_catalog_url(2001, 1)
+    women_api_url = _build_api_catalog_url(2001, 1, price_from=30.0)
     filtered_items = [
         _make_api_item(9201, title="Sac premium", brand="Louis Vuitton", size="TU", status_id=3, price="125.00", total_price="130.00", image_url="https://images1.vinted.net/t/women-9201.webp"),
         _make_api_item(9202, title="Top rapide", brand="Louis Vuitton", size="S", status_id=3, price="25.00", total_price="27.00", image_url="https://images1.vinted.net/t/women-9202.webp"),
@@ -245,6 +247,21 @@ def test_discovery_service_filters_out_low_value_and_non_target_brands(tmp_path:
                 target_brands=("louis vuitton",),
             )
         )
+        scan = repository.connection.execute(
+            """
+            SELECT
+                listing_count,
+                api_listing_count,
+                accepted_listing_count,
+                filtered_out_count,
+                accepted_ratio,
+                min_price_seen_cents,
+                max_price_seen_cents
+            FROM catalog_scans
+            WHERE run_id = ? AND catalog_id = ? AND page_number = 1
+            """,
+            (report.run_id, 2001),
+        ).fetchone()
 
         assert report.successful_scans == 1
         assert report.raw_listing_hits == 3
@@ -252,6 +269,14 @@ def test_discovery_service_filters_out_low_value_and_non_target_brands(tmp_path:
         assert repository.count_rows("listings") == 1
         assert repository.count_rows("listing_discoveries") == 1
         assert repository.count_rows("listing_observations") == 1
+        assert scan is not None
+        assert scan["listing_count"] == 3
+        assert scan["api_listing_count"] == 3
+        assert scan["accepted_listing_count"] == 1
+        assert scan["filtered_out_count"] == 2
+        assert scan["accepted_ratio"] == pytest.approx(1 / 3)
+        assert scan["min_price_seen_cents"] == 2500
+        assert scan["max_price_seen_cents"] == 12500
 
 
 def test_discovery_service_restricts_scans_to_target_catalog_ids(tmp_path: Path) -> None:

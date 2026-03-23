@@ -37,6 +37,7 @@ class DiscoveryOptions:
     request_delay: float = 3.0
     concurrency: int = 1
     min_price: float = 30.0
+    max_price: float = 0.0
     target_catalogs: tuple[int, ...] = ()
     target_brands: tuple[str, ...] = ()
 
@@ -60,6 +61,17 @@ class _CatalogScanResult:
     failed_scans: int = 0
     raw_listing_hits: int = 0
     unique_listing_ids: set[int] = field(default_factory=set)
+
+
+@dataclass(frozen=True, slots=True)
+class _PageScanTelemetry:
+    accepted_listings: tuple[tuple[int, ListingCard], ...]
+    api_listing_count: int
+    accepted_listing_count: int
+    filtered_out_count: int
+    accepted_ratio: float | None
+    min_price_seen_cents: int | None
+    max_price_seen_cents: int | None
 
 
 class DiscoveryService:
@@ -103,6 +115,8 @@ class DiscoveryService:
             raise ValueError("page_limit must be at least 1")
         if options.min_price < 0:
             raise ValueError("min_price must be at least 0")
+        if options.max_price < 0:
+            raise ValueError("max_price must be at least 0")
 
         run_id = self.repository.start_run(
             root_scope=options.root_scope,
@@ -233,10 +247,16 @@ class DiscoveryService:
         """
         result = _CatalogScanResult()
         minimum_price_cents = _price_floor_cents(options.min_price)
+        maximum_price_cents = _price_limit_cents(options.max_price)
         target_brands = _normalize_brand_filters(options.target_brands)
 
         for page_number in range(1, options.page_limit + 1):
-            api_url = _build_api_catalog_url(catalog.catalog_id, page_number)
+            api_url = _build_api_catalog_url(
+                catalog.catalog_id,
+                page_number,
+                price_from=options.min_price,
+                price_to=options.max_price,
+            )
             logger.info(
                 "Catalog %d (%s) – fetching API page %d/%d",
                 catalog.catalog_id,
@@ -266,6 +286,8 @@ class DiscoveryService:
                         response_status=page.status_code,
                         success=False,
                         listing_count=0,
+                        api_listing_count=None,
+                        accepted_listing_count=None,
                         pagination_total_pages=None,
                         next_page_url=None,
                         error_message=f"HTTP {page.status_code}",
@@ -294,26 +316,24 @@ class DiscoveryService:
                     source_catalog_id=catalog.catalog_id,
                     source_root_catalog_id=catalog.root_catalog_id,
                 )
+                page_telemetry = _measure_page_scan_telemetry(
+                    parsed_page.listings,
+                    minimum_price_cents=minimum_price_cents,
+                    maximum_price_cents=maximum_price_cents,
+                    target_brands=target_brands,
+                )
                 result.successful_scans += 1
-                result.raw_listing_hits += len(parsed_page.listings)
+                result.raw_listing_hits += page_telemetry.api_listing_count
                 logger.info(
                     "Catalog %d page %d – %d listings found (page %s/%s)",
                     catalog.catalog_id,
                     page_number,
-                    len(parsed_page.listings),
+                    page_telemetry.api_listing_count,
                     parsed_page.current_page,
                     parsed_page.total_pages,
                 )
 
-                for card_position, listing in enumerate(
-                    parsed_page.listings, start=1
-                ):
-                    if not _listing_matches_filters(
-                        listing,
-                        minimum_price_cents=minimum_price_cents,
-                        target_brands=target_brands,
-                    ):
-                        continue
+                for card_position, listing in page_telemetry.accepted_listings:
                     result.unique_listing_ids.add(listing.listing_id)
                     self.repository.upsert_listing(
                         listing,
@@ -347,7 +367,13 @@ class DiscoveryService:
                     fetched_at=observed_at,
                     response_status=page.status_code,
                     success=True,
-                    listing_count=len(parsed_page.listings),
+                    listing_count=page_telemetry.api_listing_count,
+                    api_listing_count=page_telemetry.api_listing_count,
+                    accepted_listing_count=page_telemetry.accepted_listing_count,
+                    filtered_out_count=page_telemetry.filtered_out_count,
+                    accepted_ratio=page_telemetry.accepted_ratio,
+                    min_price_seen_cents=page_telemetry.min_price_seen_cents,
+                    max_price_seen_cents=page_telemetry.max_price_seen_cents,
                     pagination_total_pages=parsed_page.total_pages,
                     next_page_url=parsed_page.next_page_url,
                     error_message=None,
@@ -381,6 +407,8 @@ class DiscoveryService:
                     response_status=None,
                     success=False,
                     listing_count=0,
+                    api_listing_count=None,
+                    accepted_listing_count=None,
                     pagination_total_pages=None,
                     next_page_url=None,
                     error_message=f"{type(exc).__name__}: {exc}",
@@ -452,14 +480,54 @@ def _normalize_brand_filters(brands: tuple[str, ...]) -> frozenset[str]:
     return frozenset(normalized)
 
 
+def _measure_page_scan_telemetry(
+    listings: list[ListingCard],
+    *,
+    minimum_price_cents: int,
+    maximum_price_cents: int,
+    target_brands: frozenset[str],
+) -> _PageScanTelemetry:
+    accepted_listings: list[tuple[int, ListingCard]] = []
+    raw_prices_cents = [
+        listing.price_amount_cents
+        for listing in listings
+        if listing.price_amount_cents is not None
+    ]
+
+    for card_position, listing in enumerate(listings, start=1):
+        if not _listing_matches_filters(
+            listing,
+            minimum_price_cents=minimum_price_cents,
+            maximum_price_cents=maximum_price_cents,
+            target_brands=target_brands,
+        ):
+            continue
+        accepted_listings.append((card_position, listing))
+
+    api_listing_count = len(listings)
+    accepted_listing_count = len(accepted_listings)
+    return _PageScanTelemetry(
+        accepted_listings=tuple(accepted_listings),
+        api_listing_count=api_listing_count,
+        accepted_listing_count=accepted_listing_count,
+        filtered_out_count=api_listing_count - accepted_listing_count,
+        accepted_ratio=None if api_listing_count == 0 else accepted_listing_count / api_listing_count,
+        min_price_seen_cents=min(raw_prices_cents, default=None),
+        max_price_seen_cents=max(raw_prices_cents, default=None),
+    )
+
+
 def _listing_matches_filters(
     listing: ListingCard,
     *,
     minimum_price_cents: int,
+    maximum_price_cents: int,
     target_brands: frozenset[str],
 ) -> bool:
     price_amount_cents = listing.price_amount_cents
     if price_amount_cents is None or price_amount_cents < minimum_price_cents:
+        return False
+    if maximum_price_cents > 0 and price_amount_cents > maximum_price_cents:
         return False
 
     if not target_brands:
@@ -479,13 +547,27 @@ def _price_floor_cents(min_price: float) -> int:
     return int(round(min_price * 100))
 
 
-def _build_api_catalog_url(catalog_id: int, page: int) -> str:
+def _price_limit_cents(max_price: float) -> int:
+    return int(round(max_price * 100))
+
+
+def _build_api_catalog_url(
+    catalog_id: int,
+    page: int,
+    *,
+    price_from: float = 0,
+    price_to: float = 0,
+) -> str:
     """Build the full API URL for a catalog page request."""
     params = {
         "catalog_ids": str(catalog_id),
         "page": str(page),
         "per_page": str(_PER_PAGE),
     }
+    if price_from > 0:
+        params["price_from"] = str(price_from)
+    if price_to > 0:
+        params["price_to"] = str(price_to)
     return f"{_API_CATALOG_BASE}?{urlencode(params)}"
 
 

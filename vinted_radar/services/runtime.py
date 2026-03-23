@@ -21,6 +21,7 @@ class RadarRuntimeOptions:
     state_refresh_limit: int = 10
     concurrency: int = 1
     min_price: float = 30.0
+    max_price: float = 0.0
     target_catalogs: tuple[int, ...] = ()
     target_brands: tuple[str, ...] = ()
     proxies: tuple[str, ...] = ()
@@ -35,6 +36,7 @@ class RadarRuntimeOptions:
             "state_refresh_limit": self.state_refresh_limit,
             "concurrency": self.concurrency,
             "min_price": self.min_price,
+            "max_price": self.max_price,
             "target_catalogs": list(self.target_catalogs),
             "target_brands": list(self.target_brands),
         }
@@ -117,6 +119,7 @@ class RadarRuntimeService:
                         request_delay=options.request_delay,
                         concurrency=options.concurrency,
                         min_price=options.min_price,
+                        max_price=options.max_price,
                         target_catalogs=options.target_catalogs,
                         target_brands=options.target_brands,
                     )

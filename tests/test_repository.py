@@ -233,6 +233,94 @@ def test_repository_reuses_materialized_overview_snapshot_for_same_now(tmp_path:
         assert calls["count"] == 2
 
 
+def test_repository_migrates_catalog_scan_telemetry_columns_without_faking_legacy_acceptance(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-scans.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE catalog_scans (
+                run_id TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                page_number INTEGER NOT NULL,
+                requested_url TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                response_status INTEGER,
+                success INTEGER NOT NULL CHECK (success IN (0, 1)),
+                listing_count INTEGER NOT NULL DEFAULT 0,
+                pagination_total_pages INTEGER,
+                next_page_url TEXT,
+                error_message TEXT,
+                PRIMARY KEY (run_id, catalog_id, page_number)
+            );
+
+            INSERT INTO catalog_scans (
+                run_id,
+                catalog_id,
+                page_number,
+                requested_url,
+                fetched_at,
+                response_status,
+                success,
+                listing_count,
+                pagination_total_pages,
+                next_page_url,
+                error_message
+            ) VALUES (
+                'run-1',
+                2001,
+                1,
+                'https://www.vinted.fr/api/v2/catalog/items?catalog_ids=2001&page=1',
+                '2026-03-23T10:00:00+00:00',
+                200,
+                1,
+                96,
+                3,
+                NULL,
+                NULL
+            );
+            """
+        )
+        connection.commit()
+
+    with RadarRepository(db_path) as repository:
+        columns = {
+            row["name"]
+            for row in repository.connection.execute("PRAGMA table_info(catalog_scans)")
+        }
+        row = repository.connection.execute(
+            """
+            SELECT
+                listing_count,
+                api_listing_count,
+                accepted_listing_count,
+                filtered_out_count,
+                accepted_ratio,
+                min_price_seen_cents,
+                max_price_seen_cents
+            FROM catalog_scans
+            WHERE run_id = 'run-1' AND catalog_id = 2001 AND page_number = 1
+            """
+        ).fetchone()
+
+    assert {
+        "api_listing_count",
+        "accepted_listing_count",
+        "filtered_out_count",
+        "accepted_ratio",
+        "min_price_seen_cents",
+        "max_price_seen_cents",
+    }.issubset(columns)
+    assert row is not None
+    assert row["listing_count"] == 96
+    assert row["api_listing_count"] == 96
+    assert row["accepted_listing_count"] is None
+    assert row["filtered_out_count"] is None
+    assert row["accepted_ratio"] is None
+    assert row["min_price_seen_cents"] is None
+    assert row["max_price_seen_cents"] is None
+
+
 def test_repository_migrates_legacy_listing_columns_before_creating_dependent_indexes(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.db"
 

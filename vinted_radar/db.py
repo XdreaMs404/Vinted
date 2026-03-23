@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS catalog_scans (
     response_status INTEGER,
     success INTEGER NOT NULL CHECK (success IN (0, 1)),
     listing_count INTEGER NOT NULL DEFAULT 0,
+    api_listing_count INTEGER,
+    accepted_listing_count INTEGER,
+    filtered_out_count INTEGER,
+    accepted_ratio REAL,
+    min_price_seen_cents INTEGER,
+    max_price_seen_cents INTEGER,
     pagination_total_pages INTEGER,
     next_page_url TEXT,
     error_message TEXT,
@@ -237,11 +243,48 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
 
     for table_name, column_spec in (
         ("runtime_cycles", "state_refresh_summary_json TEXT NOT NULL DEFAULT '{}'"),
+        ("catalog_scans", "api_listing_count INTEGER"),
+        ("catalog_scans", "accepted_listing_count INTEGER"),
+        ("catalog_scans", "filtered_out_count INTEGER"),
+        ("catalog_scans", "accepted_ratio REAL"),
+        ("catalog_scans", "min_price_seen_cents INTEGER"),
+        ("catalog_scans", "max_price_seen_cents INTEGER"),
     ):
         try:
             connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_spec}")
         except sqlite3.OperationalError:
             pass
+
+    if _table_exists(connection, "catalog_scans"):
+        connection.execute(
+            """
+            UPDATE catalog_scans
+            SET api_listing_count = listing_count
+            WHERE api_listing_count IS NULL
+            """
+        )
+        connection.execute(
+            """
+            UPDATE catalog_scans
+            SET filtered_out_count = api_listing_count - accepted_listing_count
+            WHERE filtered_out_count IS NULL
+              AND api_listing_count IS NOT NULL
+              AND accepted_listing_count IS NOT NULL
+            """
+        )
+        connection.execute(
+            """
+            UPDATE catalog_scans
+            SET accepted_ratio = CASE
+                WHEN api_listing_count IS NULL THEN NULL
+                WHEN accepted_listing_count IS NULL THEN NULL
+                WHEN api_listing_count = 0 THEN NULL
+                ELSE CAST(accepted_listing_count AS REAL) / CAST(api_listing_count AS REAL)
+            END
+            WHERE accepted_ratio IS NULL
+              AND accepted_listing_count IS NOT NULL
+            """
+        )
 
     if _table_exists(connection, "listing_discoveries") and _table_exists(connection, "listings"):
         version = connection.execute("PRAGMA user_version").fetchone()[0]

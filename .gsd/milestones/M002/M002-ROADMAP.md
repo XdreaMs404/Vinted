@@ -6,6 +6,7 @@
 
 - The default home on the live radar is a market overview that tells a broad audience, in French, what is moving now, what deserves attention, and how trustworthy the read currently is.
 - The home, explorer, and detail surfaces stop depending on full-corpus request-time Python recomputation for their primary user paths and instead serve scalable SQL-backed payloads.
+- Discovery can push both minimum and maximum price bounds directly into the Vinted catalog API request, while still retaining client-side price guards as a local safety net.
 - A desktop user can explore the real tracked corpus with server-side filtering, sorting, and paging across category, brand, price band, condition, and sold state.
 - A listing detail explains why the listing matters in plain language before exposing technical proof, while preserving the boundary between observed facts, inferred state, estimated publication timing, and radar first-seen/last-seen timestamps.
 - The runtime/admin surface can truthfully show running, paused, scheduled, failed, elapsed pause time, next resume timing, and recent errors from persisted runtime state rather than inferred UI wording.
@@ -20,6 +21,7 @@
 - The product could become prettier but analytically weaker if comparative intelligence remains shallow or if evidence/provenance gets buried.
 - Item-page refresh remains the weaker acquisition flank; if anti-bot pressure rises there, the product could silently drift unless degraded mode becomes visible.
 - Explorer search and wide corpus filtering will become more expensive as the corpus grows if M002 keeps broad `%LIKE%` scanning and oversized page payloads without stronger query discipline.
+- Discovery still wastes requests and ban budget if price bounds stay client-side only instead of using the Vinted API's native `price_from` / `price_to` query parameters.
 
 ## Proof Strategy
 
@@ -30,6 +32,7 @@
 - Retire the plain-language/progressive-disclosure gap in **S05** by shipping a real listing detail that leads with narrative utility and keeps proof accessible underneath.
 - Retire the degraded-data honesty risk in **S06** by hardening the weak acquisition flank and surfacing degraded/partial conditions directly in the live product.
 - Retire the assembled-system risk in **S07** by proving the fully integrated product on the live VPS from both phone and desktop against a realistically large corpus.
+- Retire the unnecessary-request / ban-pressure risk in **S08** by proving `batch` and `continuous` pass native `price_from` / `price_to` bounds into the catalog API while persisted requested URLs and local safety filters stay truthful.
 
 ## Verification Classes
 
@@ -90,6 +93,9 @@ This milestone is complete only when all are true:
 
 - [x] **S07: Live VPS End-to-End Acceptance Closure** `risk:medium` `depends:[S01,S02,S03,S04,S05,S06]`
   > After this: the assembled radar is proven through the real VPS entrypoint on phone and desktop with live overview, explorer, detail, runtime, and degraded-mode behavior all working together on a realistically large corpus.
+
+- [x] **S08: Native API Price Bounds for Discovery** `risk:low` `depends:[S06]`
+  > After this: `batch` and `continuous` can constrain both min and max price directly at the Vinted API boundary, while persisted requested URLs and client-side price guards still show the real acquisition contract.
 
 ## Boundary Map
 
@@ -164,3 +170,14 @@ Produces:
 
 Consumes:
 - all prior slice contracts and live runtime behavior across the same evidence-backed SQLite boundary
+
+### S06 + S07 → S08
+
+Produces:
+- native Vinted catalog API price-window contract through `price_from` / `price_to`
+- shared runtime/CLI support for `max_price` on `batch` and `continuous`
+- persisted acquisition diagnostics that show the exact bounded API URL and runtime config used for each run
+
+Consumes:
+- acquisition/runtime plumbing from S06
+- integrated operator path from S07 so the new bound is available on the real shared runtime entrypoints
