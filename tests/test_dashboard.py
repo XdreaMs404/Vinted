@@ -407,6 +407,65 @@ def test_listing_detail_payload_exposes_narrative_and_provenance_contract(tmp_pa
 
 
 
+def test_listing_detail_payload_scopes_scoring_to_target_listing(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+    original = RadarRepository.listing_state_inputs
+
+    def _guard(self, *, now: str | None = None, listing_id: int | None = None) -> list[dict[str, object]]:
+        if listing_id is None:
+            raise AssertionError("detail payload should not request full listing state inputs")
+        return original(self, now=now, listing_id=listing_id)
+
+    monkeypatch.setattr(RadarRepository, "listing_state_inputs", _guard)
+
+    with RadarRepository(db_path) as repository:
+        payload = build_listing_detail_payload(
+            repository,
+            listing_id=9002,
+            now="2026-03-19T12:00:00+00:00",
+        )
+
+    assert payload is not None
+    assert payload["listing_id"] == 9002
+
+
+
+def test_listing_detail_payload_preserves_price_context_without_full_score_reload(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        repository.connection.executescript(
+            """
+            INSERT INTO listings (listing_id, canonical_url, source_url, title, brand, size_label, condition_label, price_amount_cents, price_currency, total_price_amount_cents, total_price_currency, image_url, favourite_count, view_count, user_id, user_login, user_profile_url, created_at_ts, primary_catalog_id, primary_root_catalog_id, first_discovered_at, last_discovered_at, last_seen_run_id, last_card_payload_json)
+            VALUES
+              (9011, 'https://www.vinted.fr/items/9011-active', 'https://www.vinted.fr/items/9011-active?referrer=catalog', 'Active robe peer 1', 'Zara', 'S', 'Très bon état', 1000, '€', 1150, '€', 'https://images/9011.webp', 7, 80, 51, 'alice-bis', 'https://www.vinted.fr/member/51', 1711187000, 2001, 1904, '2026-03-19T10:01:00+00:00', '2026-03-19T10:05:00+00:00', 'run-3', '{"description_title": "Zara peer 1"}'),
+              (9012, 'https://www.vinted.fr/items/9012-active', 'https://www.vinted.fr/items/9012-active?referrer=catalog', 'Active robe peer 2', 'Zara', 'L', 'Très bon état', 1700, '€', 1850, '€', 'https://images/9012.webp', 8, 90, 52, 'alice-ter', 'https://www.vinted.fr/member/52', 1711187100, 2001, 1904, '2026-03-19T10:02:00+00:00', '2026-03-19T10:05:00+00:00', 'run-3', '{"description_title": "Zara peer 2"}'),
+              (9013, 'https://www.vinted.fr/items/9013-active', 'https://www.vinted.fr/items/9013-active?referrer=catalog', 'Active robe peer 3', 'Zara', 'M', 'Très bon état', 1900, '€', 2050, '€', 'https://images/9013.webp', 9, 95, 53, 'alice-quatre', 'https://www.vinted.fr/member/53', 1711187200, 2001, 1904, '2026-03-19T10:03:00+00:00', '2026-03-19T10:05:00+00:00', 'run-3', '{"description_title": "Zara peer 3"}');
+
+            INSERT INTO listing_observations (run_id, listing_id, observed_at, canonical_url, source_url, source_catalog_id, source_page_number, first_card_position, sighting_count, title, brand, size_label, condition_label, price_amount_cents, price_currency, total_price_amount_cents, total_price_currency, image_url, raw_card_payload_json)
+            VALUES
+              ('run-3', 9011, '2026-03-19T10:05:00+00:00', 'https://www.vinted.fr/items/9011-active', 'https://www.vinted.fr/items/9011-active?referrer=catalog', 2001, 1, 5, 1, 'Active robe peer 1', 'Zara', 'S', 'Très bon état', 1000, '€', 1150, '€', 'https://images/9011.webp', '{"overlay_title": "Active robe peer 1"}'),
+              ('run-3', 9012, '2026-03-19T10:05:00+00:00', 'https://www.vinted.fr/items/9012-active', 'https://www.vinted.fr/items/9012-active?referrer=catalog', 2001, 1, 6, 1, 'Active robe peer 2', 'Zara', 'L', 'Très bon état', 1700, '€', 1850, '€', 'https://images/9012.webp', '{"overlay_title": "Active robe peer 2"}'),
+              ('run-3', 9013, '2026-03-19T10:05:00+00:00', 'https://www.vinted.fr/items/9013-active', 'https://www.vinted.fr/items/9013-active?referrer=catalog', 2001, 1, 7, 1, 'Active robe peer 3', 'Zara', 'M', 'Très bon état', 1900, '€', 2050, '€', 'https://images/9013.webp', '{"overlay_title": "Active robe peer 3"}');
+            """
+        )
+
+    with RadarRepository(db_path) as repository:
+        payload = build_listing_detail_payload(
+            repository,
+            listing_id=9001,
+            now="2026-03-19T12:00:00+00:00",
+        )
+
+    assert payload is not None
+    assert payload["score_explanation"]["context"] is not None
+    assert payload["score_explanation"]["context"]["label"] == "catalog_brand_condition"
+    assert payload["score_explanation"]["context"]["sample_size"] == 4
+
+
+
 def test_runtime_payload_surfaces_controller_truth_separately_from_latest_cycle(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard.db"
     _seed_dashboard_db(db_path)

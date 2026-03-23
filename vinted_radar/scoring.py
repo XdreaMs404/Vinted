@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from statistics import median
-from typing import Callable, Iterable
+from typing import Iterable
 
 from vinted_radar.repository import RadarRepository
 from vinted_radar.state_machine import evaluate_listing_state, summarize_state_evaluations
@@ -21,14 +21,22 @@ CONFIDENCE_COMPONENT = {"high": 12.0, "medium": 7.0, "low": 2.0}
 BASIS_COMPONENT = {"observed": 8.0, "inferred": 3.0, "unknown": 0.0}
 FRESHNESS_COMPONENT = {"fresh-followup": 10.0, "aging-followup": 6.0, "stale-followup": 2.0, "first-pass-only": 4.0}
 
-_CONTEXT_BUILDERS: list[tuple[str, int, Callable[[dict[str, object]], tuple[object, ...] | None]]] = [
-    ("catalog_brand_condition", 4, lambda item: _maybe_key(item.get("primary_catalog_id"), _norm(item.get("brand")), _norm(item.get("condition_label")))),
-    ("catalog_condition", 5, lambda item: _maybe_key(item.get("primary_catalog_id"), _norm(item.get("condition_label")))),
-    ("catalog_brand", 5, lambda item: _maybe_key(item.get("primary_catalog_id"), _norm(item.get("brand")))),
-    ("catalog", 8, lambda item: _maybe_key(item.get("primary_catalog_id"))),
-    ("root_condition", 10, lambda item: _maybe_key(_norm(item.get("root_title")), _norm(item.get("condition_label")))),
-    ("root", 20, lambda item: _maybe_key(_norm(item.get("root_title")))),
-]
+
+@dataclass(frozen=True, slots=True)
+class ContextSpec:
+    name: str
+    min_support: int
+    fields: tuple[str, ...]
+
+
+_CONTEXT_SPECS: tuple[ContextSpec, ...] = (
+    ContextSpec("catalog_brand_condition", 4, ("primary_catalog_id", "brand", "condition_label")),
+    ContextSpec("catalog_condition", 5, ("primary_catalog_id", "condition_label")),
+    ContextSpec("catalog_brand", 5, ("primary_catalog_id", "brand")),
+    ContextSpec("catalog", 8, ("primary_catalog_id",)),
+    ContextSpec("root_condition", 10, ("root_title", "condition_label")),
+    ContextSpec("root", 20, ("root_title",)),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,28 +46,40 @@ class ListingScoreBundle:
     explanation: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class ContextSelection:
+    name: str
+    sample_size: int
+    prices: tuple[int, ...]
+
+
 def load_listing_scores(repository: RadarRepository, *, now: str | None = None) -> list[dict[str, object]]:
     inputs = repository.listing_state_inputs(now=now)
     evaluations = [evaluate_listing_state(item, now=now) for item in inputs]
     return build_listing_scores(evaluations)
 
 
+
+def load_listing_score_detail(
+    repository: RadarRepository,
+    *,
+    listing_id: int,
+    now: str | None = None,
+) -> dict[str, object] | None:
+    inputs = repository.listing_state_inputs(now=now, listing_id=listing_id)
+    if not inputs:
+        return None
+    evaluation = evaluate_listing_state(inputs[0], now=now)
+    context = _load_repository_context(repository, evaluation)
+    return _enrich_listing_score(evaluation, context)
+
+
+
 def build_listing_scores(evaluations: Iterable[dict[str, object]]) -> list[dict[str, object]]:
     items = [dict(item) for item in evaluations]
     context_indexes = _build_context_indexes(items)
-    scored: list[dict[str, object]] = []
-    for item in items:
-        bundle = _score_listing(item, context_indexes)
-        enriched = dict(item)
-        enriched.update(
-            {
-                "demand_score": bundle.demand_score,
-                "premium_score": bundle.premium_score,
-                "score_explanation": bundle.explanation,
-            }
-        )
-        scored.append(enriched)
-    return scored
+    return [_enrich_listing_score(item, _select_context(item, context_indexes)) for item in items]
+
 
 
 def build_rankings(listing_scores: list[dict[str, object]], *, kind: str, limit: int = 20) -> list[dict[str, object]]:
@@ -74,6 +94,7 @@ def build_rankings(listing_scores: list[dict[str, object]], *, kind: str, limit:
         ),
     )
     return rankings[:limit]
+
 
 
 def build_market_summary(
@@ -138,6 +159,7 @@ def build_market_summary(
     }
 
 
+
 def build_listing_score_detail(listing_scores: list[dict[str, object]], listing_id: int) -> dict[str, object] | None:
     for item in listing_scores:
         if int(item["listing_id"]) == listing_id:
@@ -145,7 +167,22 @@ def build_listing_score_detail(listing_scores: list[dict[str, object]], listing_
     return None
 
 
-def _score_listing(item: dict[str, object], context_indexes: dict[str, dict[tuple[object, ...], list[dict[str, object]]]]) -> ListingScoreBundle:
+
+def _enrich_listing_score(item: dict[str, object], context: ContextSelection | None) -> dict[str, object]:
+    bundle = _score_listing(item, context)
+    enriched = dict(item)
+    enriched.update(
+        {
+            "demand_score": bundle.demand_score,
+            "premium_score": bundle.premium_score,
+            "score_explanation": bundle.explanation,
+        }
+    )
+    return enriched
+
+
+
+def _score_listing(item: dict[str, object], context: ContextSelection | None) -> ListingScoreBundle:
     state_code = str(item["state_code"])
     confidence_label = str(item["confidence_label"])
     basis_kind = str(item["basis_kind"])
@@ -163,16 +200,15 @@ def _score_listing(item: dict[str, object], context_indexes: dict[str, dict[tupl
     }
     demand_score = round(min(sum(factor_breakdown.values()), 100.0), 2)
 
-    context = _select_context(item, context_indexes)
     expensive_signal = 0.0
     price_band_label = "unavailable"
+    percentile = None
     if context is not None and item.get("price_amount_cents") is not None:
-        percentile = _percentile_rank(int(item["price_amount_cents"]), [int(peer["price_amount_cents"]) for peer in context["peers"] if peer.get("price_amount_cents") is not None])
+        percentile = _percentile_rank(int(item["price_amount_cents"]), list(context.prices))
         expensive_signal = round(max(0.0, (percentile - 0.5) / 0.5) * 100.0, 2)
         price_band_label = _price_band_label(percentile)
         premium_score = round((demand_score * 0.78) + (expensive_signal * 0.22), 2)
     else:
-        percentile = None
         premium_score = round(demand_score * 0.85, 2)
 
     explanation = {
@@ -180,8 +216,8 @@ def _score_listing(item: dict[str, object], context_indexes: dict[str, dict[tupl
         "context": None
         if context is None
         else {
-            "label": context["name"],
-            "sample_size": context["sample_size"],
+            "label": context.name,
+            "sample_size": context.sample_size,
             "price_percentile": percentile,
             "price_band_label": price_band_label,
             "expensive_signal": expensive_signal,
@@ -194,42 +230,98 @@ def _score_listing(item: dict[str, object], context_indexes: dict[str, dict[tupl
     return ListingScoreBundle(demand_score=demand_score, premium_score=premium_score, explanation=explanation)
 
 
+
 def _build_context_indexes(items: list[dict[str, object]]) -> dict[str, dict[tuple[object, ...], list[dict[str, object]]]]:
-    indexes: dict[str, dict[tuple[object, ...], list[dict[str, object]]]] = {name: defaultdict(list) for name, _, _ in _CONTEXT_BUILDERS}
+    indexes: dict[str, dict[tuple[object, ...], list[dict[str, object]]]] = {spec.name: defaultdict(list) for spec in _CONTEXT_SPECS}
     for item in items:
         if item.get("price_amount_cents") is None:
             continue
-        for name, _, builder in _CONTEXT_BUILDERS:
-            key = builder(item)
+        for spec in _CONTEXT_SPECS:
+            key = _context_key(item, spec.fields)
             if key is not None:
-                indexes[name][key].append(item)
+                indexes[spec.name][key].append(item)
     return indexes
 
 
-def _select_context(item: dict[str, object], context_indexes: dict[str, dict[tuple[object, ...], list[dict[str, object]]]]) -> dict[str, object] | None:
+
+def _select_context(
+    item: dict[str, object],
+    context_indexes: dict[str, dict[tuple[object, ...], list[dict[str, object]]]],
+) -> ContextSelection | None:
     if item.get("price_amount_cents") is None:
         return None
-    for name, min_support, builder in _CONTEXT_BUILDERS:
-        key = builder(item)
+    for spec in _CONTEXT_SPECS:
+        key = _context_key(item, spec.fields)
         if key is None:
             continue
-        peers = context_indexes[name].get(key, [])
-        if len(peers) >= min_support:
-            return {"name": name, "sample_size": len(peers), "peers": peers}
+        peers = context_indexes[spec.name].get(key, [])
+        if len(peers) >= spec.min_support:
+            return ContextSelection(
+                name=spec.name,
+                sample_size=len(peers),
+                prices=tuple(int(peer["price_amount_cents"]) for peer in peers if peer.get("price_amount_cents") is not None),
+            )
     return None
 
 
-def _maybe_key(*parts: object) -> tuple[object, ...] | None:
-    cleaned = [part for part in parts if part is not None and part != ""]
-    if not cleaned:
+
+def _load_repository_context(repository: RadarRepository, item: dict[str, object]) -> ContextSelection | None:
+    if item.get("price_amount_cents") is None:
         return None
-    return tuple(cleaned)
+    for spec in _CONTEXT_SPECS:
+        filters = _context_filters(item, spec.fields)
+        if not filters:
+            continue
+        peer_prices = repository.listing_price_context_peer_prices(**_context_filter_kwargs(filters))
+        if len(peer_prices) >= spec.min_support:
+            return ContextSelection(name=spec.name, sample_size=len(peer_prices), prices=tuple(peer_prices))
+    return None
+
+
+
+def _context_filters(item: dict[str, object], fields: tuple[str, ...]) -> tuple[tuple[str, object], ...]:
+    filters: list[tuple[str, object]] = []
+    for field in fields:
+        value = _context_field_value(field, item.get(field))
+        if value is not None and value != "":
+            filters.append((field, value))
+    return tuple(filters)
+
+
+
+def _context_key(item: dict[str, object], fields: tuple[str, ...]) -> tuple[object, ...] | None:
+    filters = _context_filters(item, fields)
+    if not filters:
+        return None
+    return tuple(value for _, value in filters)
+
+
+
+def _context_filter_kwargs(filters: tuple[tuple[str, object], ...]) -> dict[str, object | None]:
+    kwargs: dict[str, object | None] = {
+        "primary_catalog_id": None,
+        "root_title": None,
+        "brand": None,
+        "condition_label": None,
+    }
+    for field, value in filters:
+        kwargs[field] = value
+    return kwargs
+
+
+
+def _context_field_value(field: str, value: object) -> object | None:
+    if field in {"root_title", "brand", "condition_label"}:
+        return _norm(value)
+    return value
+
 
 
 def _norm(value: object) -> str | None:
     if value is None:
         return None
     return str(value).strip().lower() or None
+
 
 
 def _percentile_rank(value: int, peers: list[int]) -> float:
@@ -241,6 +333,7 @@ def _percentile_rank(value: int, peers: list[int]) -> float:
     return round((below + (equal / 2.0)) / len(sorted_peers), 3)
 
 
+
 def _price_band_label(percentile: float) -> str:
     if percentile >= 0.67:
         return "premium"
@@ -249,8 +342,10 @@ def _price_band_label(percentile: float) -> str:
     return "budget"
 
 
+
 def _score_field(kind: str) -> str:
     return "demand_score" if kind == "demand" else "premium_score"
+
 
 
 def _latest_segment_scan_counts(repository: RadarRepository, catalog_id: int) -> tuple[int | None, int | None]:
@@ -269,6 +364,7 @@ def _latest_segment_scan_counts(repository: RadarRepository, catalog_id: int) ->
     latest = int(rows[0]["listing_count"])
     previous = int(rows[1]["listing_count"]) if len(rows) > 1 else None
     return latest, previous
+
 
 
 def _state_mix(items: list[dict[str, object]]) -> dict[str, int]:

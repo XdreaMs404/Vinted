@@ -1786,6 +1786,44 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         probe["detail"] = json.loads(detail_json) if detail_json else {}
         return probe
 
+    def listing_price_context_peer_prices(
+        self,
+        *,
+        primary_catalog_id: int | None = None,
+        root_title: str | None = None,
+        brand: str | None = None,
+        condition_label: str | None = None,
+    ) -> list[int]:
+        where_clauses = [
+            "listings.price_amount_cents IS NOT NULL",
+            "EXISTS (SELECT 1 FROM listing_observations WHERE listing_observations.listing_id = listings.listing_id)",
+        ]
+        params: list[object] = []
+
+        if primary_catalog_id is not None:
+            where_clauses.append("listings.primary_catalog_id = ?")
+            params.append(int(primary_catalog_id))
+        if root_title is not None:
+            where_clauses.append("LOWER(TRIM(COALESCE(roots.title, ''))) = ?")
+            params.append(_clean_query_text(str(root_title)))
+        if brand is not None:
+            where_clauses.append("LOWER(TRIM(COALESCE(listings.brand, ''))) = ?")
+            params.append(_clean_query_text(str(brand)))
+        if condition_label is not None:
+            where_clauses.append("LOWER(TRIM(COALESCE(listings.condition_label, ''))) = ?")
+            params.append(_clean_query_text(str(condition_label)))
+
+        rows = self.connection.execute(
+            f"""
+            SELECT listings.price_amount_cents
+            FROM listings
+            LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
+            WHERE {' AND '.join(where_clauses)}
+            """,
+            params,
+        ).fetchall()
+        return [int(row["price_amount_cents"]) for row in rows if row["price_amount_cents"] is not None]
+
     def listing_state_inputs(self, *, now: str | None = None, listing_id: int | None = None) -> list[dict[str, object]]:
         now_dt = _coerce_now(now)
         observation_filter = ""

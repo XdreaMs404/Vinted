@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlencode
 from wsgiref.simple_server import WSGIServer, make_server
 
 from vinted_radar.repository import RadarRepository
-from vinted_radar.scoring import load_listing_scores
+from vinted_radar.scoring import load_listing_score_detail
 from vinted_radar.serving import RouteContext, normalize_base_path
 from vinted_radar.state_machine import STATE_ORDER
 
@@ -539,8 +539,7 @@ def build_listing_detail_payload(
     explorer_filters: ExplorerFilters | None = None,
 ) -> dict[str, Any] | None:
     route_context = route_context or RouteContext()
-    listing_scores = load_listing_scores(repository, now=now)
-    listing = _find_listing(listing_scores, listing_id)
+    listing = load_listing_score_detail(repository, listing_id=listing_id, now=now)
     if listing is None:
         return None
 
