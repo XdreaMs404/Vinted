@@ -12,19 +12,19 @@ Turn imperfect public Vinted listing signals into an evidence-backed market read
 
 M001 implementation is complete and integrated across S01 through S06, and its closeout summary now exists at `.gsd/milestones/M001/M001-SUMMARY.md`. That milestone still carries a **needs-attention** closeout result because the historical proof databases are not yet trustworthy enough for final multi-day acceptance.
 
-M002 is now underway. S01 through S06 are complete: the home path is SQL-backed and French-first, runtime truth lives in a separate controller snapshot with pause/resume/scheduling surfaced through the CLI, `/runtime`, `/api/runtime`, and `/health`, the product ships with a shared responsive shell plus a mounted VPS-serving contract across overview, explorer, runtime, and HTML listing detail, `/explorer` is the main browse-and-compare workspace with SQL-backed filters and context-preserving detail drill-down, `/listings/<id>` is narrative-first with progressive proof, and degraded acquisition truth is now explicit across overview, explorer, detail, runtime, `/api/runtime`, and `/health` via persisted state-refresh telemetry plus recent scan-failure visibility.
+M002 is complete. S01 through S07 are complete: the home path is SQL-backed and French-first, runtime truth lives in a separate controller snapshot with pause/resume/scheduling surfaced through the CLI, `/runtime`, `/api/runtime`, and `/health`, the product ships with a shared responsive shell plus a mounted VPS-serving contract across overview, explorer, runtime, and HTML listing detail, `/explorer` is the main browse-and-compare workspace with SQL-backed filters and context-preserving detail drill-down, `/listings/<id>` is narrative-first with progressive proof, degraded acquisition truth is explicit across overview, explorer, detail, runtime, `/api/runtime`, and `/health`, large-corpus mounted acceptance has been re-proven on `data/m001-closeout.db`, and the real public VPS entrypoint is now back online at `http://46.225.113.129:8765/` after recovering from a corrupted live DB.
 
 What is verified today:
-- `python -m pytest` passes
-- `python -m vinted_radar.cli dashboard --db data/vinted-radar-s06.db --host 127.0.0.1 --port 8786` serves the current product locally across `/`, `/explorer`, `/runtime`, `/listings/<id>`, `/api/runtime`, and `/health`
-- browser verification on the seeded S06 demo DB confirmed `acquisition dégradée` visibility on overview and explorer, dedicated acquisition-health diagnostics on `/runtime`, degraded-probe prudence on `/listings/9002`, and matching degraded acquisition JSON on `/api/runtime` and `/health`
-- the runtime now persists `state_refresh_summary_json` on each cycle so degraded item-page probes, anti-bot hits, transport failures, and inconclusive probe counts remain inspectable after the cycle finishes
-- the standalone `state-refresh` command now accepts repeatable `--proxy` options and exposes `probe_summary` in JSON/table output, matching the runtime path instead of bypassing it
+- `python -m pytest -q` passes
+- `MSYS_NO_PATHCONV=1 python -m vinted_radar.cli dashboard --db data/m001-closeout.db --host 127.0.0.1 --port 8790 --base-path /radar --public-base-url http://127.0.0.1:8790/radar` plus `MSYS_NO_PATHCONV=1 python scripts/verify_vps_serving.py --base-url http://127.0.0.1:8790/radar --listing-id 64882428` re-proved overview, explorer, runtime, detail HTML, detail JSON, and health on the realistic 49,759-listing corpus
+- desktop and mobile browser verification on the mounted realistic-corpus shell confirmed overview, explorer, detail, and runtime readability plus context-preserving navigation without console/network failures
+- `python scripts/verify_vps_serving.py --base-url http://46.225.113.129:8765 --listing-id 8468335111` passes against the real public VPS entrypoint, and direct public checks against `/`, `/explorer`, `/runtime`, `/api/runtime`, `/api/listings/8468335111`, and `/health` confirm the live operator URL is reachable again
+- the VPS had to retire a corrupted 61 GB `data/vinted-radar.db`; services now run against a fresh healthy `data/vinted-radar.clean.db`, while the corrupted file remains archived out of the live serving path
+- the runtime still persists `state_refresh_summary_json` on each cycle so degraded item-page probes, anti-bot hits, transport failures, and inconclusive probe counts remain inspectable after the cycle finishes
 - legacy SQLite snapshots missing late-added listing metadata columns still reopen successfully because migrations run before dependent indexes are created, with regression coverage in `tests/test_repository.py`
 
 What is still pending on the roadmap:
 - M001 still needs trustworthy multi-day closeout evidence from healthy historical databases
-- M002 still needs final live VPS acceptance in S07
 
 ## Architecture / Key Patterns
 
@@ -55,6 +55,6 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 ## Milestone Sequence
 
 - [x] M001: Listing-Level Market Radar — implementation complete; closeout summary written, verification result `needs-attention` pending healthy multi-day runtime proof.
-- [ ] M002: Enriched Market Intelligence Experience — in progress; S01 through S06 complete with the SQL-backed overview home, controller-backed runtime truth, shared French product shell, mounted VPS-serving contract, SQL-first explorer workspace, narrative/progressive-proof listing detail, and explicit degraded acquisition truth across overview/explorer/detail/runtime/health.
+- [x] M002: Enriched Market Intelligence Experience — complete; S01 through S07 now ship the SQL-backed overview home, controller-backed runtime truth, shared French product shell, mounted/public serving contract, SQL-first explorer workspace, narrative/progressive-proof listing detail, explicit degraded acquisition truth, realistic large-corpus acceptance, and recovered public VPS proof at `http://46.225.113.129:8765/`.
 - [ ] M003: Product-Level Intelligence + Grounded AI Layer — group listings into product-level signals and add grounded AI insights, summaries, and analytical exploration.
 - [ ] M004: SaaS Hardening and Commercialization — industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.

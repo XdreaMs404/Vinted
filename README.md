@@ -139,6 +139,17 @@ python -m vinted_radar.cli dashboard \
   --public-base-url https://radar.example.com/radar
 ```
 
+> On Git Bash / MSYS shells, leading `/radar` arguments can be rewritten into fake Windows filesystem paths before Python sees them. Use `MSYS_NO_PATHCONV=1` for mounted-route commands:
+>
+> ```bash
+> MSYS_NO_PATHCONV=1 python -m vinted_radar.cli dashboard \
+>   --db data/vinted-radar.db \
+>   --host 127.0.0.1 \
+>   --port 8782 \
+>   --base-path /radar \
+>   --public-base-url http://127.0.0.1:8782/radar
+> ```
+
 The same contract applies to `batch --dashboard` and `continuous --dashboard`.
 
 Once the server is up, verify the real product routes through the same base URL the operator will share:
@@ -146,7 +157,8 @@ Once the server is up, verify the real product routes through the same base URL 
 ```bash
 python scripts/verify_vps_serving.py \
   --base-url https://radar.example.com/radar \
-  --listing-id <id>
+  --listing-id <id> \
+  --timeout 30
 ```
 
 What this contract guarantees:

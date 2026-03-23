@@ -88,7 +88,7 @@ This milestone is complete only when all are true:
 - [x] **S06: Acquisition Hardening + Degraded-Mode Visibility** `risk:high` `depends:[S02,S03,S04,S05]`
   > After this: proxy-aware state refresh, degraded acquisition telemetry, and explicit partial-signal messaging keep the product honest when live collection weakens instead of hiding uncertainty behind polished screens.
 
-- [ ] **S07: Live VPS End-to-End Acceptance Closure** `risk:medium` `depends:[S01,S02,S03,S04,S05,S06]`
+- [x] **S07: Live VPS End-to-End Acceptance Closure** `risk:medium` `depends:[S01,S02,S03,S04,S05,S06]`
   > After this: the assembled radar is proven through the real VPS entrypoint on phone and desktop with live overview, explorer, detail, runtime, and degraded-mode behavior all working together on a realistically large corpus.
 
 ## Boundary Map

@@ -46,8 +46,10 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
         self.connection = connect_database(self.db_path)
+        self._overview_snapshot_cache_key: str | None = None
 
     def close(self) -> None:
+        self._overview_snapshot_cache_key = None
         self.connection.close()
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -975,17 +977,36 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             summaries.append(summary)
         return summaries
 
+    def _rebuild_overview_state_snapshot(self, *, now_dt: datetime) -> str:
+        table_name = "overview_state_snapshot"
+        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        self.connection.execute(f"DROP TABLE IF EXISTS temp.{table_name}")
+        self.connection.execute(
+            f"""
+            CREATE TEMP TABLE {table_name} AS
+            {cte_sql}
+            SELECT * FROM classified
+            """,
+            cte_params,
+        )
+        self._overview_snapshot_cache_key = now_dt.replace(microsecond=0).isoformat()
+        return table_name
+
+    def _ensure_overview_state_snapshot(self, *, now_dt: datetime) -> str:
+        cache_key = now_dt.replace(microsecond=0).isoformat()
+        if self._overview_snapshot_cache_key == cache_key:
+            return "overview_state_snapshot"
+        return self._rebuild_overview_state_snapshot(now_dt=now_dt)
+
     def explorer_filter_options(self, *, now: str | None = None) -> dict[str, list[dict[str, object]] | int]:
         now_dt = _coerce_now(now)
-        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        snapshot_table = self._ensure_overview_state_snapshot(now_dt=now_dt)
 
         tracked_listings_row = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT COUNT(*) AS tracked_listings
-            FROM classified
-            """,
-            cte_params,
+            FROM {snapshot_table}
+            """
         ).fetchone()
         tracked_listings = 0 if tracked_listings_row is None else int(tracked_listings_row["tracked_listings"] or 0)
 
@@ -997,13 +1018,11 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
-                {cte_sql}
                 SELECT root_title, COUNT(*) AS count
-                FROM classified
+                FROM {snapshot_table}
                 GROUP BY root_title
                 ORDER BY root_title ASC
-                """,
-                cte_params,
+                """
             )
         ]
         catalogs = [
@@ -1015,17 +1034,15 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
-                {cte_sql}
                 SELECT
                     primary_catalog_id AS catalog_id,
                     MAX(category_path) AS catalog_path,
                     COUNT(*) AS count
-                FROM classified
+                FROM {snapshot_table}
                 WHERE primary_catalog_id IS NOT NULL
                 GROUP BY primary_catalog_id
                 ORDER BY MAX(category_path) ASC
-                """,
-                cte_params,
+                """
             )
         ]
         brands = [
@@ -1036,17 +1053,15 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
-                {cte_sql}
                 SELECT
                     COALESCE(brand, 'unknown-brand') AS brand_value,
                     COALESCE(brand, 'Marque inconnue') AS brand_label,
                     COUNT(*) AS count
-                FROM classified
+                FROM {snapshot_table}
                 GROUP BY brand_value, brand_label
                 ORDER BY count DESC, brand_label ASC
                 LIMIT 80
-                """,
-                cte_params,
+                """
             )
         ]
         conditions = [
@@ -1057,17 +1072,15 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
-                {cte_sql}
                 SELECT
                     COALESCE(condition_label, 'unknown-condition') AS condition_value,
                     COALESCE(condition_label, 'État inconnu') AS condition_label,
                     COUNT(*) AS count
-                FROM classified
+                FROM {snapshot_table}
                 GROUP BY condition_value, condition_label
                 ORDER BY count DESC, condition_label ASC
                 LIMIT 40
-                """,
-                cte_params,
+                """
             )
         ]
         price_bands = [
@@ -1078,17 +1091,15 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
-                {cte_sql}
                 SELECT
                     price_band_code,
                     price_band_label,
                     MIN(price_band_sort_order) AS sort_rank,
                     COUNT(*) AS count
-                FROM classified
+                FROM {snapshot_table}
                 GROUP BY price_band_code, price_band_label
                 ORDER BY sort_rank ASC, count DESC
-                """,
-                cte_params,
+                """
             )
         ]
         states = [
@@ -1099,17 +1110,15 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
-                {cte_sql}
                 SELECT
                     state_code,
                     state_label,
                     MIN(state_sort_order) AS sort_rank,
                     COUNT(*) AS count
-                FROM classified
+                FROM {snapshot_table}
                 GROUP BY state_code, state_label
                 ORDER BY sort_rank ASC, count DESC
-                """,
-                cte_params,
+                """
             )
         ]
         return {
@@ -1201,7 +1210,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         now: str | None = None,
     ) -> dict[str, object]:
         now_dt = _coerce_now(now)
-        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        snapshot_table = self._ensure_overview_state_snapshot(now_dt=now_dt)
         where_sql, where_params = self._explorer_filter_sql(
             root=root,
             catalog_id=catalog_id,
@@ -1214,7 +1223,6 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         bounded_support_threshold = max(int(support_threshold), 1)
         summary_row = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT
                 COUNT(*) AS matched_listings,
                 SUM(sold_like) AS sold_like_count,
@@ -1232,10 +1240,10 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 SUM(thin_signal) AS thin_signal_count,
                 SUM(has_estimated_publication) AS estimated_publication_count,
                 SUM(CASE WHEN has_estimated_publication = 0 THEN 1 ELSE 0 END) AS missing_estimated_publication_count
-            FROM classified
+            FROM {snapshot_table}
             {where_sql}
             """,
-            [*cte_params, *where_params],
+            where_params,
         ).fetchone()
         summary_values = dict(summary_row) if summary_row is not None else {}
         return {
@@ -1277,7 +1285,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         now: str | None = None,
     ) -> dict[str, dict[str, object]]:
         now_dt = _coerce_now(now)
-        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        snapshot_table = self._ensure_overview_state_snapshot(now_dt=now_dt)
         where_sql, where_params = self._explorer_filter_sql(
             root=root,
             catalog_id=catalog_id,
@@ -1333,8 +1341,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             },
         ):
             comparisons[str(spec["lens"])] = self._explorer_comparison_module(
-                cte_sql=cte_sql,
-                cte_params=cte_params,
+                table_name=snapshot_table,
                 where_sql=where_sql,
                 where_params=where_params,
                 lens=str(spec["lens"]),
@@ -1364,11 +1371,11 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         now: str | None = None,
     ) -> dict[str, object]:
         now_dt = _coerce_now(now)
+        snapshot_table = self._ensure_overview_state_snapshot(now_dt=now_dt)
         bounded_page = max(int(page), 1)
         bounded_page_size = max(1, min(int(page_size), 100))
         offset = (bounded_page - 1) * bounded_page_size
         order_by, sort_key = self._explorer_sort_clause(sort)
-        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
         where_sql, where_params = self._explorer_filter_sql(
             root=root,
             catalog_id=catalog_id,
@@ -1381,18 +1388,16 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
 
         total_row = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT COUNT(*) AS total
-            FROM classified
+            FROM {snapshot_table}
             {where_sql}
             """,
-            [*cte_params, *where_params],
+            where_params,
         ).fetchone()
         total_listings = 0 if total_row is None else int(total_row["total"] or 0)
 
         rows = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT
                 listing_id,
                 canonical_url,
@@ -1439,12 +1444,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 partial_signal,
                 thin_signal,
                 has_estimated_publication
-            FROM classified
+            FROM {snapshot_table}
             {where_sql}
             ORDER BY {order_by}
             LIMIT ? OFFSET ?
             """,
-            [*cte_params, *where_params, bounded_page_size, offset],
+            [*where_params, bounded_page_size, offset],
         ).fetchall()
 
         items = [dict(row) for row in rows]
@@ -1463,8 +1468,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
     def _explorer_comparison_module(
         self,
         *,
-        cte_sql: str,
-        cte_params: list[object],
+        table_name: str,
         where_sql: str,
         where_params: list[object],
         lens: str,
@@ -1478,10 +1482,9 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
     ) -> dict[str, object]:
         rows = self.connection.execute(
             f"""
-            {cte_sql},
-            filtered AS (
+            WITH filtered AS (
                 SELECT *
-                FROM classified
+                FROM {table_name}
                 {where_sql}
             )
             SELECT
@@ -1511,7 +1514,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             ORDER BY {order_by}
             LIMIT ?
             """,
-            [*cte_params, *where_params, max(int(limit), 1)],
+            [*where_params, max(int(limit), 1)],
         ).fetchall()
 
         items: list[dict[str, object]] = []
@@ -1964,11 +1967,10 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         generated_at = now_dt.replace(microsecond=0).isoformat()
         bounded_limit = max(int(comparison_limit), 1)
         bounded_support_threshold = max(int(support_threshold), 1)
-        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        snapshot_table = self._ensure_overview_state_snapshot(now_dt=now_dt)
 
         summary_row = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT
                 COUNT(*) AS tracked_listings,
                 MAX(last_seen_at) AS latest_listing_seen_at,
@@ -1990,9 +1992,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 SUM(thin_signal) AS thin_signal_count,
                 SUM(has_estimated_publication) AS estimated_publication_count,
                 SUM(CASE WHEN has_estimated_publication = 0 THEN 1 ELSE 0 END) AS missing_estimated_publication_count
-            FROM classified
-            """,
-            cte_params,
+            FROM {snapshot_table}
+            """
         ).fetchone()
         summary_values = dict(summary_row) if summary_row is not None else {}
         coverage = self.coverage_summary()
@@ -2045,8 +2046,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             },
         ):
             comparisons[str(spec["lens"])] = self._overview_comparison_module(
-                cte_sql=cte_sql,
-                cte_params=cte_params,
+                table_name=snapshot_table,
                 lens=str(spec["lens"]),
                 title=str(spec["title"]),
                 value_expression=str(spec["value_expression"]),
@@ -2115,8 +2115,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
     def _overview_comparison_module(
         self,
         *,
-        cte_sql: str,
-        cte_params: list[object],
+        table_name: str,
         lens: str,
         title: str,
         value_expression: str,
@@ -2128,7 +2127,6 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
     ) -> dict[str, object]:
         rows = self.connection.execute(
             f"""
-            {cte_sql}
             SELECT
                 {value_expression} AS lens_value,
                 {label_expression} AS lens_label{extra_select},
@@ -2150,13 +2148,13 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 SUM(thin_signal) AS thin_signal_count,
                 SUM(has_estimated_publication) AS estimated_publication_count,
                 SUM(CASE WHEN has_estimated_publication = 0 THEN 1 ELSE 0 END) AS missing_estimated_publication_count
-            FROM classified
-            CROSS JOIN (SELECT COUNT(*) AS tracked_listings FROM classified) AS totals
+            FROM {table_name}
+            CROSS JOIN (SELECT COUNT(*) AS tracked_listings FROM {table_name}) AS totals
             GROUP BY {value_expression}, {label_expression}
             ORDER BY {order_by}
             LIMIT ?
             """,
-            [*cte_params, max(int(limit), 1)],
+            [max(int(limit), 1)],
         ).fetchall()
 
         items: list[dict[str, object]] = []

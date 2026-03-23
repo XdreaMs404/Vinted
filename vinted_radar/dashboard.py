@@ -321,9 +321,10 @@ def build_dashboard_payload(
     route_context: RouteContext | None = None,
 ) -> dict[str, Any]:
     route_context = route_context or RouteContext()
+    generated_at = _generated_at(now)
     comparison_limit = max(1, min(int(filters.limit), SEGMENT_LIMIT))
-    overview = repository.overview_snapshot(now=now, comparison_limit=comparison_limit)
-    featured_page = repository.listing_explorer_page(page=1, page_size=4, sort="last_seen_desc", now=now)
+    overview = repository.overview_snapshot(now=generated_at, comparison_limit=comparison_limit)
+    featured_page = repository.listing_explorer_page(page=1, page_size=4, sort="last_seen_desc", now=generated_at)
     featured_listings = [_serialize_overview_listing_item(item, route_context=route_context) for item in featured_page["items"]]
 
     return {
@@ -373,7 +374,7 @@ def build_explorer_payload(
 ) -> dict[str, Any]:
     route_context = route_context or RouteContext()
     generated_at = _generated_at(now)
-    options = repository.explorer_filter_options(now=now)
+    options = repository.explorer_filter_options(now=generated_at)
     snapshot = repository.explorer_snapshot(
         root=filters.root,
         catalog_id=filters.catalog_id,
@@ -386,9 +387,9 @@ def build_explorer_payload(
         page=filters.page,
         page_size=filters.page_size,
         comparison_limit=SEGMENT_LIMIT,
-        now=now,
+        now=generated_at,
     )
-    runtime = repository.runtime_status(limit=5, now=now)
+    runtime = repository.runtime_status(limit=5, now=generated_at)
     acquisition = runtime.get("acquisition") if isinstance(runtime, dict) else {}
     page = snapshot["page"]
     summary = snapshot["summary"]
@@ -3450,5 +3451,21 @@ def _format_unix_timestamp(value: Any) -> str | None:
         return None
 
 
+def _repair_visible_mojibake(value: str) -> str:
+    if not value or "�" in value:
+        return value
+    marker_count = value.count("Ã") + value.count("Â") + value.count("â")
+    if marker_count == 0:
+        return value
+    try:
+        repaired = value.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        return value
+    repaired_marker_count = repaired.count("Ã") + repaired.count("Â") + repaired.count("â")
+    return repaired if repaired_marker_count < marker_count else value
+
+
+
 def _escape(value: Any) -> str:
-    return html.escape("" if value is None else str(value), quote=True)
+    text = "" if value is None else str(value)
+    return html.escape(_repair_visible_mojibake(text), quote=True)

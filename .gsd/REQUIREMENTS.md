@@ -48,17 +48,6 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: S04 proof: `python -m pytest tests/test_scoring.py` verified support-threshold-based context selection and graceful fallback when no trustworthy peer group exists.
 - Notes: S04 applies lightweight contextualization opportunistically through explicit peer tiers (`catalog_brand_condition`, `catalog_condition`, `catalog_brand`, `catalog`, `root_condition`, `root`) with minimum support thresholds and a no-context fallback when support is too thin.
 
-### R011 — The pipeline and product must continue to function when public signals are missing, partial, or inconsistent, while making those gaps explicit.
-- Class: quality-attribute
-- Status: active
-- Description: The pipeline and product must continue to function when public signals are missing, partial, or inconsistent, while making those gaps explicit.
-- Why it matters: Public web data is incomplete by nature; fragility would break trust and usefulness.
-- Source: user
-- Primary owning slice: M001/S03
-- Supporting slices: M001/S01, M001/S02, M001/S04, M001/S05, M001/S06
-- Validation: S06 proof: `python -m pytest tests/test_item_page_parser.py tests/test_runtime_service.py tests/test_runtime_repository.py tests/test_runtime_cli.py tests/test_overview_repository.py tests/test_dashboard.py tests/test_dashboard_cli.py`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s06.db --host 127.0.0.1 --port 8786`, and browser verification across `/`, `/explorer?root=Femmes&q=robe&page_size=2&sort=view_desc`, `/runtime`, `/listings/9002?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12`, `/api/runtime`, and `/health` confirmed explicit healthy/partial/degraded acquisition visibility without hiding the underlying diagnostics.
-- Notes: M002/S06 now surfaces degraded acquisition truth through `runtime_status().acquisition`, overview freshness, explorer/detail/runtime HTML, `/api/runtime`, and `/health`, while keeping the machine JSON literal and the visible product copy French-first. Final live VPS acceptance still belongs to S07.
-
 ### R012 — The product should add richer user-facing utility features such as comparisons, exports, and other helpful workflows that make the tool more complete beyond the core market read.
 - Class: differentiator
 - Status: active
@@ -182,6 +171,17 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: S06 proof: `python -m pytest`, `python -m vinted_radar.cli batch --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --request-delay 0.0`, `python -m vinted_radar.cli runtime-status --db data/vinted-radar-s06.db --format json`, and `python -m vinted_radar.cli continuous --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 2 --state-refresh-limit 4 --interval-seconds 5 --request-delay 0.0 --dashboard --host 127.0.0.1 --port 8766` plus browser verification at `http://127.0.0.1:8766` and direct checks against `/api/runtime`, `/api/dashboard`, and `/health` confirmed both operator modes and persisted runtime diagnostics.
 - Notes: Runtime truth now lives in SQLite `runtime_cycles`, with batch/continuous orchestration exposed through the CLI and mirrored on the dashboard runtime card plus `/api/runtime`.
 
+### R011 — The pipeline and product must continue to function when public signals are missing, partial, or inconsistent, while making those gaps explicit.
+- Class: quality-attribute
+- Status: validated
+- Description: The pipeline and product must continue to function when public signals are missing, partial, or inconsistent, while making those gaps explicit.
+- Why it matters: Public web data is incomplete by nature; fragility would break trust and usefulness.
+- Source: user
+- Primary owning slice: M001/S03
+- Supporting slices: M001/S01, M001/S02, M001/S04, M001/S05, M001/S06
+- Validation: S06+S07 proof: `python -m pytest -q`, `MSYS_NO_PATHCONV=1 python scripts/verify_vps_serving.py --base-url http://127.0.0.1:8790/radar --listing-id 64882428`, desktop/mobile browser verification on the mounted realistic corpus, `python scripts/verify_vps_serving.py --base-url http://46.225.113.129:8765 --listing-id 8468335111`, and direct public checks against `/`, `/explorer`, `/runtime`, `/api/runtime`, `/api/listings/8468335111`, and `/health` confirmed the product stays explicit about healthy/degraded acquisition truth while remaining operable through the recovered public VPS entrypoint.
+- Notes: M002/S06 introduced the degraded/partial/healthy acquisition contract; S07 then validated it end to end through combined realistic-corpus local proof and real public VPS proof after retiring a corrupted 61 GB live DB from the serving path and repointing services to a fresh healthy clean DB.
+
 ## Deferred
 
 ### R020 — The product could notify the user when segments accelerate, weaken, or cross notable confidence thresholds.
@@ -277,7 +277,7 @@ This file is the explicit capability and coverage contract for the project.
 | R008 | primary-user-loop | validated | M001/S04 | M001/S05, M001/S06 | S05 proof: `python -m pytest`, `python -m vinted_radar.cli market-summary --db data/vinted-radar-s05.db --limit 6 --format json`, and `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765` plus browser verification confirmed performing/rising segment modules on the main product surface. |
 | R009 | primary-user-loop | validated | M001/S05 | M001/S03, M001/S04, M001/S06 | S05 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765`, and browser verification at `http://127.0.0.1:8765` confirmed a mixed dashboard with segment summaries, demand/premium ranking tables, root/state/catalog/search filters, and listing-detail drill-down into history, score factors, transitions, and state reasons. |
 | R010 | operability | validated | M001/S06 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05 | S06 proof: `python -m pytest`, `python -m vinted_radar.cli batch --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --request-delay 0.0`, `python -m vinted_radar.cli runtime-status --db data/vinted-radar-s06.db --format json`, and `python -m vinted_radar.cli continuous --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 2 --state-refresh-limit 4 --interval-seconds 5 --request-delay 0.0 --dashboard --host 127.0.0.1 --port 8766` plus browser verification at `http://127.0.0.1:8766` and direct checks against `/api/runtime`, `/api/dashboard`, and `/health` confirmed both operator modes and persisted runtime diagnostics. |
-| R011 | quality-attribute | active | M001/S03 | M001/S01, M001/S02, M001/S04, M001/S05, M001/S06 | S06 proof: `python -m pytest tests/test_item_page_parser.py tests/test_runtime_service.py tests/test_runtime_repository.py tests/test_runtime_cli.py tests/test_overview_repository.py tests/test_dashboard.py tests/test_dashboard_cli.py`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s06.db --host 127.0.0.1 --port 8786`, and browser verification across `/`, `/explorer?root=Femmes&q=robe&page_size=2&sort=view_desc`, `/runtime`, `/listings/9002?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12`, `/api/runtime`, and `/health` confirmed explicit healthy/partial/degraded acquisition visibility without hiding the underlying diagnostics. |
+| R011 | quality-attribute | validated | M001/S03 | M001/S01, M001/S02, M001/S04, M001/S05, M001/S06 | S06+S07 proof: `python -m pytest -q`, `MSYS_NO_PATHCONV=1 python scripts/verify_vps_serving.py --base-url http://127.0.0.1:8790/radar --listing-id 64882428`, desktop/mobile browser verification on the mounted realistic corpus, `python scripts/verify_vps_serving.py --base-url http://46.225.113.129:8765 --listing-id 8468335111`, and direct public checks against `/`, `/explorer`, `/runtime`, `/api/runtime`, `/api/listings/8468335111`, and `/health` confirmed the product stays explicit about healthy/degraded acquisition truth while remaining operable through the recovered public VPS entrypoint. |
 | R012 | differentiator | active | M002 (provisional) | none | S04 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s04.db --host 127.0.0.1 --port 8783`, and browser verification at `http://127.0.0.1:8783/explorer?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12` confirmed richer comparison and navigation workflows beyond the overview-only market read. |
 | R013 | core-capability | active | M003 (provisional) | none | mapped |
 | R014 | differentiator | active | M003 (provisional) | none | mapped |
@@ -293,7 +293,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 10
-- Mapped to slices: 10
-- Validated: 6 (R004, R005, R006, R008, R009, R010)
+- Active requirements: 9
+- Mapped to slices: 9
+- Validated: 7 (R004, R005, R006, R008, R009, R010, R011)
 - Unmapped active requirements: 0

@@ -145,7 +145,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Verify the proxy-aware Vinted Radar serving contract.")
     parser.add_argument("--base-url", required=True, help="Base URL prefix for the served product, e.g. http://127.0.0.1:8782 or https://radar.example.com/radar")
     parser.add_argument("--listing-id", required=True, type=int, help="Listing ID to verify through the HTML and JSON detail routes.")
-    parser.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds per request.")
+    parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds per request.")
     args = parser.parse_args()
 
     try:

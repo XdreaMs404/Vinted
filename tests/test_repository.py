@@ -206,6 +206,33 @@ def test_explorer_filter_options_include_comparison_dimensions(tmp_path: Path) -
     assert any(item["value"] == "20_to_39_eur" for item in options["price_bands"])
 
 
+def test_repository_reuses_materialized_overview_snapshot_for_same_now(tmp_path: Path) -> None:
+    from tests.test_dashboard import _seed_dashboard_db
+
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        calls = {"count": 0}
+        original = repository._rebuild_overview_state_snapshot
+
+        def _wrapped(*, now_dt):
+            calls["count"] += 1
+            return original(now_dt=now_dt)
+
+        repository._rebuild_overview_state_snapshot = _wrapped  # type: ignore[method-assign]
+        fixed_now = "2026-03-19T12:00:00+00:00"
+
+        repository.explorer_filter_options(now=fixed_now)
+        repository.overview_snapshot(now=fixed_now)
+        repository.explorer_snapshot(now=fixed_now)
+
+        assert calls["count"] == 1
+
+        repository.overview_snapshot(now="2026-03-19T12:00:01+00:00")
+        assert calls["count"] == 2
+
+
 def test_repository_migrates_legacy_listing_columns_before_creating_dependent_indexes(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.db"
 

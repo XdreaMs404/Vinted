@@ -38,6 +38,7 @@ __pycache__/
 venv/
 data/
 artifacts/
+.artifacts/
 target/
 vendor/
 *.log

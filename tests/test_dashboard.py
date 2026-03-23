@@ -8,6 +8,7 @@ from vinted_radar.dashboard import (
     DashboardApplication,
     DashboardFilters,
     ExplorerFilters,
+    _escape,
     build_dashboard_payload,
     build_explorer_payload,
     build_listing_detail_payload,
@@ -200,6 +201,48 @@ def test_dashboard_payload_uses_sql_overview_contract_and_honesty_notes(tmp_path
     ]
 
 
+def test_dashboard_payload_reuses_one_generated_at_for_repository_calls() -> None:
+    captured: dict[str, str | None] = {}
+
+    class _RepositoryStub:
+        db_path = Path("data/stub.db")
+
+        def overview_snapshot(self, *, now: str | None, comparison_limit: int) -> dict[str, object]:
+            captured["overview_now"] = now
+            return {
+                "generated_at": now,
+                "db_path": str(self.db_path),
+                "summary": {
+                    "inventory": {"tracked_listings": 0, "sold_like_count": 0, "comparison_support_threshold": 3, "state_counts": {}},
+                    "honesty": {"observed_state_count": 0, "inferred_state_count": 0, "unknown_state_count": 0, "partial_signal_count": 0, "thin_signal_count": 0, "estimated_publication_count": 0, "missing_estimated_publication_count": 0, "confidence_counts": {"high": 0, "medium": 0, "low": 0}},
+                    "freshness": {"acquisition_status": None, "acquisition_reasons": [], "recent_probe_issue_count": 0, "recent_inconclusive_probe_count": 0, "recent_probe_issues": [], "recent_acquisition_failure_count": 0, "recent_acquisition_failures": []},
+                },
+                "comparisons": {},
+                "coverage": None,
+                "runtime": {"acquisition": {"status": "healthy", "reasons": []}},
+            }
+
+        def listing_explorer_page(self, *, page: int, page_size: int, sort: str, now: str | None) -> dict[str, object]:
+            captured["page_now"] = now
+            return {"items": []}
+
+    payload = build_dashboard_payload(_RepositoryStub(), filters=DashboardFilters())
+
+    assert captured["overview_now"] is not None
+    assert captured["overview_now"] == captured["page_now"]
+    assert payload["generated_at"] == captured["overview_now"]
+
+
+
+def test_escape_repairs_common_utf8_mojibake_for_visible_html() -> None:
+    escaped = _escape("Femmes > VÃªtements > Porte-clÃ©s")
+
+    assert "Vêtements" in escaped
+    assert "Porte-clés" in escaped
+    assert "VÃªtements" not in escaped
+
+
+
 def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard.db"
     _seed_dashboard_db(db_path)
@@ -228,6 +271,44 @@ def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> Non
     assert payload["items"][0]["detail_href"] == "/listings/9003?root=Femmes&q=robe&page_size=2"
     assert payload["filters"]["available"]["catalogs"][1]["catalog_id"] == 2001
     assert payload["filters"]["available"]["brands"][1]["value"] == "Maje"
+
+
+def test_explorer_payload_reuses_one_generated_at_for_repository_calls() -> None:
+    captured: dict[str, str | None] = {}
+
+    class _RepositoryStub:
+        db_path = Path("data/stub.db")
+
+        def explorer_filter_options(self, *, now: str | None) -> dict[str, object]:
+            captured["options_now"] = now
+            return {
+                "tracked_listings": 0,
+                "roots": [{"value": "all", "label": "All roots"}],
+                "catalogs": [{"value": "", "label": "All catalogs"}],
+                "brands": [{"value": "all", "label": "All brands"}],
+                "conditions": [{"value": "all", "label": "All conditions"}],
+                "price_bands": [{"value": "all", "label": "All price bands"}],
+                "states": [{"value": "all", "label": "All radar states"}],
+                "sorts": [{"value": "last_seen_desc", "label": "Recently seen"}],
+            }
+
+        def explorer_snapshot(self, *, now: str | None, **kwargs) -> dict[str, object]:
+            captured["snapshot_now"] = now
+            return {
+                "summary": {"inventory": {"matched_listings": 0, "sold_like_count": 0, "comparison_support_threshold": 3, "average_price_amount_cents": None, "state_counts": {}}, "honesty": {"observed_state_count": 0, "inferred_state_count": 0, "unknown_state_count": 0, "partial_signal_count": 0, "thin_signal_count": 0, "estimated_publication_count": 0, "missing_estimated_publication_count": 0}},
+                "comparisons": {},
+                "page": {"total_listings": 0, "total_pages": 0, "page": 1, "page_size": 50, "sort": "last_seen_desc", "has_previous_page": False, "has_next_page": False, "items": []},
+            }
+
+        def runtime_status(self, *, limit: int, now: str | None) -> dict[str, object]:
+            captured["runtime_now"] = now
+            return {"acquisition": {"status": "healthy", "reasons": []}}
+
+    payload = build_explorer_payload(_RepositoryStub(), filters=ExplorerFilters())
+
+    assert captured["options_now"] is not None
+    assert captured["options_now"] == captured["snapshot_now"] == captured["runtime_now"]
+    assert payload["generated_at"] == captured["options_now"]
 
 
 def test_explorer_payload_applies_sql_brand_condition_and_sort_filters(tmp_path: Path) -> None:
