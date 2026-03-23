@@ -101,6 +101,7 @@ def batch_run(
     typer.echo(f"Overview home: http://{host}:{port}/")
     typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
     typer.echo(f"Explorer: http://{host}:{port}/explorer")
+    typer.echo(f"Runtime: http://{host}:{port}/runtime")
     typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
     typer.echo(f"Health: http://{host}:{port}/health")
     try:
@@ -151,6 +152,7 @@ def continuous_run(
         typer.echo(f"Overview home: http://{host}:{port}/")
         typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
         typer.echo(f"Explorer: http://{host}:{port}/explorer")
+        typer.echo(f"Runtime: http://{host}:{port}/runtime")
         typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
         typer.echo(f"Health: http://{host}:{port}/health")
 
@@ -173,16 +175,49 @@ def continuous_run(
             dashboard_server.stop()
 
 
+@app.command("runtime-pause")
+def runtime_pause(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+) -> None:
+    with RadarRepository(db) as repository:
+        controller = repository.request_runtime_pause()
+
+    typer.echo(f"Database: {db}")
+    typer.echo(f"Current runtime status: {controller['status']} (phase {controller['phase']})")
+    if controller.get("requested_action") == "pause":
+        typer.echo("Pause requested. The running cycle will stop after it finishes and then switch to paused.")
+    else:
+        typer.echo("Runtime is now paused in the persisted controller state.")
+
+
+@app.command("runtime-resume")
+def runtime_resume(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+) -> None:
+    with RadarRepository(db) as repository:
+        controller = repository.request_runtime_resume()
+
+    typer.echo(f"Database: {db}")
+    typer.echo(f"Current runtime status: {controller['status']} (phase {controller['phase']})")
+    if controller.get("requested_action") == "resume":
+        typer.echo("Resume requested. A paused controller will re-enter the schedule on the next heartbeat.")
+    elif controller.get("status") == "scheduled":
+        typer.echo(f"Runtime resumed. Next cycle window: {controller.get('next_resume_at') or 'now'}")
+    else:
+        typer.echo("No paused runtime was waiting; any pending pause request was cleared.")
+
+
 @app.command("runtime-status")
 def runtime_status(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
     limit: int = typer.Option(5, "--limit", min=1, help="How many recent runtime cycles to show."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
+    now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic runtime timing output."),
 ) -> None:
     with RadarRepository(db) as repository:
-        status = repository.runtime_status(limit=limit)
+        status = repository.runtime_status(limit=limit, now=now)
 
-    if status["latest_cycle"] is None:
+    if status["latest_cycle"] is None and status.get("controller") is None:
         typer.echo(f"Database: {db}")
         typer.echo("No runtime cycles recorded yet.")
         return
@@ -193,28 +228,55 @@ def runtime_status(
     if output_format != "table":
         raise typer.BadParameter("--format must be either 'table' or 'json'.")
 
-    latest = status["latest_cycle"]
+    latest = status.get("latest_cycle") or {}
+    controller = status.get("controller") or {}
     totals = status["totals"]
     typer.echo(f"Database: {db}")
-    typer.echo(f"Latest cycle: {latest['cycle_id']}")
-    typer.echo(f"Mode: {latest['mode']}")
-    typer.echo(f"Status: {latest['status']} (phase {latest['phase']})")
-    typer.echo(f"Started: {latest['started_at']}")
-    typer.echo(f"Finished: {latest['finished_at'] or 'still running'}")
-    typer.echo(f"Discovery run: {latest.get('discovery_run_id') or 'n/a'}")
-    typer.echo(f"State probes: {latest.get('state_probed_count', 0)} / {latest.get('state_probe_limit', 0)}")
-    typer.echo(
-        "Freshness snapshot: first-pass {first_pass_only}, fresh {fresh_followup}, aging {aging_followup}, stale {stale_followup}".format(
-            **latest
+    typer.echo(f"Runtime now: {status.get('status') or 'n/a'} (phase {status.get('phase') or 'n/a'})")
+    typer.echo(f"Controller mode: {status.get('mode') or latest.get('mode') or 'n/a'}")
+    typer.echo(f"Updated at: {status.get('updated_at') or 'n/a'}")
+    heartbeat = status.get("heartbeat") or {}
+    if heartbeat:
+        typer.echo(
+            "Heartbeat: age {age} / stale after {threshold} / stale {stale}".format(
+                age=_format_duration_seconds(heartbeat.get("age_seconds")),
+                threshold=_format_duration_seconds(heartbeat.get("stale_after_seconds")),
+                stale="yes" if heartbeat.get("is_stale") else "no",
+            )
         )
-    )
+    if status.get("paused_at"):
+        typer.echo(
+            f"Paused since: {status['paused_at']} ({_format_duration_seconds(status.get('elapsed_pause_seconds'))})"
+        )
+    if status.get("next_resume_at"):
+        typer.echo(
+            f"Next resume: {status['next_resume_at']} ({_format_duration_seconds(status.get('next_resume_in_seconds'))} remaining)"
+        )
+    if status.get("requested_action") and status.get("requested_action") != "none":
+        typer.echo(f"Pending operator action: {status['requested_action']} @ {status.get('requested_at') or 'n/a'}")
+    if status.get("last_error"):
+        typer.echo(f"Controller last error: {status['last_error']}")
+        if status.get("last_error_at"):
+            typer.echo(f"Controller last error at: {status['last_error_at']}")
+
+    if latest:
+        typer.echo(f"Latest cycle: {latest['cycle_id']}")
+        typer.echo(f"Latest cycle status: {latest['status']} (phase {latest['phase']})")
+        typer.echo(f"Started: {latest['started_at']}")
+        typer.echo(f"Finished: {latest['finished_at'] or 'still running'}")
+        typer.echo(f"Discovery run: {latest.get('discovery_run_id') or 'n/a'}")
+        typer.echo(f"State probes: {latest.get('state_probed_count', 0)} / {latest.get('state_probe_limit', 0)}")
+        typer.echo(
+            "Freshness snapshot: first-pass {first_pass_only}, fresh {fresh_followup}, aging {aging_followup}, stale {stale_followup}".format(
+                **latest
+            )
+        )
+
     typer.echo(
         "Cycle totals: completed {completed_cycles}, failed {failed_cycles}, running {running_cycles}, interrupted {interrupted_cycles}".format(
             **totals
         )
     )
-    if latest.get("last_error"):
-        _echo(f"Last error: {latest['last_error']}")
     typer.echo("Recent cycles:")
     for cycle in status["recent_cycles"]:
         typer.echo(
@@ -660,6 +722,7 @@ def dashboard(
     typer.echo(f"Overview home: http://{host}:{port}/")
     typer.echo(f"Dashboard API: http://{host}:{port}/api/dashboard")
     typer.echo(f"Explorer: http://{host}:{port}/explorer")
+    typer.echo(f"Runtime: http://{host}:{port}/runtime")
     typer.echo(f"Runtime API: http://{host}:{port}/api/runtime")
     typer.echo(f"Health: http://{host}:{port}/health")
     typer.echo(f"Database: {db}")
@@ -812,6 +875,19 @@ def _format_money(amount_cents: object, currency: object) -> str:
     if amount_cents is None:
         return "price n/a"
     return f"{int(amount_cents) / 100:.2f} {currency or ''}".strip()
+
+
+def _format_duration_seconds(value: object) -> str:
+    if value is None:
+        return "n/a"
+    seconds = max(int(round(float(value))), 0)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
 
 
 def _score_kind(kind: str) -> str:

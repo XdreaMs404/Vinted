@@ -4,7 +4,14 @@ import json
 from pathlib import Path
 from wsgiref.util import setup_testing_defaults
 
-from vinted_radar.dashboard import DashboardApplication, DashboardFilters, ExplorerFilters, build_dashboard_payload, build_explorer_payload
+from vinted_radar.dashboard import (
+    DashboardApplication,
+    DashboardFilters,
+    ExplorerFilters,
+    build_dashboard_payload,
+    build_explorer_payload,
+    build_runtime_payload,
+)
 from vinted_radar.repository import RadarRepository
 
 
@@ -89,6 +96,20 @@ def _seed_dashboard_db(db_path: Path) -> None:
             },
             last_error=None,
         )
+        repository.set_runtime_controller_state(
+            status="scheduled",
+            phase="waiting",
+            mode="continuous",
+            active_cycle_id=None,
+            latest_cycle_id=cycle_id,
+            interval_seconds=900.0,
+            updated_at="2026-03-19T11:55:00+00:00",
+            paused_at=None,
+            next_resume_at="2026-03-19T12:05:00+00:00",
+            requested_action="none",
+            requested_at=None,
+            config={"state_refresh_limit": 4, "page_limit": 1},
+        )
         conn.commit()
 
 
@@ -126,6 +147,7 @@ def test_dashboard_payload_uses_sql_overview_contract_and_honesty_notes(tmp_path
     assert payload["summary"]["inventory"]["comparison_support_threshold"] == 3
     assert payload["summary"]["honesty"]["inferred_state_count"] == 1
     assert payload["summary"]["honesty"]["estimated_publication_count"] == 3
+    assert payload["summary"]["freshness"]["current_runtime_status"] == "scheduled"
     assert payload["summary"]["freshness"]["latest_runtime_cycle_status"] == "completed"
     assert payload["comparisons"]["category"]["status"] == "ok"
     assert payload["comparisons"]["brand"]["status"] == "thin-support"
@@ -140,6 +162,7 @@ def test_dashboard_payload_uses_sql_overview_contract_and_honesty_notes(tmp_path
     assert payload["featured_listings"][0]["detail_api"] == "/api/listings/9003"
     assert payload["featured_listings"][0]["explorer_href"] == "/explorer?q=9003"
     assert payload["diagnostics"]["dashboard_api"] == "/api/dashboard"
+    assert payload["diagnostics"]["runtime"] == "/runtime"
     assert payload["diagnostics"]["runtime_api"] == "/api/runtime"
     assert payload["diagnostics"]["explorer_api"] == "/api/explorer"
 
@@ -196,6 +219,22 @@ def test_explorer_payload_applies_sql_brand_condition_and_sort_filters(tmp_path:
     assert payload["notes"]["estimated_publication"].startswith("Estimated publication uses the main image timestamp")
 
 
+
+def test_runtime_payload_surfaces_controller_truth_separately_from_latest_cycle(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        payload = build_runtime_payload(repository, now="2026-03-19T12:00:00+00:00")
+
+    assert payload["summary"]["status"] == "scheduled"
+    assert payload["summary"]["phase"] == "waiting"
+    assert payload["summary"]["next_resume_at"] == "2026-03-19T12:05:00+00:00"
+    assert payload["runtime"]["latest_cycle"]["status"] == "completed"
+    assert payload["diagnostics"]["runtime"] == "/runtime"
+
+
+
 def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard.db"
     _seed_dashboard_db(db_path)
@@ -205,6 +244,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     api_status, api_body, api_headers = _call_app(app, "/api/dashboard", "state=active")
     explorer_status, explorer_body, explorer_headers = _call_app(app, "/explorer", "q=robe&page_size=2&sort=favourite_desc")
     explorer_api_status, explorer_api_body, explorer_api_headers = _call_app(app, "/api/explorer", "q=robe&page_size=2&sort=favourite_desc")
+    runtime_page_status, runtime_page_body, runtime_page_headers = _call_app(app, "/runtime")
     runtime_status, runtime_body, runtime_headers = _call_app(app, "/api/runtime")
     detail_status, detail_body, detail_headers = _call_app(app, "/api/listings/9002")
     health_status, health_body, _ = _call_app(app, "/health")
@@ -218,6 +258,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert "Niveau d’honnêteté du signal" in html_text
     assert "Comparaisons à lire avec contexte" in html_text
     assert "Explorer les annonces" in html_text
+    assert "Runtime actuel : planifié" in html_text
     assert "JSON aperçu" in html_text
     assert "JSON détail" in html_text
 
@@ -226,6 +267,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     api_payload = json.loads(api_body)
     assert api_payload["request"]["legacy_query_filters"]["state"] == "active"
     assert api_payload["summary"]["inventory"]["tracked_listings"] == 4
+    assert api_payload["summary"]["freshness"]["current_runtime_status"] == "scheduled"
     assert api_payload["comparisons"]["category"]["rows"][0]["label"] == "Femmes > Robes"
     assert api_payload["featured_listings"][0]["detail_api"] == "/api/listings/9003"
 
@@ -246,9 +288,19 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert explorer_payload["items"][0]["visible_likes_display"] == "41"
     assert explorer_payload["items"][0]["detail_api"] == "/api/listings/9003"
 
+    assert runtime_page_status == "200 OK"
+    assert runtime_page_headers["Content-Type"].startswith("text/html")
+    runtime_page_text = runtime_page_body.decode("utf-8")
+    assert "Runtime du radar" in runtime_page_text
+    assert "Le contrôleur vivant du radar" in runtime_page_text
+    assert "Cycles récents" in runtime_page_text
+
     assert runtime_status == "200 OK"
     assert runtime_headers["Content-Type"].startswith("application/json")
     runtime_payload = json.loads(runtime_body)
+    assert runtime_payload["status"] == "scheduled"
+    assert runtime_payload["phase"] == "waiting"
+    assert runtime_payload["next_resume_at"] == "2026-03-19T12:05:00+00:00"
     assert runtime_payload["latest_cycle"]["status"] == "completed"
     assert runtime_payload["latest_cycle"]["discovery_run_id"] == "run-3"
 
@@ -262,4 +314,5 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert health_status == "200 OK"
     health_payload = json.loads(health_body)
     assert health_payload["tracked_listings"] == 4
+    assert health_payload["current_runtime_status"] == "scheduled"
     assert health_payload["latest_runtime_cycle"]["status"] == "completed"

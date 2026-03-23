@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import time
 from typing import Callable
@@ -65,11 +66,13 @@ class RadarRuntimeService:
         discovery_service_factory: Callable[..., object] = build_default_service,
         state_refresh_service_factory: Callable[..., object] = build_default_state_refresh_service,
         sleep_fn: Callable[[float], None] = time.sleep,
+        now_fn: Callable[[], datetime] | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.discovery_service_factory = discovery_service_factory
         self.state_refresh_service_factory = state_refresh_service_factory
         self.sleep_fn = sleep_fn
+        self.now_fn = now_fn or (lambda: datetime.now(UTC))
 
     def run_cycle(
         self,
@@ -192,21 +195,201 @@ class RadarRuntimeService:
 
         reports: list[RadarRuntimeCycleReport] = []
         cycle_count = 0
-        while max_cycles is None or cycle_count < max_cycles:
-            report = self.run_cycle(
-                options,
-                mode="continuous",
-                interval_seconds=interval_seconds,
-                raise_on_error=not continue_on_error,
-            )
-            reports.append(report)
-            cycle_count += 1
-            if on_cycle_complete is not None:
-                on_cycle_complete(report)
-            if max_cycles is not None and cycle_count >= max_cycles:
-                break
-            self.sleep_fn(interval_seconds)
+        self._schedule_controller(
+            options,
+            interval_seconds=interval_seconds,
+            next_resume_at=self._now_iso(),
+            latest_cycle_id=None,
+            last_error=None,
+            last_error_at=None,
+        )
+        try:
+            while max_cycles is None or cycle_count < max_cycles:
+                self._wait_for_next_cycle_window(options, interval_seconds=interval_seconds)
+                report = self.run_cycle(
+                    options,
+                    mode="continuous",
+                    interval_seconds=interval_seconds,
+                    raise_on_error=not continue_on_error,
+                )
+                reports.append(report)
+                cycle_count += 1
+                if max_cycles is None or cycle_count < max_cycles:
+                    with RadarRepository(self.db_path) as repository:
+                        controller = repository.runtime_controller_state(now=self._now_iso()) or {}
+                    if controller.get("requested_action") == "pause":
+                        self._pause_controller(
+                            options,
+                            interval_seconds=interval_seconds,
+                            paused_at=self._now_iso(),
+                            latest_cycle_id=report.cycle_id,
+                            last_error=report.last_error if report.status == "failed" else None,
+                            last_error_at=report.finished_at if report.status == "failed" else None,
+                        )
+                    else:
+                        next_resume_at = self._iso_at(self.now_fn() + timedelta(seconds=interval_seconds))
+                        self._schedule_controller(
+                            options,
+                            interval_seconds=interval_seconds,
+                            next_resume_at=next_resume_at,
+                            latest_cycle_id=report.cycle_id,
+                            last_error=report.last_error if report.status == "failed" else None,
+                            last_error_at=report.finished_at if report.status == "failed" else None,
+                        )
+                if on_cycle_complete is not None:
+                    on_cycle_complete(report)
+                if max_cycles is not None and cycle_count >= max_cycles:
+                    break
+        except KeyboardInterrupt:
+            self._idle_controller(options, interval_seconds=interval_seconds)
+            raise
+
+        self._idle_controller(options, interval_seconds=interval_seconds)
         return reports
+
+    def _schedule_controller(
+        self,
+        options: RadarRuntimeOptions,
+        *,
+        interval_seconds: float,
+        next_resume_at: str,
+        latest_cycle_id: str | None,
+        last_error: str | None,
+        last_error_at: str | None,
+    ) -> None:
+        with RadarRepository(self.db_path) as repository:
+            repository.set_runtime_controller_state(
+                status="scheduled",
+                phase="waiting",
+                mode="continuous",
+                active_cycle_id=None,
+                latest_cycle_id=latest_cycle_id,
+                interval_seconds=interval_seconds,
+                updated_at=self._now_iso(),
+                paused_at=None,
+                next_resume_at=next_resume_at,
+                last_error=last_error,
+                last_error_at=last_error_at,
+                requested_action="none",
+                requested_at=None,
+                config=options.as_config(),
+            )
+
+    def _pause_controller(
+        self,
+        options: RadarRuntimeOptions,
+        *,
+        interval_seconds: float,
+        paused_at: str,
+        latest_cycle_id: str | None,
+        last_error: str | None,
+        last_error_at: str | None,
+    ) -> None:
+        with RadarRepository(self.db_path) as repository:
+            repository.set_runtime_controller_state(
+                status="paused",
+                phase="paused",
+                mode="continuous",
+                active_cycle_id=None,
+                latest_cycle_id=latest_cycle_id,
+                interval_seconds=interval_seconds,
+                updated_at=self._now_iso(),
+                paused_at=paused_at,
+                next_resume_at=None,
+                last_error=last_error,
+                last_error_at=last_error_at,
+                requested_action="none",
+                requested_at=None,
+                config=options.as_config(),
+            )
+
+    def _idle_controller(self, options: RadarRuntimeOptions, *, interval_seconds: float) -> None:
+        with RadarRepository(self.db_path) as repository:
+            repository.set_runtime_controller_state(
+                status="idle",
+                phase="idle",
+                mode="continuous",
+                active_cycle_id=None,
+                interval_seconds=interval_seconds,
+                updated_at=self._now_iso(),
+                paused_at=None,
+                next_resume_at=None,
+                requested_action="none",
+                requested_at=None,
+                config=options.as_config(),
+            )
+
+    def _wait_for_next_cycle_window(self, options: RadarRuntimeOptions, *, interval_seconds: float) -> None:
+        poll_seconds = self._poll_interval_seconds(interval_seconds)
+        while True:
+            current_iso = self._now_iso()
+            with RadarRepository(self.db_path) as repository:
+                controller = repository.runtime_controller_state(now=current_iso)
+            if controller is None:
+                self._schedule_controller(
+                    options,
+                    interval_seconds=interval_seconds,
+                    next_resume_at=current_iso,
+                    latest_cycle_id=None,
+                    last_error=None,
+                    last_error_at=None,
+                )
+                return
+
+            status = str(controller.get("status") or "idle")
+            latest_cycle_id = None if controller.get("latest_cycle_id") is None else str(controller["latest_cycle_id"])
+            last_error = None if controller.get("last_error") is None else str(controller["last_error"])
+            last_error_at = None if controller.get("last_error_at") is None else str(controller["last_error_at"])
+
+            if status == "paused":
+                self._pause_controller(
+                    options,
+                    interval_seconds=interval_seconds,
+                    paused_at=str(controller.get("paused_at") or current_iso),
+                    latest_cycle_id=latest_cycle_id,
+                    last_error=last_error,
+                    last_error_at=last_error_at,
+                )
+                self.sleep_fn(poll_seconds)
+                continue
+
+            if status != "scheduled":
+                self._schedule_controller(
+                    options,
+                    interval_seconds=interval_seconds,
+                    next_resume_at=current_iso,
+                    latest_cycle_id=latest_cycle_id,
+                    last_error=last_error,
+                    last_error_at=last_error_at,
+                )
+                return
+
+            next_resume_at = controller.get("next_resume_at")
+            if not next_resume_at:
+                return
+
+            remaining = float(controller.get("next_resume_in_seconds") or 0.0)
+            if remaining <= 0:
+                return
+
+            self._schedule_controller(
+                options,
+                interval_seconds=interval_seconds,
+                next_resume_at=str(next_resume_at),
+                latest_cycle_id=latest_cycle_id,
+                last_error=last_error,
+                last_error_at=last_error_at,
+            )
+            self.sleep_fn(min(poll_seconds, remaining))
+
+    def _poll_interval_seconds(self, interval_seconds: float) -> float:
+        return min(max(interval_seconds / 10.0, 0.25), 1.0)
+
+    def _now_iso(self) -> str:
+        return self._iso_at(self.now_fn())
+
+    def _iso_at(self, value: datetime) -> str:
+        return value.astimezone(UTC).replace(microsecond=0).isoformat()
 
     def _update_phase(self, cycle_id: str, phase: str) -> None:
         with RadarRepository(self.db_path) as repository:

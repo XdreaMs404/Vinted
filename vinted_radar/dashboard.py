@@ -161,9 +161,15 @@ class DashboardApplication:
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
+        if path == "/runtime":
+            with RadarRepository(self.db_path) as repository:
+                payload = build_runtime_payload(repository, now=self.now)
+            body = render_runtime_html(payload)
+            return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
+
         if path == "/api/runtime":
             with RadarRepository(self.db_path) as repository:
-                payload = repository.runtime_status(limit=8)
+                payload = repository.runtime_status(limit=8, now=self.now)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
@@ -184,13 +190,15 @@ class DashboardApplication:
             with RadarRepository(self.db_path) as repository:
                 coverage = repository.coverage_summary()
                 freshness = repository.freshness_summary(now=self.now)
-                runtime_status = repository.runtime_status(limit=1)
+                runtime_status = repository.runtime_status(limit=1, now=self.now)
             body = json.dumps(
                 {
                     "status": "ok",
                     "db_path": str(self.db_path),
                     "has_run": coverage is not None,
                     "tracked_listings": int(freshness["overall"].get("tracked_listings") or 0),
+                    "current_runtime_status": runtime_status.get("status"),
+                    "runtime_controller": runtime_status.get("controller"),
                     "latest_runtime_cycle": runtime_status["latest_cycle"],
                 },
                 ensure_ascii=False,
@@ -262,6 +270,7 @@ def build_dashboard_payload(
         "diagnostics": {
             "home": "/",
             "dashboard_api": "/api/dashboard",
+            "runtime": "/runtime",
             "runtime_api": "/api/runtime",
             "explorer": "/explorer",
             "explorer_api": "/api/explorer",
@@ -269,6 +278,8 @@ def build_dashboard_payload(
             "listing_detail_examples": [item["detail_api"] for item in featured_listings],
         },
     }
+
+
 def build_explorer_payload(
     repository: RadarRepository,
     *,
@@ -324,6 +335,59 @@ def build_explorer_payload(
         "diagnostics": {
             "explorer_api": "/api/explorer",
             "dashboard": "/",
+        },
+    }
+
+
+
+def build_runtime_payload(
+    repository: RadarRepository,
+    *,
+    now: str | None = None,
+    limit: int = 8,
+) -> dict[str, Any]:
+    generated_at = _generated_at(now)
+    runtime = repository.runtime_status(limit=limit, now=now)
+    controller = runtime.get("controller") or {}
+    latest_cycle = runtime.get("latest_cycle") or {}
+    heartbeat = runtime.get("heartbeat") or {}
+    return {
+        "generated_at": generated_at,
+        "db_path": str(repository.db_path),
+        "runtime": runtime,
+        "summary": {
+            "status": runtime.get("status"),
+            "phase": runtime.get("phase"),
+            "mode": runtime.get("mode") or latest_cycle.get("mode"),
+            "updated_at": runtime.get("updated_at"),
+            "paused_at": runtime.get("paused_at"),
+            "next_resume_at": runtime.get("next_resume_at"),
+            "elapsed_pause_seconds": runtime.get("elapsed_pause_seconds"),
+            "next_resume_in_seconds": runtime.get("next_resume_in_seconds"),
+            "last_error": runtime.get("last_error"),
+            "last_error_at": runtime.get("last_error_at"),
+            "requested_action": runtime.get("requested_action"),
+            "requested_at": runtime.get("requested_at"),
+            "heartbeat": heartbeat,
+            "active_cycle_id": runtime.get("active_cycle_id"),
+            "latest_cycle_id": runtime.get("latest_cycle_id"),
+            "controller_mode": controller.get("mode"),
+        },
+        "latest_cycle": latest_cycle,
+        "recent_cycles": runtime.get("recent_cycles") or [],
+        "recent_failures": runtime.get("recent_failures") or [],
+        "totals": runtime.get("totals") or {},
+        "diagnostics": {
+            "home": "/",
+            "dashboard_api": "/api/dashboard",
+            "runtime": "/runtime",
+            "runtime_api": "/api/runtime",
+            "health": "/health",
+        },
+        "notes": {
+            "scheduled": "Un runtime 'scheduled' attend la prochaine fenêtre de reprise enregistrée en base. Ce n'est pas un run terminé : c'est une attente saine et suivie.",
+            "paused": "Un runtime 'paused' garde un `paused_at` persistant. Le temps écoulé dépend du contrôleur, pas d'une estimation dérivée du dernier cycle.",
+            "failed": "Un cycle raté reste visible dans l'historique, mais le contrôleur peut revenir à `scheduled` si la boucle continue avec retry.",
         },
     }
 
@@ -452,6 +516,19 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
     recent_failures = freshness.get("recent_acquisition_failures") or []
     runtime = payload.get("runtime") or {}
     latest_cycle = runtime.get("latest_cycle") or {}
+    current_runtime_status = freshness.get("current_runtime_status") or runtime.get("status") or latest_cycle.get("status") or freshness.get("latest_runtime_cycle_status")
+    runtime_timing_line = None
+    if freshness.get("current_runtime_next_resume_at"):
+        runtime_timing_line = f"Prochaine reprise : {_format_optional_timestamp(freshness.get('current_runtime_next_resume_at'))}"
+    elif freshness.get("current_runtime_paused_at"):
+        runtime_timing_line = f"En pause depuis : {_format_optional_timestamp(freshness.get('current_runtime_paused_at'))}"
+
+    freshness_lines = [
+        f"Dernière vue annonce : {_format_optional_timestamp(freshness.get('latest_listing_seen_at'))}",
+        f"Runtime actuel : {_runtime_status_label(current_runtime_status)}",
+    ]
+    if runtime_timing_line:
+        freshness_lines.append(runtime_timing_line)
 
     cards_html = "".join(
         (
@@ -484,10 +561,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
             _metric_card(
                 "Fraîcheur",
                 _escape(_format_optional_timestamp(freshness.get("latest_successful_scan_at"))),
-                [
-                    f"Dernière vue annonce : {_format_optional_timestamp(freshness.get('latest_listing_seen_at'))}",
-                    f"Cycle runtime : {latest_cycle.get('status') or freshness.get('latest_runtime_cycle_status') or 'n/a'}",
-                ],
+                freshness_lines,
             ),
         )
     )
@@ -511,6 +585,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
 
     diagnostics_links = [
         ("Explorer", diagnostics["explorer"]),
+        ("Runtime", diagnostics["runtime"]),
         ("JSON aperçu", diagnostics["dashboard_api"]),
         ("JSON runtime", diagnostics["runtime_api"]),
         ("Santé", diagnostics["health"]),
@@ -721,8 +796,8 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       <p class="lead">Cette page d’accueil privilégie un aperçu français, lisible et honnête. Le contenu principal vient directement du contrat SQL du dépôt : volumes suivis, fraîcheur réelle, niveaux de confiance, zones fragiles et premiers comparatifs catégories / marques / prix / états / statuts de vente.</p>
       <nav class="nav-links" aria-label="Raccourcis d’exploration">
         <a class="button" href="{_escape(diagnostics['explorer'])}">Explorer les annonces</a>
+        <a class="button secondary" href="{_escape(diagnostics['runtime'])}">Ouvrir le runtime</a>
         <a class="button secondary" href="{_escape(diagnostics['dashboard_api'])}">Ouvrir le JSON aperçu</a>
-        <a class="button secondary" href="{_escape(diagnostics['runtime_api'])}">Voir le runtime</a>
         <a class="button secondary" href="{_escape(diagnostics['health'])}">Vérifier la santé</a>
       </nav>
     </header>
@@ -760,7 +835,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
         <section class="panel" aria-labelledby="runtime-title">
           <div class="panel-head">
             <h2 id="runtime-title">Fraîcheur et incidents récents</h2>
-            <p>Dernier scan réussi : {_escape(_format_optional_timestamp(freshness.get('latest_successful_scan_at')))} · dernier cycle runtime : {_escape(str(freshness.get('latest_runtime_cycle_status') or 'n/a'))}.</p>
+            <p>Dernier scan réussi : {_escape(_format_optional_timestamp(freshness.get('latest_successful_scan_at')))} · runtime actuel : {_escape(_runtime_status_label(current_runtime_status))}.</p>
           </div>
           {failure_html}
         </section>
@@ -771,6 +846,267 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
             <p>Pour diagnostiquer une régression, comparez d’abord cette page avec les JSON publics correspondants : même source, symptômes plus faciles à tracer.</p>
           </div>
           <div class="button-row">{diagnostics_html}</div>
+        </section>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>'''
+
+
+
+def render_runtime_html(payload: dict[str, Any]) -> str:
+    summary = payload["summary"]
+    runtime = payload["runtime"]
+    latest_cycle = payload.get("latest_cycle") or {}
+    recent_cycles = payload.get("recent_cycles") or []
+    recent_failures = payload.get("recent_failures") or []
+    diagnostics = payload["diagnostics"]
+    notes = payload.get("notes") or {}
+    heartbeat = summary.get("heartbeat") or {}
+
+    status = str(summary.get("status") or "idle")
+    status_label = _runtime_status_label(status)
+    status_class = _runtime_status_tone(status)
+    current_mode = _runtime_mode_label(summary.get("mode") or latest_cycle.get("mode"))
+    controller_rows = [
+        ("Statut courant", status_label),
+        ("Phase", _runtime_phase_label(summary.get("phase"))),
+        ("Mode", str(current_mode)),
+        ("Dernier heartbeat", _format_optional_timestamp(summary.get("updated_at"))),
+        ("Âge du heartbeat", _format_seconds_duration(heartbeat.get("age_seconds"))),
+        ("Heartbeat périmé", "oui" if heartbeat.get("is_stale") else "non"),
+        ("Cycle actif", str(summary.get("active_cycle_id") or "aucun")),
+        ("Dernier cycle lié", str(summary.get("latest_cycle_id") or "aucun")),
+    ]
+    if summary.get("paused_at"):
+        controller_rows.append(("Pause enregistrée à", _format_optional_timestamp(summary.get("paused_at"))))
+        controller_rows.append(("Pause écoulée", _format_seconds_duration(summary.get("elapsed_pause_seconds"))))
+    if summary.get("next_resume_at"):
+        controller_rows.append(("Prochaine reprise", _format_optional_timestamp(summary.get("next_resume_at"))))
+        controller_rows.append(("Temps restant", _format_seconds_duration(summary.get("next_resume_in_seconds"))))
+    if summary.get("requested_action") and summary.get("requested_action") != "none":
+        controller_rows.append(("Action opérateur en attente", str(summary.get("requested_action"))))
+        controller_rows.append(("Demande horodatée", _format_optional_timestamp(summary.get("requested_at"))))
+    if summary.get("last_error"):
+        controller_rows.append(("Dernière erreur contrôleur", str(summary.get("last_error"))))
+        controller_rows.append(("Erreur horodatée", _format_optional_timestamp(summary.get("last_error_at"))))
+
+    controller_html = "".join(
+        f"<div class=\"fact\"><span>{_escape(label)}</span><strong>{_escape(value)}</strong></div>"
+        for label, value in controller_rows
+    )
+
+    cycle_rows_html = "".join(
+        f"""
+        <tr>
+          <td><strong>{_escape(str(cycle.get('cycle_id') or 'n/a'))}</strong></td>
+          <td>{_escape(str(cycle.get('mode') or 'n/a'))}</td>
+          <td><span class=\"pill { _runtime_status_tone(str(cycle.get('status') or 'idle')) }\">{_escape(_runtime_status_label(str(cycle.get('status') or 'idle')))}</span></td>
+          <td>{_escape(_runtime_phase_label(cycle.get('phase')))}</td>
+          <td>{_escape(_format_optional_timestamp(cycle.get('started_at')))}</td>
+          <td>{_escape(_format_optional_timestamp(cycle.get('finished_at')))}</td>
+          <td>{_escape(str(cycle.get('tracked_listings') or 0))}</td>
+          <td>{_escape(str(cycle.get('state_probed_count') or 0))}</td>
+        </tr>
+        """
+        for cycle in recent_cycles
+    ) or "<tr><td colspan='8'>Aucun cycle runtime enregistré.</td></tr>"
+
+    failures_html = "".join(
+        f"<li><strong>{_escape(str(cycle.get('cycle_id') or 'cycle inconnu'))}</strong><span>{_escape(str(cycle.get('last_error') or 'erreur inconnue'))}</span></li>"
+        for cycle in recent_failures[:6]
+    ) or '<li><strong>Aucun échec récent</strong><span>Le contrôleur n’a pas conservé de cycle en échec dans la fenêtre demandée.</span></li>'
+
+    note_cards = "".join(
+        f"<article class=\"note\"><h3>{_escape(title)}</h3><p>{_escape(text)}</p></article>"
+        for title, text in (
+            ("Planifié", str(notes.get("scheduled") or "")),
+            ("En pause", str(notes.get("paused") or "")),
+            ("Échec", str(notes.get("failed") or "")),
+        )
+    )
+
+    totals = payload.get("totals") or {}
+
+    return f'''<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vinted Radar — runtime</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b1118'/%3E%3Cpath d='M16 46V18h15.5c9.6 0 16.5 5.4 16.5 14 0 8.6-6.6 14-16 14H16Zm8-6h5c5.1 0 8.8-3.1 8.8-8s-3.7-8-9.1-8H24v16Z' fill='%237ec6ff'/%3E%3C/svg%3E">
+  <style>
+    :root {{
+      --bg: #0b1118;
+      --panel: rgba(13, 24, 35, 0.94);
+      --ink: #f4f7fb;
+      --muted: #b4c2cf;
+      --line: rgba(255,255,255,0.10);
+      --accent: #7ec6ff;
+      --accent-strong: #3b9dff;
+      --success: #72d1a4;
+      --warning: #ffcf74;
+      --danger: #ff8c7b;
+      --radius-lg: 28px;
+      --radius-md: 20px;
+      --radius-sm: 14px;
+      --shadow: 0 24px 72px rgba(0,0,0,0.34);
+    }}
+    * {{ box-sizing: border-box; }}
+    html {{ color-scheme: dark; -webkit-font-smoothing: antialiased; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top right, rgba(59,157,255,0.18), transparent 26%),
+        radial-gradient(circle at bottom left, rgba(114,209,164,0.10), transparent 24%),
+        linear-gradient(180deg, #0b1118 0%, #0a0f15 100%);
+    }}
+    a {{ color: inherit; }}
+    .skip-link {{ position: absolute; left: 16px; top: -48px; background: #000; color: #fff; padding: 10px 14px; border-radius: 999px; text-decoration: none; z-index: 20; }}
+    .skip-link:focus {{ top: 16px; }}
+    .shell {{ max-width: 1380px; margin: 0 auto; padding: 28px; }}
+    .hero, .panel, .metric, .note {{ background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(16px); }}
+    .hero {{ border-radius: var(--radius-lg); padding: 28px; display: grid; gap: 16px; margin-bottom: 22px; }}
+    .eyebrow {{ text-transform: uppercase; letter-spacing: 0.18em; font-size: 12px; color: var(--accent); font-weight: 700; }}
+    h1, h2, h3 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; text-wrap: balance; }}
+    h1 {{ font-size: clamp(2.1rem, 4.8vw, 4rem); line-height: 0.98; max-width: 12ch; }}
+    h2 {{ font-size: clamp(1.35rem, 2.2vw, 2rem); line-height: 1.06; }}
+    p {{ margin: 0; color: var(--muted); line-height: 1.6; text-wrap: pretty; }}
+    .nav {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+    .button {{ min-height: 42px; display: inline-flex; align-items: center; justify-content: center; padding: 11px 16px; border-radius: 999px; text-decoration: none; font-weight: 600; border: 1px solid rgba(126,198,255,0.34); background: linear-gradient(135deg, rgba(126,198,255,0.24), rgba(59,157,255,0.08)); transition: transform 140ms ease, border-color 140ms ease; font-variant-numeric: tabular-nums; }}
+    .button.secondary {{ background: rgba(255,255,255,0.04); border-color: var(--line); color: var(--muted); }}
+    .button:hover {{ transform: translateY(-1px); border-color: rgba(126,198,255,0.58); }}
+    .button:active {{ transform: scale(0.96); }}
+    .button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 3px; }}
+    .status-line {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
+    .pill {{ display: inline-flex; align-items: center; min-height: 34px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }}
+    .pill.success {{ color: var(--success); }}
+    .pill.warning {{ color: var(--warning); }}
+    .pill.danger {{ color: var(--danger); }}
+    .pill.info {{ color: var(--accent); }}
+    .metrics {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 22px; }}
+    .metric {{ border-radius: var(--radius-md); padding: 20px; }}
+    .metric-label {{ color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; font-size: 11px; margin-bottom: 10px; }}
+    .metric-value {{ font-size: 1.8rem; font-family: Georgia, "Times New Roman", serif; font-variant-numeric: tabular-nums; margin-bottom: 8px; }}
+    .layout {{ display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr); gap: 22px; align-items: start; }}
+    .stack {{ display: grid; gap: 22px; }}
+    .panel {{ border-radius: var(--radius-lg); padding: 24px; }}
+    .panel-head {{ display: grid; gap: 8px; margin-bottom: 18px; }}
+    .facts {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }}
+    .fact {{ border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); padding: 14px; display: grid; gap: 8px; }}
+    .fact span {{ color: var(--muted); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }}
+    .fact strong {{ font-size: 1rem; line-height: 1.45; font-variant-numeric: tabular-nums; }}
+    .note-grid {{ display: grid; gap: 12px; }}
+    .note {{ border-radius: var(--radius-md); padding: 16px; }}
+    .note p {{ margin-top: 6px; }}
+    .failure-list {{ margin: 0; padding-left: 18px; display: grid; gap: 10px; color: var(--muted); }}
+    .failure-list strong {{ color: var(--ink); display: block; margin-bottom: 2px; }}
+    .table-wrap {{ overflow: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-md); }}
+    table {{ width: 100%; border-collapse: collapse; min-width: 960px; }}
+    th, td {{ padding: 13px 14px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; font-variant-numeric: tabular-nums; }}
+    th {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; background: rgba(255,255,255,0.02); }}
+    @media (max-width: 1040px) {{ .layout {{ grid-template-columns: 1fr; }} }}
+    @media (max-width: 720px) {{ .shell {{ padding: 18px; }} .hero, .panel, .metric {{ padding: 18px; }} }}
+    @media (prefers-reduced-motion: reduce) {{ * {{ scroll-behavior: auto; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }} }}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#runtime-main">Aller au contenu runtime</a>
+  <main id="runtime-main" class="shell">
+    <header class="hero">
+      <span class="eyebrow">Runtime du radar</span>
+      <h1>Le contrôleur vivant du radar, sans deviner à partir du dernier cycle.</h1>
+      <p>Cette page lit le contrôleur SQLite en direct : statut courant, heartbeat, pause, prochaine reprise, erreur récente et séparation nette entre l'état actuel et l'historique immuable des cycles.</p>
+      <div class="status-line" role="status" aria-live="polite">
+        <span class="pill {status_class}">{_escape(status_label)}</span>
+        <span class="pill">Phase {_escape(_runtime_phase_label(summary.get('phase')))}</span>
+        <span class="pill">Mode {_escape(str(current_mode))}</span>
+      </div>
+      <nav class="nav" aria-label="Raccourcis runtime">
+        <a class="button" href="{_escape(diagnostics['home'])}">Retour à l’aperçu</a>
+        <a class="button secondary" href="{_escape(diagnostics['runtime_api'])}">JSON runtime</a>
+        <a class="button secondary" href="{_escape(diagnostics['dashboard_api'])}">JSON aperçu</a>
+        <a class="button secondary" href="{_escape(diagnostics['health'])}">Santé</a>
+      </nav>
+    </header>
+
+    <section class="metrics" aria-label="Indicateurs runtime">
+      <article class="metric">
+        <div class="metric-label">Statut courant</div>
+        <div class="metric-value">{_escape(status_label)}</div>
+        <p>{_escape(_runtime_status_description(status))}</p>
+      </article>
+      <article class="metric">
+        <div class="metric-label">Dernier heartbeat</div>
+        <div class="metric-value">{_escape(_format_optional_timestamp(summary.get('updated_at')))}</div>
+        <p>Âge { _escape(_format_seconds_duration(heartbeat.get('age_seconds'))) } · stale { _escape('oui' if heartbeat.get('is_stale') else 'non') }</p>
+      </article>
+      <article class="metric">
+        <div class="metric-label">Pause / reprise</div>
+        <div class="metric-value">{_escape(_format_optional_timestamp(summary.get('next_resume_at') or summary.get('paused_at')))}</div>
+        <p>Pause { _escape(_format_seconds_duration(summary.get('elapsed_pause_seconds'))) } · reprise { _escape(_format_seconds_duration(summary.get('next_resume_in_seconds'))) }</p>
+      </article>
+      <article class="metric">
+        <div class="metric-label">Historique</div>
+        <div class="metric-value">{_escape(str(totals.get('total_cycles') or 0))}</div>
+        <p>Complétés { _escape(str(totals.get('completed_cycles') or 0)) } · échecs { _escape(str(totals.get('failed_cycles') or 0)) }</p>
+      </article>
+    </section>
+
+    <div class="layout">
+      <div class="stack">
+        <section class="panel" aria-labelledby="controller-title">
+          <div class="panel-head">
+            <h2 id="controller-title">État courant du contrôleur</h2>
+            <p>Ce bloc répond à la question « que fait le runtime maintenant ? » sans confondre attente saine, pause opérateur et dernier résultat de cycle.</p>
+          </div>
+          <div class="facts">{controller_html}</div>
+        </section>
+
+        <section class="panel" aria-labelledby="cycles-title">
+          <div class="panel-head">
+            <h2 id="cycles-title">Cycles récents</h2>
+            <p>Les cycles restent l'historique immuable. Le contrôleur au-dessus représente l'état vivant du scheduler.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Cycle</th>
+                  <th>Mode</th>
+                  <th>Statut</th>
+                  <th>Phase</th>
+                  <th>Démarré</th>
+                  <th>Terminé</th>
+                  <th>Annonces</th>
+                  <th>Probes</th>
+                </tr>
+              </thead>
+              <tbody>{cycle_rows_html}</tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <aside class="stack">
+        <section class="panel" aria-labelledby="failures-title">
+          <div class="panel-head">
+            <h2 id="failures-title">Échecs récents</h2>
+            <p>Un échec reste visible ici même si la boucle peut repartir ensuite en `scheduled`.</p>
+          </div>
+          <ul class="failure-list">{failures_html}</ul>
+        </section>
+
+        <section class="panel" aria-labelledby="semantics-title">
+          <div class="panel-head">
+            <h2 id="semantics-title">Sémantique du runtime</h2>
+            <p>Ces définitions évitent les faux positifs du type « completed = runtime terminé » alors que le scheduler attend simplement la prochaine fenêtre.</p>
+          </div>
+          <div class="note-grid">{note_cards}</div>
         </section>
       </aside>
     </div>
@@ -1763,6 +2099,84 @@ def _format_optional_int(value: Any) -> str:
     if value is None:
         return "n/a"
     return str(int(value))
+
+
+def _format_seconds_duration(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        total_seconds = max(int(round(float(value))), 0)
+    except (TypeError, ValueError):
+        return str(value)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {seconds:02d}s"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
+def _runtime_status_label(value: Any) -> str:
+    labels = {
+        "idle": "au repos",
+        "running": "en cours",
+        "scheduled": "planifié",
+        "paused": "en pause",
+        "failed": "en échec",
+        "completed": "terminé",
+        "interrupted": "interrompu",
+    }
+    if value is None:
+        return "n/a"
+    return labels.get(str(value), str(value))
+
+
+def _runtime_status_tone(value: str) -> str:
+    if value in {"running", "completed"}:
+        return "success"
+    if value in {"scheduled", "paused", "interrupted"}:
+        return "warning"
+    if value == "failed":
+        return "danger"
+    return "info"
+
+
+def _runtime_phase_label(value: Any) -> str:
+    labels = {
+        "idle": "au repos",
+        "waiting": "attente",
+        "paused": "pause",
+        "starting": "démarrage",
+        "discovery": "collecte",
+        "state_refresh": "rafraîchissement d'état",
+        "summarizing": "synthèse",
+        "completed": "terminé",
+    }
+    if value is None:
+        return "n/a"
+    return labels.get(str(value), str(value))
+
+
+def _runtime_mode_label(value: Any) -> str:
+    labels = {
+        "continuous": "continu",
+        "batch": "batch",
+    }
+    if value is None:
+        return "n/a"
+    return labels.get(str(value), str(value))
+
+
+def _runtime_status_description(value: str) -> str:
+    descriptions = {
+        "idle": "Aucune boucle continue n'est en attente active sur ce contrôleur au moment de la lecture.",
+        "running": "Le cycle en cours travaille réellement ; ce n'est ni une attente ni une pause opérateur.",
+        "scheduled": "Le runtime attend la prochaine fenêtre de reprise enregistrée en base. C'est un état sain de veille active.",
+        "paused": "Le runtime est volontairement gelé avec un horodatage de pause persistant.",
+        "failed": "Le contrôleur a gardé un dernier échec explicite. Vérifiez les cycles récents et l'horodatage de l'erreur.",
+    }
+    return descriptions.get(value, "État runtime non documenté.")
 
 
 def _format_optional_timestamp(value: Any) -> str:

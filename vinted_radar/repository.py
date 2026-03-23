@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+import re
 import sqlite3
 import uuid
 
@@ -36,6 +37,9 @@ FULL_SIGNAL_COMPLETENESS = 7
 HIGH_SIGNAL_COMPLETENESS = 5
 DEFAULT_OVERVIEW_COMPARISON_LIMIT = 6
 DEFAULT_OVERVIEW_SUPPORT_THRESHOLD = 3
+_RUNTIME_CONTROLLER_SINGLETON_ID = 1
+_UNSET = object()
+_SENSITIVE_URL_USERINFO_RE = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s]+(?::[^/@\s]*)?@)")
 
 
 class RadarRepository(AbstractContextManager["RadarRepository"]):
@@ -400,8 +404,24 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     phase,
                     interval_seconds,
                     state_probe_limit,
-                    json.dumps(config, ensure_ascii=False, sort_keys=True),
+                    _serialize_runtime_config(config),
                 ),
+            )
+            self._upsert_runtime_controller_state(
+                status="running",
+                phase=phase,
+                mode=mode,
+                active_cycle_id=cycle_id,
+                latest_cycle_id=cycle_id,
+                interval_seconds=interval_seconds,
+                updated_at=started_at,
+                paused_at=None,
+                next_resume_at=None,
+                last_error=None,
+                last_error_at=None,
+                requested_action="none",
+                requested_at=None,
+                config=config,
             )
         return cycle_id
 
@@ -411,6 +431,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 "UPDATE runtime_cycles SET phase = ? WHERE cycle_id = ?",
                 (phase, cycle_id),
             )
+            controller_row = self._runtime_controller_row()
+            if controller_row is not None and controller_row["active_cycle_id"] == cycle_id:
+                self._upsert_runtime_controller_state(
+                    phase=phase,
+                    updated_at=_utc_now(),
+                )
 
     def complete_runtime_cycle(
         self,
@@ -425,7 +451,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         last_error: str | None = None,
     ) -> None:
         freshness_counts = freshness_counts or {}
+        finished_at = _utc_now()
         with self.connection:
+            cycle_row = self.connection.execute(
+                "SELECT * FROM runtime_cycles WHERE cycle_id = ?",
+                (cycle_id,),
+            ).fetchone()
             self.connection.execute(
                 """
                 UPDATE runtime_cycles
@@ -436,7 +467,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 WHERE cycle_id = ?
                 """,
                 (
-                    _utc_now(),
+                    finished_at,
                     status,
                     phase,
                     discovery_run_id,
@@ -450,6 +481,23 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     cycle_id,
                 ),
             )
+            if cycle_row is not None:
+                controller_status = _controller_status_from_runtime_cycle_status(status)
+                controller_phase = _controller_phase_from_runtime_state(controller_status, phase)
+                self._upsert_runtime_controller_state(
+                    status=controller_status,
+                    phase=controller_phase,
+                    mode=cycle_row["mode"],
+                    active_cycle_id=None,
+                    latest_cycle_id=cycle_id,
+                    interval_seconds=cycle_row["interval_seconds"],
+                    updated_at=finished_at,
+                    paused_at=None if controller_status != "paused" else _UNSET,
+                    next_resume_at=None if controller_status != "scheduled" else _UNSET,
+                    last_error=last_error,
+                    last_error_at=None if last_error is None else finished_at,
+                    config=_deserialize_runtime_config(cycle_row["config_json"]),
+                )
 
     def runtime_cycle(self, cycle_id: str) -> dict[str, object] | None:
         row = self.connection.execute(
@@ -460,12 +508,116 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             return None
         return self._hydrate_runtime_cycle_row(row)
 
-    def runtime_status(self, *, limit: int = 10) -> dict[str, object]:
+    def runtime_controller_state(self, *, now: str | None = None) -> dict[str, object] | None:
+        row = self._runtime_controller_row()
+        if row is None:
+            return None
+        return self._hydrate_runtime_controller_row(row, now_dt=_coerce_now(now))
+
+    def set_runtime_controller_state(
+        self,
+        *,
+        status: str | object = _UNSET,
+        phase: str | object = _UNSET,
+        mode: str | None | object = _UNSET,
+        active_cycle_id: str | None | object = _UNSET,
+        latest_cycle_id: str | None | object = _UNSET,
+        interval_seconds: float | None | object = _UNSET,
+        updated_at: str | None | object = _UNSET,
+        paused_at: str | None | object = _UNSET,
+        next_resume_at: str | None | object = _UNSET,
+        last_error: str | None | object = _UNSET,
+        last_error_at: str | None | object = _UNSET,
+        requested_action: str | object = _UNSET,
+        requested_at: str | None | object = _UNSET,
+        config: dict[str, object] | object = _UNSET,
+    ) -> dict[str, object]:
+        with self.connection:
+            self._upsert_runtime_controller_state(
+                status=status,
+                phase=phase,
+                mode=mode,
+                active_cycle_id=active_cycle_id,
+                latest_cycle_id=latest_cycle_id,
+                interval_seconds=interval_seconds,
+                updated_at=updated_at,
+                paused_at=paused_at,
+                next_resume_at=next_resume_at,
+                last_error=last_error,
+                last_error_at=last_error_at,
+                requested_action=requested_action,
+                requested_at=requested_at,
+                config=config,
+            )
+            row = self._runtime_controller_row()
+        if row is None:
+            raise RuntimeError("Runtime controller state was not persisted.")
+        reference_now = updated_at if isinstance(updated_at, str) else None
+        return self._hydrate_runtime_controller_row(row, now_dt=_coerce_now(reference_now))
+
+    def request_runtime_pause(self, *, requested_at: str | None = None) -> dict[str, object]:
+        request_time = requested_at or _utc_now()
+        controller = self.runtime_controller_state(now=request_time)
+        if controller is not None and controller.get("status") in {"scheduled", "paused"} and controller.get("mode") == "continuous":
+            paused_at = controller.get("paused_at") or request_time
+            return self.set_runtime_controller_state(
+                status="paused",
+                phase="paused",
+                updated_at=request_time,
+                paused_at=None if paused_at is None else str(paused_at),
+                next_resume_at=None,
+                requested_action="none",
+                requested_at=None,
+            )
+        return self.set_runtime_controller_state(
+            requested_action="pause",
+            requested_at=request_time,
+            updated_at=request_time,
+        )
+
+    def request_runtime_resume(self, *, requested_at: str | None = None) -> dict[str, object]:
+        request_time = requested_at or _utc_now()
+        controller = self.runtime_controller_state(now=request_time)
+        if controller is not None and controller.get("status") == "paused" and controller.get("mode") == "continuous":
+            return self.set_runtime_controller_state(
+                status="scheduled",
+                phase="waiting",
+                updated_at=request_time,
+                paused_at=None,
+                next_resume_at=request_time,
+                requested_action="none",
+                requested_at=None,
+            )
+        if controller is not None and controller.get("requested_action") == "pause":
+            return self.clear_runtime_controller_action(updated_at=request_time)
+        return self.set_runtime_controller_state(
+            requested_action="resume",
+            requested_at=request_time,
+            updated_at=request_time,
+        )
+
+    def clear_runtime_controller_action(self, *, updated_at: str | None = None) -> dict[str, object]:
+        return self.set_runtime_controller_state(
+            requested_action="none",
+            requested_at=None,
+            updated_at=updated_at if updated_at is not None else _utc_now(),
+        )
+
+    def runtime_status(self, *, limit: int = 10, now: str | None = None) -> dict[str, object]:
+        now_dt = _coerce_now(now)
+        generated_at = now_dt.replace(microsecond=0).isoformat()
         bounded_limit = max(int(limit), 1)
         recent_cycles = [
             self._hydrate_runtime_cycle_row(row)
             for row in self.connection.execute(
                 "SELECT * FROM runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT ?",
+                (bounded_limit,),
+            )
+        ]
+        recent_failures = [
+            self._hydrate_runtime_cycle_row(row)
+            for row in self.connection.execute(
+                "SELECT * FROM runtime_cycles WHERE status = 'failed' ORDER BY started_at DESC, cycle_id DESC LIMIT ?",
                 (bounded_limit,),
             )
         ]
@@ -480,14 +632,68 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             FROM runtime_cycles
             """
         ).fetchone()
-        latest_failure_row = self.connection.execute(
-            "SELECT * FROM runtime_cycles WHERE status = 'failed' ORDER BY started_at DESC, cycle_id DESC LIMIT 1"
-        ).fetchone()
         totals = dict(totals_row) if totals_row is not None else {}
+        latest_cycle = None if not recent_cycles else recent_cycles[0]
+        controller = self.runtime_controller_state(now=generated_at)
+        effective_status = None
+        effective_phase = None
+        effective_mode = None
+        effective_updated_at = None
+        effective_paused_at = None
+        effective_next_resume_at = None
+        effective_elapsed_pause_seconds = None
+        effective_next_resume_in_seconds = None
+        effective_last_error = None
+        effective_last_error_at = None
+        effective_requested_action = None
+        effective_requested_at = None
+        effective_active_cycle_id = None
+        effective_latest_cycle_id = None
+        heartbeat = None
+        if controller is not None:
+            effective_status = controller.get("status")
+            effective_phase = controller.get("phase")
+            effective_mode = controller.get("mode") or (None if latest_cycle is None else latest_cycle.get("mode"))
+            effective_updated_at = controller.get("updated_at")
+            effective_paused_at = controller.get("paused_at")
+            effective_next_resume_at = controller.get("next_resume_at")
+            effective_elapsed_pause_seconds = controller.get("elapsed_pause_seconds")
+            effective_next_resume_in_seconds = controller.get("next_resume_in_seconds")
+            effective_last_error = controller.get("last_error")
+            effective_last_error_at = controller.get("last_error_at")
+            effective_requested_action = controller.get("requested_action")
+            effective_requested_at = controller.get("requested_at")
+            effective_active_cycle_id = controller.get("active_cycle_id")
+            effective_latest_cycle_id = controller.get("latest_cycle_id")
+            heartbeat = controller.get("heartbeat")
+        elif latest_cycle is not None:
+            effective_status = _controller_status_from_runtime_cycle_status(str(latest_cycle.get("status") or ""))
+            effective_phase = latest_cycle.get("phase")
+            effective_mode = latest_cycle.get("mode")
+
         return {
-            "latest_cycle": None if not recent_cycles else recent_cycles[0],
+            "generated_at": generated_at,
+            "db_path": str(self.db_path),
+            "controller": controller,
+            "status": effective_status,
+            "phase": effective_phase,
+            "mode": effective_mode,
+            "updated_at": effective_updated_at,
+            "paused_at": effective_paused_at,
+            "next_resume_at": effective_next_resume_at,
+            "elapsed_pause_seconds": effective_elapsed_pause_seconds,
+            "next_resume_in_seconds": effective_next_resume_in_seconds,
+            "last_error": effective_last_error if effective_last_error is not None else (None if not recent_failures else recent_failures[0].get("last_error")),
+            "last_error_at": effective_last_error_at,
+            "requested_action": effective_requested_action,
+            "requested_at": effective_requested_at,
+            "active_cycle_id": effective_active_cycle_id,
+            "latest_cycle_id": effective_latest_cycle_id,
+            "heartbeat": heartbeat,
+            "latest_cycle": latest_cycle,
             "recent_cycles": recent_cycles,
-            "latest_failure": None if latest_failure_row is None else self._hydrate_runtime_cycle_row(latest_failure_row),
+            "latest_failure": None if not recent_failures else recent_failures[0],
+            "recent_failures": recent_failures,
             "totals": {
                 "total_cycles": int(totals.get("total_cycles") or 0),
                 "completed_cycles": int(totals.get("completed_cycles") or 0),
@@ -1334,7 +1540,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         ).fetchone()
         summary_values = dict(summary_row) if summary_row is not None else {}
         coverage = self.coverage_summary()
-        runtime = self.runtime_status(limit=5)
+        runtime = self.runtime_status(limit=5, now=generated_at)
+        controller = runtime.get("controller") if isinstance(runtime, dict) else None
         latest_cycle = runtime.get("latest_cycle") if isinstance(runtime, dict) else None
         recent_failures = [] if coverage is None else list(coverage.get("failures") or [])
 
@@ -1427,6 +1634,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     "latest_run_id": None if coverage is None else coverage["run"].get("run_id"),
                     "latest_run_started_at": None if coverage is None else coverage["run"].get("started_at"),
                     "latest_run_finished_at": None if coverage is None else coverage["run"].get("finished_at"),
+                    "current_runtime_status": runtime.get("status") if isinstance(runtime, dict) else None,
+                    "current_runtime_phase": runtime.get("phase") if isinstance(runtime, dict) else None,
+                    "current_runtime_updated_at": runtime.get("updated_at") if isinstance(runtime, dict) else None,
+                    "current_runtime_next_resume_at": runtime.get("next_resume_at") if isinstance(runtime, dict) else None,
+                    "current_runtime_paused_at": runtime.get("paused_at") if isinstance(runtime, dict) else None,
+                    "current_runtime_heartbeat_stale": False if controller is None else bool((controller.get("heartbeat") or {}).get("is_stale")),
                     "latest_runtime_cycle_status": None if latest_cycle is None else latest_cycle.get("status"),
                     "latest_runtime_cycle_started_at": None if latest_cycle is None else latest_cycle.get("started_at"),
                     "recent_acquisition_failure_count": len(recent_failures),
@@ -1833,7 +2046,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
     def _hydrate_runtime_cycle_row(self, row: sqlite3.Row) -> dict[str, object]:
         hydrated = dict(row)
         config_json = hydrated.pop("config_json", "{}")
-        hydrated["config"] = json.loads(config_json) if config_json else {}
+        hydrated["config"] = _deserialize_runtime_config(config_json)
         hydrated["freshness_counts"] = {
             "first-pass-only": int(hydrated.get("first_pass_only") or 0),
             "fresh-followup": int(hydrated.get("fresh_followup") or 0),
@@ -1841,6 +2054,175 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "stale-followup": int(hydrated.get("stale_followup") or 0),
         }
         return hydrated
+
+    def _hydrate_runtime_controller_row(self, row: sqlite3.Row, *, now_dt: datetime) -> dict[str, object]:
+        hydrated = dict(row)
+        config_json = hydrated.pop("config_json", "{}")
+        hydrated["config"] = _deserialize_runtime_config(config_json)
+        updated_at = hydrated.get("updated_at")
+        paused_at = hydrated.get("paused_at")
+        next_resume_at = hydrated.get("next_resume_at")
+        age_seconds = None if updated_at is None else _seconds_between(str(updated_at), now_dt)
+        elapsed_pause_seconds = None if paused_at is None else _seconds_between(str(paused_at), now_dt)
+        next_resume_in_seconds = None if next_resume_at is None else max(_seconds_until(str(next_resume_at), now_dt), 0.0)
+        stale_after_seconds = _runtime_heartbeat_stale_after_seconds(
+            status=None if hydrated.get("status") is None else str(hydrated["status"]),
+            interval_seconds=hydrated.get("interval_seconds"),
+        )
+        hydrated["elapsed_pause_seconds"] = elapsed_pause_seconds
+        hydrated["next_resume_in_seconds"] = next_resume_in_seconds
+        hydrated["heartbeat"] = {
+            "updated_at": updated_at,
+            "age_seconds": age_seconds,
+            "stale_after_seconds": stale_after_seconds,
+            "is_stale": age_seconds is not None and age_seconds > stale_after_seconds,
+        }
+        return hydrated
+
+    def _runtime_controller_row(self) -> sqlite3.Row | None:
+        return self.connection.execute(
+            "SELECT * FROM runtime_controller_state WHERE controller_id = ?",
+            (_RUNTIME_CONTROLLER_SINGLETON_ID,),
+        ).fetchone()
+
+    def _upsert_runtime_controller_state(
+        self,
+        *,
+        status: str | object = _UNSET,
+        phase: str | object = _UNSET,
+        mode: str | None | object = _UNSET,
+        active_cycle_id: str | None | object = _UNSET,
+        latest_cycle_id: str | None | object = _UNSET,
+        interval_seconds: float | None | object = _UNSET,
+        updated_at: str | None | object = _UNSET,
+        paused_at: str | None | object = _UNSET,
+        next_resume_at: str | None | object = _UNSET,
+        last_error: str | None | object = _UNSET,
+        last_error_at: str | None | object = _UNSET,
+        requested_action: str | object = _UNSET,
+        requested_at: str | None | object = _UNSET,
+        config: dict[str, object] | object = _UNSET,
+    ) -> None:
+        existing_row = self._runtime_controller_row()
+        if existing_row is None:
+            payload: dict[str, object | None] = {
+                "controller_id": _RUNTIME_CONTROLLER_SINGLETON_ID,
+                "status": "idle",
+                "phase": "idle",
+                "mode": None,
+                "active_cycle_id": None,
+                "latest_cycle_id": None,
+                "interval_seconds": None,
+                "updated_at": None,
+                "paused_at": None,
+                "next_resume_at": None,
+                "last_error": None,
+                "last_error_at": None,
+                "requested_action": "none",
+                "requested_at": None,
+                "config": {},
+            }
+        else:
+            payload = dict(existing_row)
+            payload["config"] = _deserialize_runtime_config(payload.pop("config_json", "{}"))
+
+        if status is not _UNSET:
+            payload["status"] = None if status is None else str(status)
+        if phase is not _UNSET:
+            payload["phase"] = None if phase is None else str(phase)
+        if mode is not _UNSET:
+            payload["mode"] = None if mode is None else str(mode)
+        if active_cycle_id is not _UNSET:
+            payload["active_cycle_id"] = None if active_cycle_id is None else str(active_cycle_id)
+        if latest_cycle_id is not _UNSET:
+            payload["latest_cycle_id"] = None if latest_cycle_id is None else str(latest_cycle_id)
+        if interval_seconds is not _UNSET:
+            payload["interval_seconds"] = None if interval_seconds is None else float(interval_seconds)
+        if updated_at is _UNSET:
+            payload["updated_at"] = _utc_now()
+        else:
+            payload["updated_at"] = None if updated_at is None else str(updated_at)
+        if paused_at is not _UNSET:
+            payload["paused_at"] = None if paused_at is None else str(paused_at)
+        if next_resume_at is not _UNSET:
+            payload["next_resume_at"] = None if next_resume_at is None else str(next_resume_at)
+        if last_error is not _UNSET:
+            payload["last_error"] = None if last_error is None else str(last_error)
+        if last_error_at is not _UNSET:
+            payload["last_error_at"] = None if last_error_at is None else str(last_error_at)
+        if requested_action is not _UNSET:
+            normalized_action = "none" if requested_action in {None, "", "none"} else str(requested_action)
+            payload["requested_action"] = normalized_action
+            if normalized_action == "none" and requested_at is _UNSET:
+                payload["requested_at"] = None
+        if requested_at is not _UNSET:
+            payload["requested_at"] = None if requested_at is None else str(requested_at)
+        if config is not _UNSET:
+            payload["config"] = _sanitize_runtime_config(config)
+        elif "config" not in payload:
+            payload["config"] = {}
+
+        if payload.get("status") is None:
+            payload["status"] = "idle"
+        if payload.get("phase") is None:
+            payload["phase"] = "idle"
+        if payload.get("requested_action") is None:
+            payload["requested_action"] = "none"
+        payload["config"] = _sanitize_runtime_config(payload.get("config") or {})
+
+        self.connection.execute(
+            """
+            INSERT INTO runtime_controller_state (
+                controller_id,
+                status,
+                phase,
+                mode,
+                active_cycle_id,
+                latest_cycle_id,
+                interval_seconds,
+                updated_at,
+                paused_at,
+                next_resume_at,
+                last_error,
+                last_error_at,
+                requested_action,
+                requested_at,
+                config_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(controller_id) DO UPDATE SET
+                status = excluded.status,
+                phase = excluded.phase,
+                mode = excluded.mode,
+                active_cycle_id = excluded.active_cycle_id,
+                latest_cycle_id = excluded.latest_cycle_id,
+                interval_seconds = excluded.interval_seconds,
+                updated_at = excluded.updated_at,
+                paused_at = excluded.paused_at,
+                next_resume_at = excluded.next_resume_at,
+                last_error = excluded.last_error,
+                last_error_at = excluded.last_error_at,
+                requested_action = excluded.requested_action,
+                requested_at = excluded.requested_at,
+                config_json = excluded.config_json
+            """,
+            (
+                _RUNTIME_CONTROLLER_SINGLETON_ID,
+                payload["status"],
+                payload["phase"],
+                payload.get("mode"),
+                payload.get("active_cycle_id"),
+                payload.get("latest_cycle_id"),
+                payload.get("interval_seconds"),
+                payload.get("updated_at"),
+                payload.get("paused_at"),
+                payload.get("next_resume_at"),
+                payload.get("last_error"),
+                payload.get("last_error_at"),
+                payload.get("requested_action") or "none",
+                payload.get("requested_at"),
+                _serialize_runtime_config(payload.get("config") or {}),
+            ),
+        )
 
     def _resolve_run(self, run_id: str | None) -> sqlite3.Row | None:
         if run_id is None:
@@ -1906,6 +2288,68 @@ def _coerce_now(now: str | None) -> datetime:
 def _hours_between(timestamp: str, now: datetime) -> float:
     observed_at = datetime.fromisoformat(timestamp)
     return max((now - observed_at).total_seconds() / 3600.0, 0.0)
+
+
+def _seconds_between(timestamp: str, now: datetime) -> float:
+    observed_at = datetime.fromisoformat(timestamp)
+    return max((now - observed_at).total_seconds(), 0.0)
+
+
+def _seconds_until(timestamp: str, now: datetime) -> float:
+    target_at = datetime.fromisoformat(timestamp)
+    return (target_at - now).total_seconds()
+
+
+def _runtime_heartbeat_stale_after_seconds(*, status: str | None, interval_seconds: object) -> float:
+    if status in {"running", "scheduled"}:
+        return 30.0
+    if status == "paused":
+        return 120.0
+    if interval_seconds is not None:
+        try:
+            return max(min(float(interval_seconds), 300.0), 60.0)
+        except (TypeError, ValueError):
+            pass
+    return 300.0
+
+
+def _controller_status_from_runtime_cycle_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized == "running":
+        return "running"
+    if normalized == "failed":
+        return "failed"
+    return "idle"
+
+
+def _controller_phase_from_runtime_state(status: str, phase: str) -> str:
+    if status == "idle":
+        return "idle"
+    return phase
+
+
+def _sanitize_runtime_config(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _sanitize_runtime_config(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_runtime_config(item) for item in value]
+    if isinstance(value, str):
+        return _SENSITIVE_URL_USERINFO_RE.sub(r"\1***@", value)
+    return value
+
+
+def _serialize_runtime_config(config: object) -> str:
+    return json.dumps(_sanitize_runtime_config(config), ensure_ascii=False, sort_keys=True)
+
+
+def _deserialize_runtime_config(config_json: object) -> dict[str, object]:
+    if not config_json:
+        return {}
+    try:
+        loaded = json.loads(str(config_json))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def _utc_now() -> str:

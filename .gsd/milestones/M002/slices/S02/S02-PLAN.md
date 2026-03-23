@@ -36,19 +36,19 @@
 
 ## Tasks
 
-- [ ] **T01: Persist the runtime-controller snapshot and repository contract** `est:1h30m`
+- [x] **T01: Persist the runtime-controller snapshot and repository contract** `est:1h30m`
   - Why: S02 cannot truthfully show scheduled, paused, next-resume, or elapsed-pause state until SQLite can represent current controller truth separately from per-cycle history, and that new truth must survive health/recovery tooling.
   - Files: `vinted_radar/db.py`, `vinted_radar/repository.py`, `vinted_radar/db_health.py`, `vinted_radar/db_recovery.py`, `tests/test_runtime_repository.py`, `tests/test_db_recovery.py`
   - Do: add a dedicated `runtime_controller_state` snapshot/table plus any brownfield-safe migration/backfill needed; extend the repository-owned runtime payload to return controller state, computed elapsed pause/next resume/heartbeat staleness, recent failures, and compatibility cycle keys; update DB health/recovery so the new runtime truth remains a first-class critical table.
   - Verify: `python -m pytest tests/test_runtime_repository.py tests/test_db_recovery.py`
   - Done when: SQLite alone can answer “what is the runtime doing now?” and copied/recovered databases keep that controller truth instead of dropping it.
-- [ ] **T02: Make continuous runtime and CLI controls honor the persisted controller truth** `est:1h30m`
+- [x] **T02: Make continuous runtime and CLI controls honor the persisted controller truth** `est:1h30m`
   - Why: The slice’s main operability claim only becomes real when continuous mode persists scheduled windows, observes pause/resume requests quickly, and the operator CLI reads and writes the same controller contract.
   - Files: `vinted_radar/services/runtime.py`, `vinted_radar/cli.py`, `vinted_radar/repository.py`, `tests/test_runtime_service.py`, `tests/test_runtime_cli.py`
   - Do: replace the one-shot interval sleep with a cooperative polling/heartbeat wait loop that persists running/scheduled/paused/failed transitions; add pause/resume commands and richer runtime-status output on top of the repository contract; keep failure state explicit without conflating the latest cycle result with the current controller state.
   - Verify: `python -m pytest tests/test_runtime_service.py tests/test_runtime_cli.py`
   - Done when: pause can be observed before the full interval elapses, resume re-establishes scheduling truthfully, and CLI status/control surfaces show controller truth plus recent cycle evidence from the DB.
-- [ ] **T03: Expose runtime truth through `/runtime`, `/api/runtime`, and the overview shell** `est:1h15m`
+- [x] **T03: Expose runtime truth through `/runtime`, `/api/runtime`, and the overview shell** `est:1h15m`
   - Why: R010 and the slice demo only land for the product when the same persisted runtime truth becomes visible on the real dashboard surfaces, not just through repository tests or CLI tables.
   - Files: `vinted_radar/dashboard.py`, `vinted_radar/cli.py`, `README.md`, `tests/test_dashboard.py`, `tests/test_dashboard_cli.py`
   - Do: add a dedicated French-first `/runtime` page and payload builder on top of the repository contract, extend `/api/runtime` without breaking compatibility keys, update overview/runtime copy and dashboard CLI URL output to point at `/runtime`, and document paused/scheduled/next-resume semantics.

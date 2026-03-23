@@ -160,6 +160,26 @@ CREATE TABLE IF NOT EXISTS runtime_cycles (
     FOREIGN KEY (discovery_run_id) REFERENCES discovery_runs(run_id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS runtime_controller_state (
+    controller_id INTEGER PRIMARY KEY CHECK (controller_id = 1),
+    status TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    mode TEXT,
+    active_cycle_id TEXT,
+    latest_cycle_id TEXT,
+    interval_seconds REAL,
+    updated_at TEXT,
+    paused_at TEXT,
+    next_resume_at TEXT,
+    last_error TEXT,
+    last_error_at TEXT,
+    requested_action TEXT NOT NULL DEFAULT 'none',
+    requested_at TEXT,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (active_cycle_id) REFERENCES runtime_cycles(cycle_id) ON DELETE SET NULL,
+    FOREIGN KEY (latest_cycle_id) REFERENCES runtime_cycles(cycle_id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_catalogs_root_leaf ON catalogs(root_title, is_leaf);
 CREATE INDEX IF NOT EXISTS idx_catalog_scans_run_success ON catalog_scans(run_id, success);
 CREATE INDEX IF NOT EXISTS idx_catalog_scans_catalog_success_time ON catalog_scans(catalog_id, success, fetched_at DESC, run_id DESC);
@@ -174,6 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_listings_favourite_count ON listings(favourite_co
 CREATE INDEX IF NOT EXISTS idx_listings_view_count ON listings(view_count DESC, listing_id DESC);
 CREATE INDEX IF NOT EXISTS idx_item_page_probes_listing_time ON item_page_probes(listing_id, probed_at);
 CREATE INDEX IF NOT EXISTS idx_runtime_cycles_started_at ON runtime_cycles(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runtime_controller_updated_at ON runtime_controller_state(updated_at DESC);
 """
 
 
@@ -208,15 +229,85 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             pass
     # -----------------------------------
 
-    if not _table_exists(connection, "listing_discoveries") or not _table_exists(connection, "listings"):
+    if _table_exists(connection, "listing_discoveries") and _table_exists(connection, "listings"):
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version < 1:
+            # Mark as migrated so we never attempt massive blocking startup queries again
+            connection.execute("PRAGMA user_version = 1")
+
+    _backfill_runtime_controller_state(connection)
+
+
+
+def _backfill_runtime_controller_state(connection: sqlite3.Connection) -> None:
+    if not _table_exists(connection, "runtime_controller_state") or not _table_exists(connection, "runtime_cycles"):
+        return
+    existing_row = connection.execute(
+        "SELECT controller_id FROM runtime_controller_state WHERE controller_id = 1"
+    ).fetchone()
+    if existing_row is not None:
         return
 
-    version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version >= 1:
+    latest_cycle = connection.execute(
+        "SELECT * FROM runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT 1"
+    ).fetchone()
+    if latest_cycle is None:
         return
 
-    # Mark as migrated so we never attempt massive blocking startup queries again
-    connection.execute("PRAGMA user_version = 1")
+    updated_at = latest_cycle["finished_at"] or latest_cycle["started_at"]
+    cycle_status = str(latest_cycle["status"])
+    controller_status = _controller_status_from_cycle_status(cycle_status)
+    last_error = latest_cycle["last_error"] if controller_status == "failed" else None
+    last_error_at = updated_at if last_error else None
+    active_cycle_id = latest_cycle["cycle_id"] if controller_status == "running" else None
+
+    connection.execute(
+        """
+        INSERT INTO runtime_controller_state (
+            controller_id,
+            status,
+            phase,
+            mode,
+            active_cycle_id,
+            latest_cycle_id,
+            interval_seconds,
+            updated_at,
+            paused_at,
+            next_resume_at,
+            last_error,
+            last_error_at,
+            requested_action,
+            requested_at,
+            config_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'none', NULL, ?)
+        """,
+        (
+            1,
+            controller_status,
+            latest_cycle["phase"],
+            latest_cycle["mode"],
+            active_cycle_id,
+            latest_cycle["cycle_id"],
+            latest_cycle["interval_seconds"],
+            updated_at,
+            None,
+            None,
+            last_error,
+            last_error_at,
+            latest_cycle["config_json"] or "{}",
+        ),
+    )
+
+
+
+def _controller_status_from_cycle_status(cycle_status: str) -> str:
+    if cycle_status == "running":
+        return "running"
+    if cycle_status == "failed":
+        return "failed"
+    return "idle"
+
+
 
 def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
     row = connection.execute(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from vinted_radar.models import CatalogNode, ListingCard
@@ -195,6 +196,20 @@ class CapturingDiscoveryFactory:
         return service
 
 
+class FakeClock:
+    def __init__(self, start_at: str) -> None:
+        self.current = datetime.fromisoformat(start_at).astimezone(UTC)
+
+    def now(self) -> datetime:
+        return self.current
+
+    def sleep(self, seconds: float) -> None:
+        self.current += timedelta(seconds=seconds)
+
+    def iso(self) -> str:
+        return self.current.replace(microsecond=0).isoformat()
+
+
 def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     runtime = RadarRuntimeService(
@@ -233,6 +248,9 @@ def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: P
     assert latest["discovery_run_id"] == report.discovery_run_id
     assert latest["tracked_listings"] == 1
     assert latest["state_probe_limit"] == 3
+    assert status["controller"] is not None
+    assert status["controller"]["status"] == "idle"
+    assert status["controller"]["latest_cycle_id"] == report.cycle_id
     assert status["totals"]["completed_cycles"] == 1
     assert status["latest_failure"] is None
 
@@ -305,11 +323,13 @@ def test_runtime_service_passes_high_value_filters_to_discovery_service(tmp_path
 
 def test_runtime_service_continuous_mode_keeps_failed_cycle_visible_and_continues(tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
+    clock = FakeClock("2026-03-23T10:00:00+00:00")
     runtime = RadarRuntimeService(
         db_path,
         discovery_service_factory=DiscoveryFactorySequence(db_path),
         state_refresh_service_factory=StateFactory(db_path),
-        sleep_fn=lambda seconds: None,
+        sleep_fn=clock.sleep,
+        now_fn=clock.now,
     )
 
     reports = runtime.run_continuous(
@@ -333,10 +353,69 @@ def test_runtime_service_continuous_mode_keeps_failed_cycle_visible_and_continue
     assert reports[1].status == "completed"
 
     with RadarRepository(db_path) as repository:
-        status = repository.runtime_status(limit=5)
+        status = repository.runtime_status(limit=5, now=clock.iso())
 
+    assert status["status"] == "idle"
     assert status["totals"]["failed_cycles"] == 1
     assert status["totals"]["completed_cycles"] == 1
     assert status["latest_failure"] is not None
     assert status["latest_failure"]["phase"] == "discovery"
     assert "discovery exploded" in str(status["latest_failure"]["last_error"])
+
+
+
+def test_runtime_service_continuous_mode_observes_pause_and_resume_between_cycles(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    clock = FakeClock("2026-03-23T11:00:00+00:00")
+    resume_requested = {"value": False}
+
+    def sleep(seconds: float) -> None:
+        with RadarRepository(db_path) as repository:
+            controller = repository.runtime_controller_state(now=clock.iso()) or {}
+            if controller.get("status") == "paused" and not resume_requested["value"]:
+                repository.request_runtime_resume(requested_at=clock.iso())
+                resume_requested["value"] = True
+        clock.sleep(seconds)
+
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=lambda **kwargs: PersistingDiscoveryService(db_path),
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+        sleep_fn=sleep,
+        now_fn=clock.now,
+    )
+
+    callback_count = {"value": 0}
+
+    def on_cycle_complete(report) -> None:
+        callback_count["value"] += 1
+        if callback_count["value"] == 1:
+            with RadarRepository(db_path) as repository:
+                repository.request_runtime_pause(requested_at=clock.iso())
+
+    reports = runtime.run_continuous(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=2,
+        ),
+        interval_seconds=5.0,
+        max_cycles=2,
+        continue_on_error=True,
+        on_cycle_complete=on_cycle_complete,
+    )
+
+    assert len(reports) == 2
+    assert reports[0].status == "completed"
+    assert reports[1].status == "completed"
+    assert resume_requested["value"] is True
+
+    with RadarRepository(db_path) as repository:
+        status = repository.runtime_status(limit=5, now=clock.iso())
+
+    assert status["status"] == "idle"
+    assert status["controller"] is not None
+    assert status["controller"]["latest_cycle_id"] == reports[-1].cycle_id

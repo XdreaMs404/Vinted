@@ -13,6 +13,7 @@ CRITICAL_TABLES = (
     "listing_observations",
     "item_page_probes",
     "runtime_cycles",
+    "runtime_controller_state",
 )
 _CHECK_MESSAGE_LIMIT = 20
 

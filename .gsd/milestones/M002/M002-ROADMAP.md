@@ -73,7 +73,7 @@ This milestone is complete only when all are true:
 - [x] **S01: SQL-Backed Overview Home + First Comparative Modules** `risk:high` `depends:[]`
   > After this: `/` is a real market-overview home rather than an M001 truth screen, powered by SQL-backed aggregates and plain-language coverage/freshness/confidence cues instead of full-corpus Python recomputation.
 
-- [ ] **S02: Runtime Truth + Pause/Resume Surface** `risk:high` `depends:[S01]`
+- [x] **S02: Runtime Truth + Pause/Resume Surface** `risk:high` `depends:[S01]`
   > After this: the product can truthfully show running, paused, scheduled, failed, elapsed pause time, next resume timing, and recent errors through the runtime page, API, and CLI on the same live DB.
 
 - [ ] **S03: Responsive French Product Shell + VPS Serving Path** `risk:high` `depends:[S01,S02]`

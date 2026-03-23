@@ -44,8 +44,11 @@ This keeps the radar alive locally and serves the French market overview home fr
 - `python -m vinted_radar.cli batch --db data/vinted-radar.db --page-limit 1 --max-leaf-categories 6 --state-refresh-limit 10`
 - `python -m vinted_radar.cli continuous --db data/vinted-radar.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --interval-seconds 1800 --dashboard --host 127.0.0.1 --port 8765`
 - `python -m vinted_radar.cli runtime-status --db data/vinted-radar.db`
+- `python -m vinted_radar.cli runtime-pause --db data/vinted-radar.db`
+- `python -m vinted_radar.cli runtime-resume --db data/vinted-radar.db`
 - `python -m vinted_radar.cli dashboard --db data/vinted-radar.db --host 127.0.0.1 --port 8765`
 - French market overview home: `http://127.0.0.1:8765/`
+- Dedicated runtime page: `http://127.0.0.1:8765/runtime`
 - SQL-backed listing explorer: `http://127.0.0.1:8765/explorer`
 
 ### Focused diagnostics
@@ -67,6 +70,7 @@ This keeps the radar alive locally and serves the French market overview home fr
 ## Overview + diagnostics routes
 
 - French overview home: `http://127.0.0.1:8765/`
+- Dedicated runtime page: `http://127.0.0.1:8765/runtime`
 - SQL-backed explorer: `http://127.0.0.1:8765/explorer`
 - JSON overview payload (compat dashboard endpoint): `http://127.0.0.1:8765/api/dashboard`
 - JSON explorer payload: `http://127.0.0.1:8765/api/explorer`
@@ -76,17 +80,37 @@ This keeps the radar alive locally and serves the French market overview home fr
 
 ## Runtime diagnostics
 
-Each batch or continuous cycle is persisted into `runtime_cycles` inside the SQLite DB with:
+`runtime_cycles` remains the immutable per-cycle history, but current scheduler truth now lives in `runtime_controller_state`.
+
+The controller snapshot can represent:
+
+- current runtime status (`running`, `scheduled`, `paused`, `failed`, `idle`)
+- current phase (`waiting`, `paused`, `discovery`, `state_refresh`, etc.)
+- `updated_at` heartbeat for staleness detection
+- `paused_at` plus elapsed pause time
+- `next_resume_at` plus remaining wait time
+- the active cycle id and latest linked cycle id
+- persisted last error and operator pause/resume requests
+
+Each cycle in `runtime_cycles` still records:
 
 - mode (`batch` or `continuous`)
-- status (`running`, `completed`, `failed`, `interrupted`)
-- current phase (`starting`, `discovery`, `state_refresh`, `summarizing`, `completed`)
+- cycle status (`running`, `completed`, `failed`, `interrupted`)
+- cycle phase (`starting`, `discovery`, `state_refresh`, `summarizing`, `completed`)
 - linked discovery run id when available
 - state probe limit and actual probed count
 - tracked listing count plus freshness snapshot
 - last error when a cycle fails
 
-Use `runtime-status --format json` or `/api/runtime` to inspect the current local operator truth without reading raw tables by hand.
+Use these surfaces depending on the question:
+
+- `python -m vinted_radar.cli runtime-status --db data/vinted-radar.db`
+- `python -m vinted_radar.cli runtime-pause --db data/vinted-radar.db`
+- `python -m vinted_radar.cli runtime-resume --db data/vinted-radar.db`
+- runtime page: `http://127.0.0.1:8765/runtime`
+- JSON runtime payload: `http://127.0.0.1:8765/api/runtime`
+
+A healthy waiting loop should now appear as `scheduled`, not as a misleadingly "completed" runtime.
 
 ## Database safety
 
@@ -156,4 +180,5 @@ Then use:
 
 - overview home → `http://127.0.0.1:8765/`
 - explorer → `http://127.0.0.1:8765/explorer`
-- runtime truth → `http://127.0.0.1:8765/api/runtime`
+- runtime page → `http://127.0.0.1:8765/runtime`
+- runtime truth JSON → `http://127.0.0.1:8765/api/runtime`

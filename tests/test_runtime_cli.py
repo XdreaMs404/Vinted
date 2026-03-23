@@ -87,6 +87,7 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
     assert "Cycle: cycle-1" in result.stdout
     assert "State probes: 2 / 4" in result.stdout
     assert "Dashboard URL: http://127.0.0.1:8766" in result.stdout
+    assert "Runtime: http://127.0.0.1:8766/runtime" in result.stdout
     assert "Runtime API: http://127.0.0.1:8766/api/runtime" in result.stdout
     assert captured["db_path"] == tmp_path / "runtime.db"
     assert captured["mode"] == "batch"
@@ -196,6 +197,7 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
 
     assert result.exit_code == 0
     assert "Dashboard URL: http://127.0.0.1:8770" in result.stdout
+    assert "Runtime: http://127.0.0.1:8770/runtime" in result.stdout
     assert "Cycle: cycle-1" in result.stdout
     assert "Last error: RuntimeError: boom" in result.stdout
     assert "Cycle: cycle-2" in result.stdout
@@ -240,6 +242,105 @@ def test_runtime_status_cli_emits_json_payload(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
+    assert payload["status"] == "idle"
+    assert payload["controller"]["status"] == "idle"
     assert payload["latest_cycle"]["cycle_id"] == cycle_id
     assert payload["latest_cycle"]["status"] == "completed"
     assert payload["totals"]["completed_cycles"] == 1
+
+
+
+def test_runtime_pause_and_resume_cli_mutate_controller_state(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    with RadarRepository(db_path) as repository:
+        repository.set_runtime_controller_state(
+            status="scheduled",
+            phase="waiting",
+            mode="continuous",
+            active_cycle_id=None,
+            latest_cycle_id=None,
+            interval_seconds=300.0,
+            updated_at="2026-03-23T09:00:00+00:00",
+            paused_at=None,
+            next_resume_at="2026-03-23T09:05:00+00:00",
+            requested_action="none",
+            requested_at=None,
+            config={"state_refresh_limit": 2},
+        )
+
+    runner = CliRunner()
+    pause_result = runner.invoke(app, ["runtime-pause", "--db", str(db_path)])
+    assert pause_result.exit_code == 0
+    assert "Runtime is now paused" in pause_result.stdout
+
+    with RadarRepository(db_path) as repository:
+        paused = repository.runtime_status(limit=3)
+    assert paused["status"] == "paused"
+
+    resume_result = runner.invoke(app, ["runtime-resume", "--db", str(db_path)])
+    assert resume_result.exit_code == 0
+    assert "Runtime resumed. Next cycle window" in resume_result.stdout
+
+    with RadarRepository(db_path) as repository:
+        resumed = repository.runtime_status(limit=3)
+    assert resumed["status"] == "scheduled"
+    assert resumed["next_resume_at"] is not None
+
+
+
+def test_runtime_status_cli_table_shows_controller_timing(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    with RadarRepository(db_path) as repository:
+        cycle_id = repository.start_runtime_cycle(
+            mode="continuous",
+            phase="starting",
+            interval_seconds=300.0,
+            state_probe_limit=2,
+            config={"state_refresh_limit": 2},
+        )
+        repository.complete_runtime_cycle(
+            cycle_id,
+            status="completed",
+            phase="completed",
+            discovery_run_id=None,
+            state_probed_count=1,
+            tracked_listings=2,
+            freshness_counts={
+                "first-pass-only": 1,
+                "fresh-followup": 1,
+                "aging-followup": 0,
+                "stale-followup": 0,
+            },
+            last_error=None,
+        )
+        repository.set_runtime_controller_state(
+            status="paused",
+            phase="paused",
+            mode="continuous",
+            active_cycle_id=None,
+            latest_cycle_id=cycle_id,
+            interval_seconds=300.0,
+            updated_at="2026-03-23T09:05:00+00:00",
+            paused_at="2026-03-23T09:00:00+00:00",
+            next_resume_at="2026-03-23T09:15:00+00:00",
+            requested_action="none",
+            requested_at=None,
+            config={"state_refresh_limit": 2},
+        )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "runtime-status",
+            "--db",
+            str(db_path),
+            "--now",
+            "2026-03-23T09:10:00+00:00",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Runtime now: paused (phase paused)" in result.stdout
+    assert "Paused since: 2026-03-23T09:00:00+00:00 (10m 00s)" in result.stdout
+    assert "Next resume: 2026-03-23T09:15:00+00:00 (5m 00s remaining)" in result.stdout

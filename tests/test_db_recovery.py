@@ -82,11 +82,12 @@ def test_recover_partial_database_copies_healthy_source(tmp_path: Path) -> None:
     assert recovered['listings'] == 1
     assert recovered['item_page_probes'] == 1
     assert recovered['runtime_cycles'] == 1
+    assert recovered['runtime_controller_state'] == 1
 
     with sqlite3.connect(destination) as connection:
         tables = {
             name: connection.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
-            for name in ('discovery_runs', 'catalogs', 'catalog_scans', 'listings', 'listing_discoveries', 'listing_observations', 'item_page_probes', 'runtime_cycles')
+            for name in ('discovery_runs', 'catalogs', 'catalog_scans', 'listings', 'listing_discoveries', 'listing_observations', 'item_page_probes', 'runtime_cycles', 'runtime_controller_state')
         }
     assert tables == {
         'discovery_runs': 1,
@@ -97,6 +98,7 @@ def test_recover_partial_database_copies_healthy_source(tmp_path: Path) -> None:
         'listing_observations': 1,
         'item_page_probes': 1,
         'runtime_cycles': 1,
+        'runtime_controller_state': 1,
     }
 
 

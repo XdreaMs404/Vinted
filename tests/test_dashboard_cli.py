@@ -36,6 +36,7 @@ def test_dashboard_cli_reports_local_urls_and_calls_server(monkeypatch, tmp_path
     assert "Overview home: http://127.0.0.1:8765/" in result.stdout
     assert "Dashboard API: http://127.0.0.1:8765/api/dashboard" in result.stdout
     assert "Explorer: http://127.0.0.1:8765/explorer" in result.stdout
+    assert "Runtime: http://127.0.0.1:8765/runtime" in result.stdout
     assert "Runtime API: http://127.0.0.1:8765/api/runtime" in result.stdout
     assert "Health: http://127.0.0.1:8765/health" in result.stdout
     assert captured == {
