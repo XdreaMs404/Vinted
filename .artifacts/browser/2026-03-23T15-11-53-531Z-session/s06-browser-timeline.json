@@ -1,0 +1,62 @@
+{
+  "entries": [
+    {
+      "id": 1,
+      "tool": "browser_navigate",
+      "status": "success",
+      "durationMs": 1074,
+      "beforeUrl": "about:blank",
+      "afterUrl": "http://127.0.0.1:8786/",
+      "line": "#1 | browser_navigate | success | 1074ms | screenshot=true, url=\"http://127.0.0.1:8786/\" | URL changed to http://127.0.0.1:8786/; title changed to Vinted Radar — aperçu du marché; landmarks 0→15; links 0→41"
+    },
+    {
+      "id": 2,
+      "tool": "browser_navigate",
+      "status": "success",
+      "durationMs": 1029,
+      "beforeUrl": "http://127.0.0.1:8786/",
+      "afterUrl": "http://127.0.0.1:8786/explorer?root=Femmes&q=robe&page_size=2&sort=view_desc",
+      "line": "#2 | browser_navigate | success | 1029ms | screenshot=true, url=\"http://127.0.0.1:8786/explorer?root=Femmes&q=robe&page_si...\" | URL changed to http://127.0.0.1:8786/explorer?root=Femmes&q=robe&page_size=2&sort=view_desc; title changed to Vinted Radar — explorateur; landmarks 15→12; buttons 0→1"
+    },
+    {
+      "id": 3,
+      "tool": "browser_navigate",
+      "status": "success",
+      "durationMs": 859,
+      "beforeUrl": "http://127.0.0.1:8786/explorer?root=Femmes&q=robe&page_size=2&sort=view_desc",
+      "afterUrl": "http://127.0.0.1:8786/runtime",
+      "line": "#3 | browser_navigate | success | 859ms | screenshot=true, url=\"http://127.0.0.1:8786/runtime\" | URL changed to http://127.0.0.1:8786/runtime; title changed to Vinted Radar — runtime; landmarks 12→13; buttons 1→0"
+    },
+    {
+      "id": 4,
+      "tool": "browser_navigate",
+      "status": "success",
+      "durationMs": 876,
+      "beforeUrl": "http://127.0.0.1:8786/runtime",
+      "afterUrl": "http://127.0.0.1:8786/listings/9002?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12",
+      "line": "#4 | browser_navigate | success | 876ms | screenshot=true, url=\"http://127.0.0.1:8786/listings/9002?root=Femmes&state=act...\" | URL changed to http://127.0.0.1:8786/listings/9002?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12; title changed to Vinted Radar — annonce 9002; landmarks 13→7; links 6→10"
+    },
+    {
+      "id": 5,
+      "tool": "browser_navigate",
+      "status": "success",
+      "durationMs": 849,
+      "beforeUrl": "http://127.0.0.1:8786/listings/9002?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12",
+      "afterUrl": "http://127.0.0.1:8786/api/runtime",
+      "line": "#5 | browser_navigate | success | 849ms | screenshot=false, url=\"http://127.0.0.1:8786/api/runtime\" | URL changed to http://127.0.0.1:8786/api/runtime; title changed to ; landmarks 7→0; links 10→0 | Warnings: JS: Failed to load resource: the server responded with a status of 404 (Not Found)\nUse browser_get_console_logs/browser_get_network_logs for full diagnostics."
+    },
+    {
+      "id": 6,
+      "tool": "browser_navigate",
+      "status": "success",
+      "durationMs": 861,
+      "beforeUrl": "http://127.0.0.1:8786/api/runtime",
+      "afterUrl": "http://127.0.0.1:8786/health",
+      "line": "#6 | browser_navigate | success | 861ms | screenshot=false, url=\"http://127.0.0.1:8786/health\" | URL changed to http://127.0.0.1:8786/health; visible text changed"
+    }
+  ],
+  "retained": 6,
+  "totalRecorded": 6,
+  "bounded": false,
+  "summary": "Timeline: 6 browser actions recorded."
+}
