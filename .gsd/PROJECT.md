@@ -12,18 +12,18 @@ Turn imperfect public Vinted listing signals into an evidence-backed market read
 
 M001 implementation is complete and integrated across S01 through S06, and its closeout summary now exists at `.gsd/milestones/M001/M001-SUMMARY.md`. That milestone still carries a **needs-attention** closeout result because the historical proof databases are not yet trustworthy enough for final multi-day acceptance.
 
-M002 is now underway. S01 through S03 are complete: the home path is SQL-backed and French-first, runtime truth now lives in a separate controller snapshot with pause/resume/scheduling surfaced through the CLI, `/runtime`, `/api/runtime`, `/health`, and the overview freshness copy, and the product now ships with a shared responsive shell plus a mounted VPS-serving contract across overview, explorer, runtime, and HTML listing detail.
+M002 is now underway. S01 through S04 are complete: the home path is SQL-backed and French-first, runtime truth now lives in a separate controller snapshot with pause/resume/scheduling surfaced through the CLI, `/runtime`, `/api/runtime`, `/health`, and the overview freshness copy, the product ships with a shared responsive shell plus a mounted VPS-serving contract across overview, explorer, runtime, and HTML listing detail, and `/explorer` is now the main browse-and-compare workspace with SQL-backed filters, comparison modules, paging, and context-preserving detail drill-down.
 
 What is verified today:
-- `python -m pytest tests/test_runtime_repository.py tests/test_runtime_service.py tests/test_runtime_cli.py tests/test_dashboard.py tests/test_dashboard_cli.py tests/test_db_recovery.py tests/test_cli_smoke.py` passes
-- `python -m vinted_radar.cli dashboard --db data/vinted-radar-s03.db --host 127.0.0.1 --port 8782 --base-path /radar --public-base-url http://127.0.0.1:8782/radar` serves the shared French shell under a mounted prefix across `/radar/`, `/radar/explorer`, `/radar/runtime`, `/radar/listings/<id>`, and `/radar/health`
-- `python scripts/verify_vps_serving.py --base-url http://127.0.0.1:8782/radar --listing-id 9002` passes against the mounted shared shell
-- browser verification proved desktop and mobile consultation of the shared shell, including no horizontal overflow on the mobile overview/explorer/detail/runtime routes checked during S03
-- the home surface now exposes tracked inventory, state mix, confidence, freshness, low-support honesty notes, recent acquisition failures, first comparison modules, and controller-backed runtime wording directly from repository SQL + runtime contracts instead of full-corpus request-time home recomputation
+- `python -m pytest` passes
+- `python -m vinted_radar.cli dashboard --db data/vinted-radar-s04.db --host 127.0.0.1 --port 8783` serves the richer explorer workflow locally across `/`, `/explorer`, `/runtime`, `/listings/<id>`, and the paired JSON/health routes
+- browser verification at `http://127.0.0.1:8783/explorer?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12` confirmed filterable explorer browsing, scoped comparison support counts, explorer-to-detail context preservation, and a truthful return-to-results path on the S04 demo DB
+- the explorer route now exposes root/catalog/brand/condition/state/price-band/query/sort/page/page-size filters, SQL-backed comparison modules, explicit low-support honesty cues, and listing links that preserve the active analytical lens into detail
+- legacy SQLite snapshots missing late-added listing metadata columns now reopen successfully because migrations run before dependent indexes are created, with regression coverage in `tests/test_repository.py`
 
 What is still pending on the roadmap:
 - M001 still needs trustworthy multi-day closeout evidence from healthy historical databases
-- M002 still needs deeper explorer filters and comparative modules, narrative listing detail, degraded-mode hardening, and final live VPS acceptance
+- M002 still needs narrative listing detail, degraded-mode hardening, and final live VPS acceptance
 
 ## Architecture / Key Patterns
 
@@ -45,7 +45,7 @@ M002/S01 begins retiring request-time Python recomputation on primary user paths
 
 M002/S02 adds a separate `runtime_controller_state` snapshot for current scheduler truth while keeping `runtime_cycles` as immutable history, so `/runtime`, `/api/runtime`, `/health`, and the overview home can distinguish running, scheduled, paused, failed, and recent-cycle outcomes honestly.
 
-Current fragility exposed during M001 closeout: schema/index bootstrap ordering can outrun migrations on older SQLite files, so backward compatibility for pre-existing DBs is weaker than intended.
+Legacy SQLite snapshots can still lag the current schema, but bootstrap now migrates late-added listing metadata columns before creating dependent indexes; `tests/test_repository.py::test_repository_migrates_legacy_listing_columns_before_creating_dependent_indexes` is the guardrail for that path.
 
 ## Capability Contract
 
@@ -54,6 +54,6 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 ## Milestone Sequence
 
 - [x] M001: Listing-Level Market Radar — implementation complete; closeout summary written, verification result `needs-attention` pending healthy multi-day runtime proof.
-- [ ] M002: Enriched Market Intelligence Experience — in progress; S01 through S03 complete with the SQL-backed overview home, controller-backed runtime truth, shared French product shell, and mounted VPS-serving contract.
+- [ ] M002: Enriched Market Intelligence Experience — in progress; S01 through S04 complete with the SQL-backed overview home, controller-backed runtime truth, shared French product shell, mounted VPS-serving contract, and the new SQL-first explorer workspace.
 - [ ] M003: Product-Level Intelligence + Grounded AI Layer — group listings into product-level signals and add grounded AI insights, summaries, and analytical exploration.
 - [ ] M004: SaaS Hardening and Commercialization — industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.

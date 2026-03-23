@@ -68,6 +68,8 @@ class ExplorerFilters:
     catalog_id: int | None = None
     brand: str | None = None
     condition: str | None = None
+    state: str | None = None
+    price_band: str | None = None
     query: str | None = None
     sort: str = "last_seen_desc"
     page: int = 1
@@ -80,6 +82,8 @@ class ExplorerFilters:
             catalog_id=_parse_int(_first_value(params, "catalog_id")),
             brand=_normalized_filter_value(_first_value(params, "brand")),
             condition=_normalized_filter_value(_first_value(params, "condition")),
+            state=_normalized_filter_value(_first_value(params, "state")),
+            price_band=_normalized_filter_value(_first_value(params, "price_band")),
             query=_clean_text(_first_value(params, "q")),
             sort=_bounded_explorer_sort(_first_value(params, "sort")),
             page=_bounded_page(_parse_int(_first_value(params, "page"))),
@@ -96,6 +100,10 @@ class ExplorerFilters:
             payload["brand"] = self.brand
         if self.condition:
             payload["condition"] = self.condition
+        if self.state:
+            payload["state"] = self.state
+        if self.price_band:
+            payload["price_band"] = self.price_band
         if self.query:
             payload["q"] = self.query
         if self.sort != "last_seen_desc":
@@ -187,8 +195,15 @@ class DashboardApplication:
             listing_id = _parse_int(path.rsplit("/", 1)[-1])
             if listing_id is None:
                 return _respond(start_response, "404 Not Found", "Not Found", content_type="text/plain; charset=utf-8")
+            explorer_filters = ExplorerFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
-                detail = build_listing_detail_payload(repository, listing_id=listing_id, now=self.now, route_context=route_context)
+                detail = build_listing_detail_payload(
+                    repository,
+                    listing_id=listing_id,
+                    now=self.now,
+                    route_context=route_context,
+                    explorer_filters=explorer_filters,
+                )
             if detail is None:
                 return _respond(start_response, "404 Not Found", "Not Found", content_type="text/plain; charset=utf-8")
             body = render_listing_detail_html(detail)
@@ -198,8 +213,15 @@ class DashboardApplication:
             listing_id = _parse_int(path.rsplit("/", 1)[-1])
             if listing_id is None:
                 return _respond(start_response, "404 Not Found", json.dumps({"error": "listing_not_found"}), content_type="application/json; charset=utf-8")
+            explorer_filters = ExplorerFilters.from_query_params(params)
             with RadarRepository(self.db_path) as repository:
-                detail = build_listing_detail_payload(repository, listing_id=listing_id, now=self.now, route_context=route_context)
+                detail = build_listing_detail_payload(
+                    repository,
+                    listing_id=listing_id,
+                    now=self.now,
+                    route_context=route_context,
+                    explorer_filters=explorer_filters,
+                )
             if detail is None:
                 return _respond(start_response, "404 Not Found", json.dumps({"error": "listing_not_found", "listing_id": listing_id}), content_type="application/json; charset=utf-8")
             body = json.dumps(detail, ensure_ascii=False, indent=2, sort_keys=True)
@@ -349,19 +371,37 @@ def build_explorer_payload(
 ) -> dict[str, Any]:
     route_context = route_context or RouteContext()
     generated_at = _generated_at(now)
-    options = repository.explorer_filter_options()
-    page = repository.listing_explorer_page(
+    options = repository.explorer_filter_options(now=now)
+    snapshot = repository.explorer_snapshot(
         root=filters.root,
         catalog_id=filters.catalog_id,
         brand=filters.brand,
         condition=filters.condition,
+        state=filters.state,
+        price_band=filters.price_band,
         query=filters.query,
         sort=filters.sort,
         page=filters.page,
         page_size=filters.page_size,
+        comparison_limit=SEGMENT_LIMIT,
         now=now,
     )
-    items = [_serialize_explorer_item(item, route_context=route_context) for item in page["items"]]
+    page = snapshot["page"]
+    summary = snapshot["summary"]
+    explorer_context = _build_explorer_context(filters, available=options, route_context=route_context)
+    comparisons = _hydrate_explorer_comparison_links(
+        snapshot["comparisons"],
+        filters=filters,
+        base_href=route_context.path("/explorer"),
+    )
+    items = [
+        _serialize_explorer_item(
+            item,
+            route_context=route_context,
+            explorer_filters=filters,
+        )
+        for item in page["items"]
+    ]
     return {
         "generated_at": generated_at,
         "db_path": str(repository.db_path),
@@ -375,13 +415,19 @@ def build_explorer_payload(
                 "catalog_id": filters.catalog_id,
                 "brand": filters.brand or "all",
                 "condition": filters.condition or "all",
+                "state": filters.state or "all",
+                "price_band": filters.price_band or "all",
                 "q": filters.query or "",
                 "sort": page["sort"],
                 "page": page["page"],
                 "page_size": page["page_size"],
             },
             "available": options,
+            "active": explorer_context["active_filters"],
+            "summary": explorer_context["summary"],
         },
+        "summary": summary,
+        "comparisons": comparisons,
         "results": {
             "total_listings": page["total_listings"],
             "total_pages": page["total_pages"],
@@ -391,12 +437,15 @@ def build_explorer_payload(
             "has_previous_page": page["has_previous_page"],
             "has_next_page": page["has_next_page"],
             "has_results": bool(items),
-            "empty_reason": None if items else "Aucune annonce suivie ne correspond aux filtres actuels de l’explorateur.",
+            "active_filter_count": len(explorer_context["active_filters"]),
+            "empty_reason": None if items else "Aucune annonce suivie ne correspond aux filtres actuels de l’explorateur. Relâche un filtre, la recherche, ou la page courante pour réouvrir le corpus.",
         },
         "items": items,
+        "context": explorer_context,
         "notes": {
             "estimated_publication": "La publication estimée s'appuie sur le timestamp de l'image principale. C'est un signal utile, pas une date de publication exacte.",
-            "scalability": "Les résultats de l’explorateur sont filtrés, triés et paginés en SQL avant l’enrichissement du seul lot courant avec l’historique et les probes.",
+            "scalability": "Les résultats, comparaisons et compteurs de l’explorateur sont calculés côté SQL sur la tranche filtrée avant le rendu HTML de la page courante.",
+            "support_rule": f"Toute comparaison sous {summary['inventory']['comparison_support_threshold']} annonces suivies garde un badge de prudence au lieu d’être supprimée.",
         },
         "diagnostics": {
             "home": route_context.path("/"),
@@ -475,6 +524,7 @@ def build_listing_detail_payload(
     listing_id: int,
     now: str | None = None,
     route_context: RouteContext | None = None,
+    explorer_filters: ExplorerFilters | None = None,
 ) -> dict[str, Any] | None:
     route_context = route_context or RouteContext()
     listing_scores = load_listing_scores(repository, now=now)
@@ -491,6 +541,13 @@ def build_listing_detail_payload(
     seller_profile_url = listing.get("user_profile_url")
     radar_first_seen_at = None if summary is None else summary.get("first_seen_at")
     radar_last_seen_at = None if summary is None else summary.get("last_seen_at")
+    explorer_context = None
+    if explorer_filters is not None:
+        explorer_context = _build_explorer_context(
+            explorer_filters,
+            available=repository.explorer_filter_options(now=now),
+            route_context=route_context,
+        )
 
     return {
         "listing_id": listing_id,
@@ -518,6 +575,7 @@ def build_listing_detail_payload(
         "score_explanation": listing.get("score_explanation"),
         "latest_probe": latest_probe,
         "history": history,
+        "explorer_context": explorer_context,
         "serving": {
             "base_path": route_context.base_path or "/",
             "public_base_url": route_context.public_base_url,
@@ -530,6 +588,8 @@ def build_listing_detail_payload(
             "detail_api": route_context.path(f"/api/listings/{listing_id}"),
             "dashboard_api": route_context.path("/api/dashboard"),
             "runtime_api": route_context.path("/api/runtime"),
+            "explorer_back": None if explorer_context is None else explorer_context.get("back_href"),
+            "explorer_back_api": None if explorer_context is None else explorer_context.get("back_api"),
         },
         "engagement": {
             "visible_likes": listing.get("favourite_count"),
@@ -562,8 +622,14 @@ def build_listing_detail_payload(
     }
 
 
-def _serialize_explorer_item(item: dict[str, Any], *, route_context: RouteContext | None = None) -> dict[str, Any]:
+def _serialize_explorer_item(
+    item: dict[str, Any],
+    *,
+    route_context: RouteContext | None = None,
+    explorer_filters: ExplorerFilters | None = None,
+) -> dict[str, Any]:
     route_context = route_context or RouteContext()
+    explorer_filters = explorer_filters or ExplorerFilters()
     listing_id = int(item["listing_id"])
     estimated_publication_at = _format_unix_timestamp(item.get("created_at_ts"))
     seller_login = item.get("user_login")
@@ -576,6 +642,7 @@ def _serialize_explorer_item(item: dict[str, Any], *, route_context: RouteContex
         if latest_probe_status is not None:
             latest_probe_display = f"{latest_probe_display} ({latest_probe_status})"
 
+    detail_suffix = _explorer_suffix_query(explorer_filters)
     payload = dict(item)
     payload.update(
         {
@@ -590,10 +657,17 @@ def _serialize_explorer_item(item: dict[str, Any], *, route_context: RouteContex
             "seller_display": seller_login or "Vendeur non exposé",
             "seller_profile_url": seller_profile_url,
             "latest_probe_display": latest_probe_display,
-            "explorer_href": route_context.path("/explorer") + _suffix_query(DashboardFilters(query=str(listing_id)), include_listing=False),
+            "state_display": _state_label(item.get("state_code")),
+            "basis_display": _basis_label(item.get("basis_kind")),
+            "confidence_display": _confidence_label(item.get("confidence_label")),
+            "explorer_href": _explorer_query(
+                explorer_filters,
+                base_href=route_context.path("/explorer"),
+                overrides={"q": str(listing_id)},
+            ),
             "canonical_href": item.get("canonical_url"),
-            "detail_href": route_context.path(f"/listings/{listing_id}"),
-            "detail_api": route_context.path(f"/api/listings/{listing_id}"),
+            "detail_href": route_context.path(f"/listings/{listing_id}") + detail_suffix,
+            "detail_api": route_context.path(f"/api/listings/{listing_id}") + detail_suffix,
         }
     )
     return payload
@@ -1364,13 +1438,22 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
 
 def render_listing_detail_html(detail: dict[str, Any]) -> str:
     diagnostics = detail.get("diagnostics") if isinstance(detail.get("diagnostics"), dict) else {}
+    explorer_context = detail.get("explorer_context") if isinstance(detail.get("explorer_context"), dict) else {}
     detail_panel = _render_detail_panel(detail)
-    hero_actions = f'<a class="button secondary" href="{_escape(str(diagnostics.get("detail_api") or "#"))}">JSON détail</a>'
+    hero_actions = "".join(
+        part
+        for part in (
+            "" if not explorer_context.get("back_href") else f'<a class="button" href="{_escape(str(explorer_context["back_href"]))}">Retour aux résultats</a>',
+            f'<a class="button secondary" href="{_escape(str(diagnostics.get("detail_api") or "#"))}">JSON détail</a>',
+            "" if not explorer_context.get("back_api") else f'<a class="button secondary" href="{_escape(str(explorer_context["back_api"]))}">JSON explorateur</a>',
+        )
+    )
     status_html = (
         '<div class="status-line">'
         f'<span class="pill {_escape(str(detail.get("state_code") or "unknown"))}">{_escape(_state_label(detail.get("state_code")))}</span>'
         f'<span class="pill">{_escape(_basis_label(detail.get("basis_kind")))}</span>'
         f'<span class="pill">Confiance {_escape(_confidence_label(detail.get("confidence_label")))}</span>'
+        f'{"" if not explorer_context.get("summary") else f"<span class=\"pill info\">{_escape(str(explorer_context["summary"]))}</span>"}'
         '</div>'
     )
     body_html = f'<section class="panel">{detail_panel}</section>'
@@ -1379,7 +1462,7 @@ def render_listing_detail_html(detail: dict[str, Any]) -> str:
         title=f"Vinted Radar — annonce {int(detail['listing_id'])}",
         eyebrow="Fiche annonce",
         heading=str(detail.get("title") or f"Annonce {int(detail['listing_id'])}"),
-        intro="Une lecture détaillée de l’annonce suivie, dans le même shell que l’accueil, l’explorateur et le runtime.",
+        intro="Une lecture détaillée de l’annonce suivie, avec le contexte explorateur conservé pour revenir au même angle d’analyse.",
         diagnostics=diagnostics,
         body_html=body_html,
         hero_actions=hero_actions,
@@ -1391,6 +1474,126 @@ def render_listing_detail_html(detail: dict[str, Any]) -> str:
 
 def _serialize_overview_listing_item(item: dict[str, Any], *, route_context: RouteContext | None = None) -> dict[str, Any]:
     return _serialize_explorer_item(item, route_context=route_context)
+
+
+
+def _build_explorer_context(
+    filters: ExplorerFilters,
+    *,
+    available: dict[str, Any],
+    route_context: RouteContext,
+) -> dict[str, Any]:
+    active_filters: list[dict[str, str]] = []
+
+    def add_filter(key: str, label: str, value: Any, *, available_key: str | None = None) -> None:
+        if value in {None, "", "all"}:
+            return
+        rendered_value = _resolve_explorer_filter_value_label(available, available_key or key, value)
+        active_filters.append({"key": key, "label": label, "value": rendered_value})
+
+    add_filter("root", "Racine", filters.root, available_key="roots")
+    add_filter("catalog_id", "Catalogue", filters.catalog_id, available_key="catalogs")
+    add_filter("brand", "Marque", filters.brand, available_key="brands")
+    add_filter("condition", "État", filters.condition, available_key="conditions")
+    add_filter("state", "Statut radar", filters.state, available_key="states")
+    add_filter("price_band", "Tranche de prix", filters.price_band, available_key="price_bands")
+    if filters.query:
+        active_filters.append({"key": "q", "label": "Recherche", "value": filters.query})
+    if filters.sort != "last_seen_desc":
+        active_filters.append(
+            {
+                "key": "sort",
+                "label": "Tri",
+                "value": _resolve_explorer_filter_value_label(available, "sorts", filters.sort),
+            }
+        )
+    if filters.page != 1:
+        active_filters.append({"key": "page", "label": "Page", "value": str(filters.page)})
+    if filters.page_size != DEFAULT_EXPLORER_PAGE_SIZE:
+        active_filters.append({"key": "page_size", "label": "Taille de page", "value": str(filters.page_size)})
+
+    back_href = _explorer_query(filters, base_href=route_context.path("/explorer"))
+    back_api = route_context.path("/api/explorer") + _explorer_suffix_query(filters)
+    summary = "Vue large du corpus suivi" if not active_filters else "Vue active — " + " · ".join(
+        f"{item['label']} : {item['value']}" for item in active_filters
+    )
+    return {
+        "active_filters": active_filters,
+        "summary": summary,
+        "back_href": back_href,
+        "back_api": back_api,
+        "has_context": bool(filters.to_query_dict()),
+    }
+
+
+
+def _hydrate_explorer_comparison_links(
+    comparisons: dict[str, Any],
+    *,
+    filters: ExplorerFilters,
+    base_href: str,
+) -> dict[str, Any]:
+    hydrated: dict[str, Any] = {}
+    for key, module in comparisons.items():
+        if not isinstance(module, dict):
+            hydrated[key] = module
+            continue
+        rows: list[dict[str, Any]] = []
+        for row in module.get("rows") or []:
+            row_payload = dict(row)
+            drilldown = row_payload.get("drilldown") if isinstance(row_payload.get("drilldown"), dict) else {}
+            row_filters = drilldown.get("filters") if isinstance(drilldown.get("filters"), dict) else {}
+            if not isinstance(row_filters, dict):
+                row_filters = {}
+            hydrated_drilldown = dict(drilldown)
+            hydrated_drilldown["href"] = _explorer_query(
+                filters,
+                base_href=base_href,
+                overrides=row_filters,
+            )
+            row_payload["drilldown"] = hydrated_drilldown
+            rows.append(row_payload)
+        hydrated[key] = {**module, "rows": rows}
+    return hydrated
+
+
+
+def _resolve_explorer_filter_value_label(available: dict[str, Any], available_key: str, value: Any) -> str:
+    options = available.get(available_key) if isinstance(available, dict) else None
+    if isinstance(options, list):
+        for option in options:
+            if str(option.get("value")) == str(value):
+                return _strip_option_count_suffix(str(option.get("label") or value))
+    return _display_explorer_filter_value(available_key, value)
+
+
+
+def _strip_option_count_suffix(label: str) -> str:
+    head, sep, tail = label.rpartition(" (")
+    if sep and tail.endswith(")") and tail[:-1].isdigit():
+        return head
+    return label
+
+
+
+def _display_explorer_filter_value(key: str, value: Any) -> str:
+    if key == "states":
+        return _state_label(value)
+    if key == "price_bands":
+        labels = {
+            "under_20_eur": "< 20 €",
+            "20_to_39_eur": "20–39 €",
+            "40_plus_eur": "40 € et plus",
+            "unknown": "Prix indisponible",
+        }
+        return labels.get(str(value), str(value))
+    if key == "sorts":
+        return _localized_explorer_option_label(str(value))
+    if key == "brands" and str(value) == "unknown-brand":
+        return "Marque inconnue"
+    if key == "conditions" and str(value) == "unknown-condition":
+        return "État inconnu"
+    return str(value)
 
 
 
@@ -1550,7 +1753,8 @@ def _render_comparison_module(module: dict[str, Any], *, explorer_href: str) -> 
 def _render_comparison_row(row: dict[str, Any], *, explorer_href: str) -> str:
     inventory = row.get("inventory") if isinstance(row.get("inventory"), dict) else {}
     honesty = row.get("honesty") if isinstance(row.get("honesty"), dict) else {}
-    filters = row.get("drilldown", {}).get("filters") if isinstance(row.get("drilldown"), dict) else {}
+    drilldown = row.get("drilldown") if isinstance(row.get("drilldown"), dict) else {}
+    filters = drilldown.get("filters") if isinstance(drilldown.get("filters"), dict) else {}
     if not isinstance(filters, dict):
         filters = {}
 
@@ -1558,7 +1762,7 @@ def _render_comparison_row(row: dict[str, Any], *, explorer_href: str) -> str:
     average_price_display = "n/a" if average_price is None else _format_money(round(float(average_price)), "€")
     support_share = float(inventory.get("support_share") or 0.0) * 100.0
     filters_label = _describe_drilldown_filters(filters)
-    drilldown_href = _explorer_href_from_filters(filters, fallback=explorer_href)
+    drilldown_href = drilldown.get("href") or _explorer_href_from_filters(filters, fallback=explorer_href)
     uses_specific_filters = drilldown_href != explorer_href
 
     badges: list[str] = []
@@ -1623,7 +1827,7 @@ def _render_featured_listing_cards(featured_listings: list[dict[str, Any]]) -> s
 
 
 def _explorer_href_from_filters(filters: dict[str, Any], *, fallback: str = "/explorer") -> str:
-    supported_keys = {"root", "catalog_id", "brand", "condition"}
+    supported_keys = {"root", "catalog_id", "brand", "condition", "price_band", "state", "q", "sort", "page", "page_size"}
     params: dict[str, str] = {}
     for key, value in filters.items():
         if key not in supported_keys or value in {None, "", "all"}:
@@ -1671,15 +1875,23 @@ def _describe_drilldown_filters(filters: dict[str, Any]) -> str:
 def render_explorer_html(payload: dict[str, Any]) -> str:
     selected = payload["filters"]["selected"]
     available = payload["filters"]["available"]
+    active_filters = payload["filters"].get("active") or []
+    filter_summary = str(payload["filters"].get("summary") or "Vue large du corpus suivi")
     results = payload["results"]
     diagnostics = payload["diagnostics"]
     notes = payload.get("notes") or {}
     items = payload["items"]
+    summary = payload.get("summary") or {}
+    summary_inventory = summary.get("inventory") if isinstance(summary.get("inventory"), dict) else {}
+    summary_honesty = summary.get("honesty") if isinstance(summary.get("honesty"), dict) else {}
+    comparisons = payload.get("comparisons") or {}
     filters = ExplorerFilters(
         root=None if selected["root"] == "all" else selected["root"],
         catalog_id=selected["catalog_id"],
         brand=None if selected["brand"] == "all" else selected["brand"],
         condition=None if selected["condition"] == "all" else selected["condition"],
+        state=None if selected["state"] == "all" else selected["state"],
+        price_band=None if selected["price_band"] == "all" else selected["price_band"],
         query=selected["q"] or None,
         sort=str(selected["sort"]),
         page=int(selected["page"]),
@@ -1690,9 +1902,21 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     catalog_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["catalog_id"]) for item in available["catalogs"])
     brand_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["brand"]) for item in available["brands"])
     condition_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["condition"]) for item in available["conditions"])
+    state_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["state"]) for item in available["states"])
+    price_band_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["price_band"]) for item in available["price_bands"])
     sort_options = "".join(_option_html(item["value"], _localized_explorer_option_label(item["label"]), selected["sort"]) for item in available["sorts"])
-    page_size_options = "".join(_option_html(str(value), str(value), selected["page_size"]) for value in (25, 50, 100))
+    page_size_options = "".join(_option_html(str(value), str(value), selected["page_size"]) for value in (12, 24, 48, 100))
     selected_sort_label = next((_localized_explorer_option_label(item["label"]) for item in available["sorts"] if item["value"] == selected["sort"]), str(selected["sort"]))
+
+    active_filters_html = "".join(
+        f'<span class="badge info">{_escape(str(item["label"]))} · {_escape(str(item["value"]))}</span>'
+        for item in active_filters
+    ) or '<span class="badge ok">Vue large du corpus</span>'
+
+    comparison_modules_html = "".join(
+        _render_comparison_module(module, explorer_href=diagnostics["explorer"])
+        for module in comparisons.values()
+    ) or '<div class="empty-state"><p>Aucun module de comparaison n’est disponible pour cette tranche du corpus.</p></div>'
 
     explorer_cards = "".join(
         f'''
@@ -1705,18 +1929,25 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
             <div class="listing-stats">
               <span class="badge ok">{_escape(str(item.get('price_display') or 'prix n/a'))}</span>
               <span class="badge">{_escape(_freshness_label(item.get('freshness_bucket')))}</span>
-              <span class="badge">Likes {_escape(str(item.get('visible_likes_display') or 'n/a'))}</span>
-              <span class="badge">Vues {_escape(str(item.get('visible_views_display') or 'n/a'))}</span>
+              <span class="badge">{_escape(str(item.get('state_display') or _state_label(item.get('state_code'))))}</span>
+              <span class="badge">Confiance {_escape(str(item.get('confidence_display') or _confidence_label(item.get('confidence_label'))))}</span>
             </div>
           </div>
           <div class="meta-grid">
             <div class="meta-block">
               <span class="meta-label">Catalogue</span>
               <strong>{_escape(str(item.get('primary_catalog_path') or item.get('root_title') or 'Catalogue inconnu'))}</strong>
+              <span class="link-muted">État {_escape(str(item.get('condition_label') or 'n/a'))}</span>
+            </div>
+            <div class="meta-block">
+              <span class="meta-label">Lecture radar</span>
+              <strong>{_escape(str(item.get('state_display') or _state_label(item.get('state_code'))))}</strong>
+              <span class="link-muted">Base {_escape(str(item.get('basis_display') or _basis_label(item.get('basis_kind'))))}</span>
             </div>
             <div class="meta-block">
               <span class="meta-label">Vendeur visible</span>
               <strong>{'<a class="listing-link" href="' + _escape(str(item.get('seller_profile_url'))) + '" target="_blank" rel="noreferrer">' + _escape(str(item.get('seller_display') or 'Vendeur non exposé')) + '</a>' if item.get('seller_profile_url') else _escape(str(item.get('seller_display') or 'Vendeur non exposé'))}</strong>
+              <span class="link-muted">Likes {_escape(str(item.get('visible_likes_display') or 'n/a'))} · Vues {_escape(str(item.get('visible_views_display') or 'n/a'))}</span>
             </div>
             <div class="meta-block">
               <span class="meta-label">Publication estimée</span>
@@ -1731,16 +1962,11 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
             <div class="meta-block">
               <span class="meta-label">Dernière probe</span>
               <strong>{_escape(str(item.get('latest_probe_display') or 'Aucune probe'))}</strong>
-              <span class="link-muted">{_escape(str(item.get('observation_count') or 0))} observations</span>
-            </div>
-            <div class="meta-block">
-              <span class="meta-label">Total affiché</span>
-              <strong>{_escape(str(item.get('total_price_display') or 'n/a'))}</strong>
-              <span class="link-muted">Condition {_escape(str(item.get('condition_label') or 'n/a'))}</span>
+              <span class="link-muted">{_escape(str(item.get('observation_count') or 0))} observations · {int(item.get('follow_up_miss_count') or 0)} ratés</span>
             </div>
           </div>
           <div class="actions">
-            <a class="button secondary" href="{_escape(str(item.get('detail_href') or '#'))}">Ouvrir la fiche</a>
+            <a class="button" href="{_escape(str(item.get('detail_href') or '#'))}">Ouvrir la fiche</a>
             <a class="button secondary" href="{_escape(str(item.get('detail_api') or '#'))}">JSON</a>
             <a class="button secondary" href="{_escape(str(item.get('explorer_href') or diagnostics['explorer']))}">Vue ciblée</a>
             {'' if not item.get('canonical_href') else f'<a class="button secondary" href="{_escape(str(item.get("canonical_href")))}" target="_blank" rel="noreferrer">Vinted</a>'}
@@ -1753,11 +1979,13 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     previous_href = _explorer_query(filters, base_href=diagnostics["explorer"], overrides={"page": max(filters.page - 1, 1)})
     next_href = _explorer_query(filters, base_href=diagnostics["explorer"], overrides={"page": filters.page + 1})
 
+    average_price_display = "n/a" if summary_inventory.get("average_price_amount_cents") is None else _format_money(round(float(summary_inventory["average_price_amount_cents"])), "€")
     status_html = (
-        '<div class="status-line">'
+        '<div class="status-line" role="status" aria-live="polite">'
         f'<span class="pill">{_escape(str(results["total_listings"]))} annonces</span>'
         f'<span class="pill">Page {results["page"]}/{results["total_pages"] or 1}</span>'
-        f'<span class="pill">Tri { _escape(str(selected_sort_label)) }</span>'
+        f'<span class="pill">Tri {_escape(str(selected_sort_label))}</span>'
+        f'<span class="pill">Support modules {int(summary_inventory.get("comparison_support_threshold") or 0)}+</span>'
         '</div>'
     )
 
@@ -1767,13 +1995,15 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
     <section class="panel" aria-labelledby="filters-title">
       <div class="panel-head">
         <h2 id="filters-title">Filtres d’exploration</h2>
-        <p>Cette route parcourt le corpus réel côté SQL puis n’enrichit que la page visible. Le shell reste le même que sur l’accueil et le runtime.</p>
+        <p>{_escape(filter_summary)}</p>
       </div>
       <form method="get" class="filters">
         <label>Racine<select name="root">{root_options}</select></label>
         <label>Catalogue<select name="catalog_id">{catalog_options}</select></label>
         <label>Marque<select name="brand">{brand_options}</select></label>
         <label>État<select name="condition">{condition_options}</select></label>
+        <label>Statut radar<select name="state">{state_options}</select></label>
+        <label>Tranche de prix<select name="price_band">{price_band_options}</select></label>
         <label>Recherche<input type="search" name="q" value="{_escape(selected['q'])}" placeholder="Titre, marque, vendeur, ID annonce"></label>
         <label>Tri<select name="sort">{sort_options}</select></label>
         <label>Taille de page<select name="page_size">{page_size_options}</select></label>
@@ -1783,12 +2013,21 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
           <a class="button secondary" href="{_escape(diagnostics['explorer'])}">Réinitialiser</a>
         </div>
       </form>
-      <div class="stats" style="margin-top:16px;">
-        <div class="metric"><div class="metric-label">Résultats</div><div class="metric-value">{results['total_listings']}</div><p>annonces correspondant aux filtres actifs</p></div>
-        <div class="metric"><div class="metric-label">Page</div><div class="metric-value">{results['page']}</div><p>sur {results['total_pages'] or 1}</p></div>
-        <div class="metric"><div class="metric-label">Corpus</div><div class="metric-value">{available['tracked_listings']}</div><p>annonces suivies dans la base</p></div>
-        <div class="metric"><div class="metric-label">Note</div><div class="metric-value">SQL</div><p>{_escape(str(notes.get('scalability') or ''))}</p></div>
+      <div class="status-line" style="margin-top:16px;">{active_filters_html}</div>
+      <div class="cards" style="margin-top:16px;">
+        {_metric_card("Résultats", _escape(str(summary_inventory.get('matched_listings', 0))), [f"{results['active_filter_count']} filtre(s) actifs", f"Corpus total {available['tracked_listings']}"])}
+        {_metric_card("Lecture de vente", _escape(str(summary_inventory.get('sold_like_count', 0))), [f"Actives {summary_inventory.get('state_counts', {}).get('active', 0)}", f"Vendues-like {summary_inventory.get('state_counts', {}).get('sold_observed', 0) + summary_inventory.get('state_counts', {}).get('sold_probable', 0)}"])}
+        {_metric_card("Honnêteté", _escape(str(summary_honesty.get('observed_state_count', 0))), [f"Inférées {summary_honesty.get('inferred_state_count', 0)}", f"Signal mince {summary_honesty.get('thin_signal_count', 0)}"])}
+        {_metric_card("Prix moyen", _escape(average_price_display), [f"Publication estimée {summary_honesty.get('estimated_publication_count', 0)}", f"Règle {notes.get('support_rule', '')}"])}
       </div>
+    </section>
+
+    <section class="panel" aria-labelledby="comparisons-title">
+      <div class="panel-head">
+        <h2 id="comparisons-title">Comparer la tranche affichée</h2>
+        <p>{_escape(str(notes.get('support_rule') or ''))}</p>
+      </div>
+      <div class="module-grid">{comparison_modules_html}</div>
     </section>
 
     <section class="panel" aria-labelledby="results-title">
@@ -1809,8 +2048,8 @@ def render_explorer_html(payload: dict[str, Any]) -> str:
         page_key="explorer",
         title="Vinted Radar — explorateur",
         eyebrow="Explorateur",
-        heading="Parcourir le corpus sans quitter le shell du produit.",
-        intro="Filtres, tri et pagination restent côté SQL. La page sert la vue utile du moment, avec une lecture mobile et desktop sur la même structure.",
+        heading="Parcourir, comparer et filtrer le corpus réel.",
+        intro="L’explorateur travaille maintenant sur une tranche SQL complète : filtres, comparaisons, support, pagination et retour contextuel vers la fiche d’annonce.",
         diagnostics=diagnostics,
         body_html=body_html,
         hero_actions=hero_actions,
@@ -1970,6 +2209,12 @@ def _render_detail_panel(detail: dict[str, Any] | None) -> str:
     score_factors = score_explanation.get("factors") if isinstance(score_explanation.get("factors"), dict) else {}
     seller = detail.get("seller") if isinstance(detail.get("seller"), dict) else {}
     timing = detail.get("timing") if isinstance(detail.get("timing"), dict) else {}
+    explorer_context = detail.get("explorer_context") if isinstance(detail.get("explorer_context"), dict) else {}
+    context_filters = explorer_context.get("active_filters") if isinstance(explorer_context.get("active_filters"), list) else []
+    context_filter_html = "".join(
+        f'<span class="badge info">{_escape(str(item.get("label") or "Filtre"))} · {_escape(str(item.get("value") or ""))}</span>'
+        for item in context_filters
+    ) or '<span class="badge ok">Vue large du corpus</span>'
     seller_html = (
         f'<a class="link-muted" href="{_escape(str(seller.get("profile_url")))}" target="_blank" rel="noreferrer">{_escape(str(seller.get("login") or seller.get("display") or "Vendeur non exposé"))}</a>'
         if seller.get("profile_url")
@@ -1986,6 +2231,11 @@ def _render_detail_panel(detail: dict[str, Any] | None) -> str:
         <span class=\"pill { _escape(str(detail.get('state_code') or 'unknown')) }\">{_escape(_state_label(detail.get('state_code')))}</span>
         <span class=\"pill\">{_escape(_basis_label(detail.get('basis_kind')))}</span>
         <span class=\"pill\">Confiance {_escape(_confidence_label(detail.get('confidence_label')))}</span>
+      </div>
+      <div class=\"signal\">
+        <span class=\"signal-label\">Contexte explorateur</span>
+        <strong>{_escape(str(explorer_context.get('summary') or 'Vue directe sans filtre mémorisé'))}</strong><br>
+        <div class=\"status-line\" style=\"margin-top:10px;\">{context_filter_html}</div>
       </div>
       <div class=\"detail-grid\">
         {''.join(f'<div class="signal"><span class="signal-label">{_escape(item["label"])}</span>{_escape(str(item["value"]))}</div>' for item in detail['signals'])}
@@ -2200,6 +2450,8 @@ _EXPLORER_OPTION_LABELS = {
     "All catalogs": "Tous les catalogues",
     "All brands": "Toutes les marques",
     "All conditions": "Tous les états",
+    "All price bands": "Toutes les tranches de prix",
+    "All radar states": "Tous les statuts radar",
     "Recently seen": "Dernière vue radar",
     "Price ↓": "Prix ↓",
     "Price ↑": "Prix ↑",

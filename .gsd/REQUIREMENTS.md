@@ -67,8 +67,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M002 (provisional)
 - Supporting slices: none
-- Validation: mapped
-- Notes: These enrichments matter, but they should not displace M001’s credibility work.
+- Validation: S04 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s04.db --host 127.0.0.1 --port 8783`, and browser verification at `http://127.0.0.1:8783/explorer?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12` confirmed richer comparison and navigation workflows beyond the overview-only market read.
+- Notes: M002/S04 turns `/explorer` into a real browse-and-compare workspace with SQL-backed root/catalog/brand/condition/state/price-band/search filters, paged result browsing, scoped comparison modules, and context-preserving listing drill-down. The requirement remains active because exports and broader utility workflows are still deferred.
 
 ### R013 — The system must move beyond individual listings and group related listings into product or article-level entities that better reflect what the market is buying.
 - Class: core-capability
@@ -278,7 +278,7 @@ This file is the explicit capability and coverage contract for the project.
 | R009 | primary-user-loop | validated | M001/S05 | M001/S03, M001/S04, M001/S06 | S05 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s05.db --host 127.0.0.1 --port 8765`, and browser verification at `http://127.0.0.1:8765` confirmed a mixed dashboard with segment summaries, demand/premium ranking tables, root/state/catalog/search filters, and listing-detail drill-down into history, score factors, transitions, and state reasons. |
 | R010 | operability | validated | M001/S06 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05 | S06 proof: `python -m pytest`, `python -m vinted_radar.cli batch --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --request-delay 0.0`, `python -m vinted_radar.cli runtime-status --db data/vinted-radar-s06.db --format json`, and `python -m vinted_radar.cli continuous --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 2 --state-refresh-limit 4 --interval-seconds 5 --request-delay 0.0 --dashboard --host 127.0.0.1 --port 8766` plus browser verification at `http://127.0.0.1:8766` and direct checks against `/api/runtime`, `/api/dashboard`, and `/health` confirmed both operator modes and persisted runtime diagnostics. |
 | R011 | quality-attribute | active | M001/S03 | M001/S01, M001/S02, M001/S04, M001/S05, M001/S06 | mapped |
-| R012 | differentiator | active | M002 (provisional) | none | mapped |
+| R012 | differentiator | active | M002 (provisional) | none | S04 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s04.db --host 127.0.0.1 --port 8783`, and browser verification at `http://127.0.0.1:8783/explorer?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12` confirmed richer comparison and navigation workflows beyond the overview-only market read. |
 | R013 | core-capability | active | M003 (provisional) | none | mapped |
 | R014 | differentiator | active | M003 (provisional) | none | mapped |
 | R015 | differentiator | active | M003 (provisional) | none | mapped |

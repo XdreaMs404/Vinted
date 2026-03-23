@@ -189,12 +189,16 @@ CREATE INDEX IF NOT EXISTS idx_listings_last_discovered_at ON listings(last_disc
 CREATE INDEX IF NOT EXISTS idx_listings_primary_catalog_last_seen ON listings(primary_catalog_id, last_discovered_at DESC, listing_id DESC);
 CREATE INDEX IF NOT EXISTS idx_listings_brand ON listings(brand, listing_id);
 CREATE INDEX IF NOT EXISTS idx_listings_condition ON listings(condition_label, listing_id);
-CREATE INDEX IF NOT EXISTS idx_listings_created_at_ts ON listings(created_at_ts DESC, listing_id DESC);
-CREATE INDEX IF NOT EXISTS idx_listings_favourite_count ON listings(favourite_count DESC, listing_id DESC);
-CREATE INDEX IF NOT EXISTS idx_listings_view_count ON listings(view_count DESC, listing_id DESC);
 CREATE INDEX IF NOT EXISTS idx_item_page_probes_listing_time ON item_page_probes(listing_id, probed_at);
 CREATE INDEX IF NOT EXISTS idx_runtime_cycles_started_at ON runtime_cycles(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runtime_controller_updated_at ON runtime_controller_state(updated_at DESC);
+"""
+
+
+POST_MIGRATION_SCHEMA = """
+CREATE INDEX IF NOT EXISTS idx_listings_created_at_ts ON listings(created_at_ts DESC, listing_id DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_favourite_count ON listings(favourite_count DESC, listing_id DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_view_count ON listings(view_count DESC, listing_id DESC);
 """
 
 
@@ -209,6 +213,7 @@ def connect_database(db_path: str | Path) -> sqlite3.Connection:
     connection.execute("PRAGMA synchronous = NORMAL")
     connection.executescript(SCHEMA)
     _apply_migrations(connection)
+    connection.executescript(POST_MIGRATION_SCHEMA)
     connection.commit()
     return connection
 

@@ -191,3 +191,64 @@ def test_upsert_listing_persists_extended_catalog_metadata(tmp_path: Path) -> No
     assert row["user_login"] == "alice"
     assert row["user_profile_url"] == "https://www.vinted.fr/member/41"
     assert row["created_at_ts"] == 1711092000
+
+
+def test_explorer_filter_options_include_comparison_dimensions(tmp_path: Path) -> None:
+    from tests.test_dashboard import _seed_dashboard_db
+
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        options = repository.explorer_filter_options(now="2026-03-19T12:00:00+00:00")
+
+    assert any(item["value"] == "active" for item in options["states"])
+    assert any(item["value"] == "20_to_39_eur" for item in options["price_bands"])
+
+
+def test_repository_migrates_legacy_listing_columns_before_creating_dependent_indexes(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE listings (
+                listing_id INTEGER PRIMARY KEY,
+                canonical_url TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                title TEXT,
+                brand TEXT,
+                size_label TEXT,
+                condition_label TEXT,
+                price_amount_cents INTEGER,
+                price_currency TEXT,
+                total_price_amount_cents INTEGER,
+                total_price_currency TEXT,
+                image_url TEXT,
+                primary_catalog_id INTEGER,
+                primary_root_catalog_id INTEGER,
+                first_discovered_at TEXT NOT NULL,
+                last_discovered_at TEXT NOT NULL,
+                last_seen_run_id TEXT NOT NULL,
+                last_card_payload_json TEXT NOT NULL
+            );
+            """
+        )
+        connection.commit()
+
+    with RadarRepository(db_path) as repository:
+        columns = {
+            row["name"]
+            for row in repository.connection.execute("PRAGMA table_info(listings)")
+        }
+        indexes = {
+            row["name"]
+            for row in repository.connection.execute("PRAGMA index_list(listings)")
+        }
+
+    assert {"favourite_count", "view_count", "user_id", "user_login", "user_profile_url", "created_at_ts"}.issubset(columns)
+    assert {
+        "idx_listings_created_at_ts",
+        "idx_listings_favourite_count",
+        "idx_listings_view_count",
+    }.issubset(indexes)

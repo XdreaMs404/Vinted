@@ -879,10 +879,17 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             summaries.append(summary)
         return summaries
 
-    def explorer_filter_options(self) -> dict[str, list[dict[str, object]] | int]:
-        tracked_predicate = "EXISTS (SELECT 1 FROM listing_observations WHERE listing_observations.listing_id = listings.listing_id)"
+    def explorer_filter_options(self, *, now: str | None = None) -> dict[str, list[dict[str, object]] | int]:
+        now_dt = _coerce_now(now)
+        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+
         tracked_listings_row = self.connection.execute(
-            f"SELECT COUNT(*) AS tracked_listings FROM listings WHERE {tracked_predicate}"
+            f"""
+            {cte_sql}
+            SELECT COUNT(*) AS tracked_listings
+            FROM classified
+            """,
+            cte_params,
         ).fetchone()
         tracked_listings = 0 if tracked_listings_row is None else int(tracked_listings_row["tracked_listings"] or 0)
 
@@ -894,13 +901,13 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
-                SELECT COALESCE(roots.title, 'Unknown') AS root_title, COUNT(*) AS count
-                FROM listings
-                LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
-                WHERE {tracked_predicate}
-                GROUP BY COALESCE(roots.title, 'Unknown')
-                ORDER BY COALESCE(roots.title, 'Unknown')
-                """
+                {cte_sql}
+                SELECT root_title, COUNT(*) AS count
+                FROM classified
+                GROUP BY root_title
+                ORDER BY root_title ASC
+                """,
+                cte_params,
             )
         ]
         catalogs = [
@@ -912,52 +919,101 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             }
             for row in self.connection.execute(
                 f"""
+                {cte_sql}
                 SELECT
-                    listings.primary_catalog_id AS catalog_id,
-                    COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS catalog_path,
+                    primary_catalog_id AS catalog_id,
+                    MAX(category_path) AS catalog_path,
                     COUNT(*) AS count
-                FROM listings
-                LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
-                LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
-                WHERE listings.primary_catalog_id IS NOT NULL
-                  AND {tracked_predicate}
-                GROUP BY listings.primary_catalog_id, COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown'))
-                ORDER BY COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown'))
-                """
+                FROM classified
+                WHERE primary_catalog_id IS NOT NULL
+                GROUP BY primary_catalog_id
+                ORDER BY MAX(category_path) ASC
+                """,
+                cte_params,
             )
         ]
         brands = [
             {
-                "value": str(row["brand_label"]),
+                "value": str(row["brand_value"]),
                 "label": f"{row['brand_label']} ({row['count']})",
                 "count": int(row["count"]),
             }
             for row in self.connection.execute(
                 f"""
-                SELECT COALESCE(listings.brand, 'Unknown brand') AS brand_label, COUNT(*) AS count
-                FROM listings
-                WHERE {tracked_predicate}
-                GROUP BY COALESCE(listings.brand, 'Unknown brand')
+                {cte_sql}
+                SELECT
+                    COALESCE(brand, 'unknown-brand') AS brand_value,
+                    COALESCE(brand, 'Marque inconnue') AS brand_label,
+                    COUNT(*) AS count
+                FROM classified
+                GROUP BY brand_value, brand_label
                 ORDER BY count DESC, brand_label ASC
                 LIMIT 80
-                """
+                """,
+                cte_params,
             )
         ]
         conditions = [
             {
-                "value": str(row["condition_label"]),
+                "value": str(row["condition_value"]),
                 "label": f"{row['condition_label']} ({row['count']})",
                 "count": int(row["count"]),
             }
             for row in self.connection.execute(
                 f"""
-                SELECT COALESCE(listings.condition_label, 'Unknown condition') AS condition_label, COUNT(*) AS count
-                FROM listings
-                WHERE {tracked_predicate}
-                GROUP BY COALESCE(listings.condition_label, 'Unknown condition')
+                {cte_sql}
+                SELECT
+                    COALESCE(condition_label, 'unknown-condition') AS condition_value,
+                    COALESCE(condition_label, 'État inconnu') AS condition_label,
+                    COUNT(*) AS count
+                FROM classified
+                GROUP BY condition_value, condition_label
                 ORDER BY count DESC, condition_label ASC
                 LIMIT 40
-                """
+                """,
+                cte_params,
+            )
+        ]
+        price_bands = [
+            {
+                "value": str(row["price_band_code"]),
+                "label": f"{row['price_band_label']} ({row['count']})",
+                "count": int(row["count"]),
+            }
+            for row in self.connection.execute(
+                f"""
+                {cte_sql}
+                SELECT
+                    price_band_code,
+                    price_band_label,
+                    MIN(price_band_sort_order) AS sort_rank,
+                    COUNT(*) AS count
+                FROM classified
+                GROUP BY price_band_code, price_band_label
+                ORDER BY sort_rank ASC, count DESC
+                """,
+                cte_params,
+            )
+        ]
+        states = [
+            {
+                "value": str(row["state_code"]),
+                "label": f"{row['state_label']} ({row['count']})",
+                "count": int(row["count"]),
+            }
+            for row in self.connection.execute(
+                f"""
+                {cte_sql}
+                SELECT
+                    state_code,
+                    state_label,
+                    MIN(state_sort_order) AS sort_rank,
+                    COUNT(*) AS count
+                FROM classified
+                GROUP BY state_code, state_label
+                ORDER BY sort_rank ASC, count DESC
+                """,
+                cte_params,
             )
         ]
         return {
@@ -966,6 +1022,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "catalogs": [{"value": "", "label": "All catalogs"}] + catalogs,
             "brands": [{"value": "all", "label": "All brands"}] + brands,
             "conditions": [{"value": "all", "label": "All conditions"}] + conditions,
+            "price_bands": [{"value": "all", "label": "All price bands"}] + price_bands,
+            "states": [{"value": "all", "label": "All radar states"}] + states,
             "sorts": [
                 {"value": "last_seen_desc", "label": "Recently seen"},
                 {"value": "price_desc", "label": "Price ↓"},
@@ -977,6 +1035,223 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             ],
         }
 
+    def explorer_snapshot(
+        self,
+        *,
+        root: str | None = None,
+        catalog_id: int | None = None,
+        brand: str | None = None,
+        condition: str | None = None,
+        state: str | None = None,
+        price_band: str | None = None,
+        query: str | None = None,
+        sort: str = "last_seen_desc",
+        page: int = 1,
+        page_size: int = 50,
+        comparison_limit: int = DEFAULT_OVERVIEW_COMPARISON_LIMIT,
+        support_threshold: int = DEFAULT_OVERVIEW_SUPPORT_THRESHOLD,
+        now: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "summary": self.explorer_summary(
+                root=root,
+                catalog_id=catalog_id,
+                brand=brand,
+                condition=condition,
+                state=state,
+                price_band=price_band,
+                query=query,
+                support_threshold=support_threshold,
+                now=now,
+            ),
+            "comparisons": self.explorer_comparison_modules(
+                root=root,
+                catalog_id=catalog_id,
+                brand=brand,
+                condition=condition,
+                state=state,
+                price_band=price_band,
+                query=query,
+                comparison_limit=comparison_limit,
+                support_threshold=support_threshold,
+                now=now,
+            ),
+            "page": self.listing_explorer_page(
+                root=root,
+                catalog_id=catalog_id,
+                brand=brand,
+                condition=condition,
+                state=state,
+                price_band=price_band,
+                query=query,
+                sort=sort,
+                page=page,
+                page_size=page_size,
+                now=now,
+            ),
+        }
+
+    def explorer_summary(
+        self,
+        *,
+        root: str | None = None,
+        catalog_id: int | None = None,
+        brand: str | None = None,
+        condition: str | None = None,
+        state: str | None = None,
+        price_band: str | None = None,
+        query: str | None = None,
+        support_threshold: int = DEFAULT_OVERVIEW_SUPPORT_THRESHOLD,
+        now: str | None = None,
+    ) -> dict[str, object]:
+        now_dt = _coerce_now(now)
+        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        where_sql, where_params = self._explorer_filter_sql(
+            root=root,
+            catalog_id=catalog_id,
+            brand=brand,
+            condition=condition,
+            state=state,
+            price_band=price_band,
+            query=query,
+        )
+        bounded_support_threshold = max(int(support_threshold), 1)
+        summary_row = self.connection.execute(
+            f"""
+            {cte_sql}
+            SELECT
+                COUNT(*) AS matched_listings,
+                SUM(sold_like) AS sold_like_count,
+                ROUND(AVG(CAST(price_amount_cents AS REAL)), 2) AS average_price_amount_cents,
+                SUM(CASE WHEN state_code = 'active' THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE WHEN state_code = 'sold_observed' THEN 1 ELSE 0 END) AS sold_observed_count,
+                SUM(CASE WHEN state_code = 'sold_probable' THEN 1 ELSE 0 END) AS sold_probable_count,
+                SUM(CASE WHEN state_code = 'unavailable_non_conclusive' THEN 1 ELSE 0 END) AS unavailable_non_conclusive_count,
+                SUM(CASE WHEN state_code = 'deleted' THEN 1 ELSE 0 END) AS deleted_count,
+                SUM(CASE WHEN state_code = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
+                SUM(CASE WHEN basis_kind = 'observed' THEN 1 ELSE 0 END) AS observed_state_count,
+                SUM(CASE WHEN basis_kind = 'inferred' THEN 1 ELSE 0 END) AS inferred_state_count,
+                SUM(CASE WHEN basis_kind = 'unknown' THEN 1 ELSE 0 END) AS unknown_state_count,
+                SUM(partial_signal) AS partial_signal_count,
+                SUM(thin_signal) AS thin_signal_count,
+                SUM(has_estimated_publication) AS estimated_publication_count,
+                SUM(CASE WHEN has_estimated_publication = 0 THEN 1 ELSE 0 END) AS missing_estimated_publication_count
+            FROM classified
+            {where_sql}
+            """,
+            [*cte_params, *where_params],
+        ).fetchone()
+        summary_values = dict(summary_row) if summary_row is not None else {}
+        return {
+            "inventory": {
+                "matched_listings": int(summary_values.get("matched_listings") or 0),
+                "sold_like_count": int(summary_values.get("sold_like_count") or 0),
+                "comparison_support_threshold": bounded_support_threshold,
+                "average_price_amount_cents": None
+                if summary_values.get("average_price_amount_cents") is None
+                else round(float(summary_values["average_price_amount_cents"]), 2),
+                "state_counts": {
+                    state_code: int(summary_values.get(f"{state_code}_count") or 0)
+                    for state_code in STATE_ORDER
+                },
+            },
+            "honesty": {
+                "observed_state_count": int(summary_values.get("observed_state_count") or 0),
+                "inferred_state_count": int(summary_values.get("inferred_state_count") or 0),
+                "unknown_state_count": int(summary_values.get("unknown_state_count") or 0),
+                "partial_signal_count": int(summary_values.get("partial_signal_count") or 0),
+                "thin_signal_count": int(summary_values.get("thin_signal_count") or 0),
+                "estimated_publication_count": int(summary_values.get("estimated_publication_count") or 0),
+                "missing_estimated_publication_count": int(summary_values.get("missing_estimated_publication_count") or 0),
+            },
+        }
+
+    def explorer_comparison_modules(
+        self,
+        *,
+        root: str | None = None,
+        catalog_id: int | None = None,
+        brand: str | None = None,
+        condition: str | None = None,
+        state: str | None = None,
+        price_band: str | None = None,
+        query: str | None = None,
+        comparison_limit: int = DEFAULT_OVERVIEW_COMPARISON_LIMIT,
+        support_threshold: int = DEFAULT_OVERVIEW_SUPPORT_THRESHOLD,
+        now: str | None = None,
+    ) -> dict[str, dict[str, object]]:
+        now_dt = _coerce_now(now)
+        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        where_sql, where_params = self._explorer_filter_sql(
+            root=root,
+            catalog_id=catalog_id,
+            brand=brand,
+            condition=condition,
+            state=state,
+            price_band=price_band,
+            query=query,
+        )
+        bounded_limit = max(int(comparison_limit), 1)
+        bounded_support_threshold = max(int(support_threshold), 1)
+        comparisons: dict[str, dict[str, object]] = {}
+        for spec in (
+            {
+                "lens": "category",
+                "title": "Catégories",
+                "value_expression": "CASE WHEN primary_catalog_id IS NOT NULL THEN CAST(primary_catalog_id AS TEXT) ELSE COALESCE(root_title, 'unknown-root') END",
+                "label_expression": "COALESCE(category_path, COALESCE(root_title, 'Catégorie inconnue'))",
+                "extra_select": ", MAX(primary_catalog_id) AS catalog_id, MAX(root_title) AS root_title",
+                "order_by": "support_count DESC, lens_label ASC",
+            },
+            {
+                "lens": "brand",
+                "title": "Marques",
+                "value_expression": "COALESCE(brand, 'unknown-brand')",
+                "label_expression": "COALESCE(brand, 'Marque inconnue')",
+                "extra_select": "",
+                "order_by": "support_count DESC, lens_label ASC",
+            },
+            {
+                "lens": "price_band",
+                "title": "Tranches de prix",
+                "value_expression": "price_band_code",
+                "label_expression": "price_band_label",
+                "extra_select": ", MIN(price_band_sort_order) AS sort_rank",
+                "order_by": "support_count DESC, sort_rank ASC, lens_label ASC",
+            },
+            {
+                "lens": "condition",
+                "title": "États",
+                "value_expression": "COALESCE(condition_label, 'unknown-condition')",
+                "label_expression": "COALESCE(condition_label, 'État inconnu')",
+                "extra_select": "",
+                "order_by": "support_count DESC, lens_label ASC",
+            },
+            {
+                "lens": "sold_state",
+                "title": "Statut radar",
+                "value_expression": "state_code",
+                "label_expression": "state_label",
+                "extra_select": ", MIN(state_sort_order) AS sort_rank",
+                "order_by": "support_count DESC, sort_rank ASC, lens_label ASC",
+            },
+        ):
+            comparisons[str(spec["lens"])] = self._explorer_comparison_module(
+                cte_sql=cte_sql,
+                cte_params=cte_params,
+                where_sql=where_sql,
+                where_params=where_params,
+                lens=str(spec["lens"]),
+                title=str(spec["title"]),
+                value_expression=str(spec["value_expression"]),
+                label_expression=str(spec["label_expression"]),
+                extra_select=str(spec["extra_select"]),
+                order_by=str(spec["order_by"]),
+                limit=bounded_limit,
+                support_threshold=bounded_support_threshold,
+            )
+        return comparisons
+
     def listing_explorer_page(
         self,
         *,
@@ -984,6 +1259,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         catalog_id: int | None = None,
         brand: str | None = None,
         condition: str | None = None,
+        state: str | None = None,
+        price_band: str | None = None,
         query: str | None = None,
         sort: str = "last_seen_desc",
         page: int = 1,
@@ -994,197 +1271,87 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         bounded_page = max(int(page), 1)
         bounded_page_size = max(1, min(int(page_size), 100))
         offset = (bounded_page - 1) * bounded_page_size
-
-        order_by = {
-            "last_seen_desc": "listings.last_discovered_at DESC, listings.listing_id DESC",
-            "price_desc": "listings.price_amount_cents IS NULL, listings.price_amount_cents DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
-            "price_asc": "listings.price_amount_cents IS NULL, listings.price_amount_cents ASC, listings.last_discovered_at DESC, listings.listing_id DESC",
-            "favourite_desc": "listings.favourite_count IS NULL, listings.favourite_count DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
-            "view_desc": "listings.view_count IS NULL, listings.view_count DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
-            "created_at_desc": "listings.created_at_ts IS NULL, listings.created_at_ts DESC, listings.last_discovered_at DESC, listings.listing_id DESC",
-            "first_seen_desc": "listings.first_discovered_at DESC, listings.listing_id DESC",
-        }.get(sort, "listings.last_discovered_at DESC, listings.listing_id DESC")
-        sort_key = sort if sort in {
-            "last_seen_desc",
-            "price_desc",
-            "price_asc",
-            "favourite_desc",
-            "view_desc",
-            "created_at_desc",
-            "first_seen_desc",
-        } else "last_seen_desc"
-
-        where_clauses = [
-            "EXISTS (SELECT 1 FROM listing_observations WHERE listing_observations.listing_id = listings.listing_id)"
-        ]
-        params: list[object] = []
-        if root:
-            where_clauses.append("COALESCE(roots.title, 'Unknown') = ?")
-            params.append(root)
-        if catalog_id is not None:
-            where_clauses.append("listings.primary_catalog_id = ?")
-            params.append(catalog_id)
-        if brand:
-            where_clauses.append("COALESCE(listings.brand, 'Unknown brand') = ?")
-            params.append(brand)
-        if condition:
-            where_clauses.append("COALESCE(listings.condition_label, 'Unknown condition') = ?")
-            params.append(condition)
-        cleaned_query = _clean_query_text(query)
-        if cleaned_query:
-            like_query = f"%{cleaned_query}%"
-            where_clauses.append(
-                "("
-                "CAST(listings.listing_id AS TEXT) LIKE ? "
-                "OR LOWER(COALESCE(listings.title, '')) LIKE ? "
-                "OR LOWER(COALESCE(listings.brand, '')) LIKE ? "
-                "OR LOWER(COALESCE(primary_catalog.path, '')) LIKE ? "
-                "OR LOWER(COALESCE(listings.user_login, '')) LIKE ?"
-                ")"
-            )
-            params.extend([like_query, like_query, like_query, like_query, like_query])
-        where_sql = "WHERE " + " AND ".join(where_clauses)
+        order_by, sort_key = self._explorer_sort_clause(sort)
+        cte_sql, cte_params = self._overview_state_snapshot_ctes(now_dt=now_dt)
+        where_sql, where_params = self._explorer_filter_sql(
+            root=root,
+            catalog_id=catalog_id,
+            brand=brand,
+            condition=condition,
+            state=state,
+            price_band=price_band,
+            query=query,
+        )
 
         total_row = self.connection.execute(
             f"""
+            {cte_sql}
             SELECT COUNT(*) AS total
-            FROM listings
-            LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
-            LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
+            FROM classified
             {where_sql}
             """,
-            params,
+            [*cte_params, *where_params],
         ).fetchone()
         total_listings = 0 if total_row is None else int(total_row["total"] or 0)
 
         rows = self.connection.execute(
             f"""
+            {cte_sql}
             SELECT
-                listings.listing_id,
-                listings.canonical_url,
-                listings.source_url,
-                listings.title,
-                listings.brand,
-                listings.size_label,
-                listings.condition_label,
-                listings.price_amount_cents,
-                listings.price_currency,
-                listings.total_price_amount_cents,
-                listings.total_price_currency,
-                listings.image_url,
-                listings.favourite_count,
-                listings.view_count,
-                listings.user_id,
-                listings.user_login,
-                listings.user_profile_url,
-                listings.created_at_ts,
-                listings.first_discovered_at,
-                listings.last_discovered_at,
-                roots.title AS root_title,
-                listings.primary_catalog_id,
-                COALESCE(primary_catalog.path, COALESCE(roots.title, 'Unknown')) AS primary_catalog_path
-            FROM listings
-            LEFT JOIN catalogs AS roots ON roots.catalog_id = listings.primary_root_catalog_id
-            LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
+                listing_id,
+                canonical_url,
+                source_url,
+                title,
+                brand,
+                size_label,
+                condition_label,
+                price_amount_cents,
+                price_currency,
+                total_price_amount_cents,
+                total_price_currency,
+                image_url,
+                favourite_count,
+                view_count,
+                user_id,
+                user_login,
+                user_profile_url,
+                created_at_ts,
+                observation_count,
+                total_sightings,
+                first_seen_at,
+                last_seen_at,
+                average_revisit_hours,
+                latest_probe_at,
+                latest_probe_response_status,
+                latest_probe_outcome,
+                latest_probe_error_message,
+                last_seen_age_hours,
+                freshness_bucket,
+                signal_completeness,
+                root_title,
+                primary_catalog_id,
+                category_path AS primary_catalog_path,
+                price_band_code,
+                price_band_label,
+                state_code,
+                state_label,
+                basis_kind,
+                confidence_label,
+                confidence_score,
+                sold_like,
+                follow_up_miss_count,
+                partial_signal,
+                thin_signal,
+                has_estimated_publication
+            FROM classified
             {where_sql}
             ORDER BY {order_by}
             LIMIT ? OFFSET ?
             """,
-            [*params, bounded_page_size, offset],
+            [*cte_params, *where_params, bounded_page_size, offset],
         ).fetchall()
 
-        page_listing_ids = [int(row["listing_id"]) for row in rows]
-        summaries_by_listing_id: dict[int, dict[str, object]] = {}
-        probes_by_listing_id: dict[int, dict[str, object]] = {}
-        if page_listing_ids:
-            placeholders = ", ".join("?" for _ in page_listing_ids)
-            summary_rows = self.connection.execute(
-                f"""
-                WITH ordered_observations AS (
-                    SELECT
-                        listing_observations.listing_id,
-                        listing_observations.observed_at,
-                        listing_observations.sighting_count,
-                        LAG(listing_observations.observed_at) OVER (
-                            PARTITION BY listing_observations.listing_id
-                            ORDER BY listing_observations.observed_at
-                        ) AS previous_observed_at
-                    FROM listing_observations
-                    WHERE listing_observations.listing_id IN ({placeholders})
-                )
-                SELECT
-                    ordered_observations.listing_id,
-                    COUNT(*) AS observation_count,
-                    SUM(ordered_observations.sighting_count) AS total_sightings,
-                    MIN(ordered_observations.observed_at) AS first_seen_at,
-                    MAX(ordered_observations.observed_at) AS last_seen_at,
-                    AVG(CASE
-                        WHEN ordered_observations.previous_observed_at IS NULL THEN NULL
-                        ELSE (julianday(ordered_observations.observed_at) - julianday(ordered_observations.previous_observed_at)) * 24.0
-                    END) AS average_revisit_hours
-                FROM ordered_observations
-                GROUP BY ordered_observations.listing_id
-                """,
-                page_listing_ids,
-            ).fetchall()
-            summaries_by_listing_id = {
-                int(row["listing_id"]): dict(row)
-                for row in summary_rows
-            }
-
-            probe_rows = self.connection.execute(
-                f"""
-                SELECT
-                    ranked.listing_id,
-                    ranked.probed_at,
-                    ranked.response_status,
-                    ranked.probe_outcome
-                FROM (
-                    SELECT
-                        item_page_probes.listing_id,
-                        item_page_probes.probed_at,
-                        item_page_probes.response_status,
-                        item_page_probes.probe_outcome,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY item_page_probes.listing_id
-                            ORDER BY item_page_probes.probed_at DESC, item_page_probes.probe_id DESC
-                        ) AS probe_rank
-                    FROM item_page_probes
-                    WHERE item_page_probes.listing_id IN ({placeholders})
-                ) AS ranked
-                WHERE ranked.probe_rank = 1
-                """,
-                page_listing_ids,
-            ).fetchall()
-            probes_by_listing_id = {
-                int(row["listing_id"]): dict(row)
-                for row in probe_rows
-            }
-
-        items: list[dict[str, object]] = []
-        for row in rows:
-            item = dict(row)
-            listing_id = int(item["listing_id"])
-            summary = summaries_by_listing_id.get(listing_id, {})
-            latest_probe = probes_by_listing_id.get(listing_id, {})
-            item["observation_count"] = int(summary.get("observation_count") or 0)
-            item["total_sightings"] = int(summary.get("total_sightings") or 0)
-            item["first_seen_at"] = summary.get("first_seen_at") or item.get("first_discovered_at")
-            item["last_seen_at"] = summary.get("last_seen_at") or item.get("last_discovered_at")
-            item["average_revisit_hours"] = (
-                None
-                if summary.get("average_revisit_hours") is None
-                else round(float(summary["average_revisit_hours"]), 2)
-            )
-            item["latest_probe_at"] = latest_probe.get("probed_at")
-            item["latest_probe_response_status"] = latest_probe.get("response_status")
-            item["latest_probe_outcome"] = latest_probe.get("probe_outcome")
-            age_hours = _hours_between(str(item["last_seen_at"]), now_dt)
-            item["last_seen_age_hours"] = round(age_hours, 2)
-            item["freshness_bucket"] = _freshness_bucket(int(item["observation_count"]), age_hours)
-            item["signal_completeness"] = _signal_completeness(item)
-            items.append(item)
-
+        items = [dict(row) for row in rows]
         total_pages = 0 if total_listings == 0 else ((total_listings - 1) // bounded_page_size) + 1
         return {
             "page": bounded_page,
@@ -1196,6 +1363,199 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "sort": sort_key,
             "items": items,
         }
+
+    def _explorer_comparison_module(
+        self,
+        *,
+        cte_sql: str,
+        cte_params: list[object],
+        where_sql: str,
+        where_params: list[object],
+        lens: str,
+        title: str,
+        value_expression: str,
+        label_expression: str,
+        extra_select: str,
+        order_by: str,
+        limit: int,
+        support_threshold: int,
+    ) -> dict[str, object]:
+        rows = self.connection.execute(
+            f"""
+            {cte_sql},
+            filtered AS (
+                SELECT *
+                FROM classified
+                {where_sql}
+            )
+            SELECT
+                {value_expression} AS lens_value,
+                {label_expression} AS lens_label{extra_select},
+                COUNT(*) AS support_count,
+                ROUND(COUNT(*) * 1.0 / NULLIF(totals.tracked_listings, 0), 3) AS support_share,
+                ROUND(AVG(CAST(price_amount_cents AS REAL)), 2) AS average_price_amount_cents,
+                SUM(CASE WHEN state_code = 'active' THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE WHEN state_code = 'sold_observed' THEN 1 ELSE 0 END) AS sold_observed_count,
+                SUM(CASE WHEN state_code = 'sold_probable' THEN 1 ELSE 0 END) AS sold_probable_count,
+                SUM(CASE WHEN state_code = 'unavailable_non_conclusive' THEN 1 ELSE 0 END) AS unavailable_non_conclusive_count,
+                SUM(CASE WHEN state_code = 'deleted' THEN 1 ELSE 0 END) AS deleted_count,
+                SUM(CASE WHEN state_code = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
+                SUM(sold_like) AS sold_like_count,
+                ROUND(SUM(sold_like) * 1.0 / COUNT(*), 3) AS sold_like_rate,
+                SUM(CASE WHEN basis_kind = 'observed' THEN 1 ELSE 0 END) AS observed_state_count,
+                SUM(CASE WHEN basis_kind = 'inferred' THEN 1 ELSE 0 END) AS inferred_state_count,
+                SUM(CASE WHEN basis_kind = 'unknown' THEN 1 ELSE 0 END) AS unknown_state_count,
+                SUM(partial_signal) AS partial_signal_count,
+                SUM(thin_signal) AS thin_signal_count,
+                SUM(has_estimated_publication) AS estimated_publication_count,
+                SUM(CASE WHEN has_estimated_publication = 0 THEN 1 ELSE 0 END) AS missing_estimated_publication_count
+            FROM filtered
+            CROSS JOIN (SELECT COUNT(*) AS tracked_listings FROM filtered) AS totals
+            GROUP BY {value_expression}, {label_expression}
+            ORDER BY {order_by}
+            LIMIT ?
+            """,
+            [*cte_params, *where_params, max(int(limit), 1)],
+        ).fetchall()
+
+        items: list[dict[str, object]] = []
+        for row in rows:
+            hydrated = dict(row)
+            lens_value = hydrated.get("lens_value")
+            support_count = int(hydrated.get("support_count") or 0)
+            if lens == "category" and hydrated.get("catalog_id") is not None:
+                filters: dict[str, object] = {"catalog_id": int(hydrated["catalog_id"])}
+            elif lens == "sold_state":
+                filters = {"state": str(lens_value)}
+            elif lens == "brand":
+                filters = {"brand": str(lens_value)}
+            elif lens == "condition":
+                filters = {"condition": str(lens_value)}
+            elif lens == "price_band":
+                filters = {"price_band": str(lens_value)}
+            elif hydrated.get("root_title"):
+                filters = {"root": str(hydrated["root_title"])}
+            else:
+                filters = {lens: str(lens_value)}
+
+            items.append(
+                {
+                    "label": hydrated.get("lens_label"),
+                    "value": lens_value,
+                    "drilldown": {
+                        "lens": lens,
+                        "value": lens_value,
+                        "filters": filters,
+                    },
+                    "inventory": {
+                        "support_count": support_count,
+                        "support_share": float(hydrated.get("support_share") or 0.0),
+                        "average_price_amount_cents": None
+                        if hydrated.get("average_price_amount_cents") is None
+                        else round(float(hydrated["average_price_amount_cents"]), 2),
+                        "sold_like_count": int(hydrated.get("sold_like_count") or 0),
+                        "sold_like_rate": float(hydrated.get("sold_like_rate") or 0.0),
+                        "state_counts": {
+                            state_code: int(hydrated.get(f"{state_code}_count") or 0)
+                            for state_code in STATE_ORDER
+                        },
+                    },
+                    "honesty": {
+                        "low_support": support_count < support_threshold,
+                        "support_threshold": support_threshold,
+                        "observed_state_count": int(hydrated.get("observed_state_count") or 0),
+                        "inferred_state_count": int(hydrated.get("inferred_state_count") or 0),
+                        "unknown_state_count": int(hydrated.get("unknown_state_count") or 0),
+                        "partial_signal_count": int(hydrated.get("partial_signal_count") or 0),
+                        "thin_signal_count": int(hydrated.get("thin_signal_count") or 0),
+                        "estimated_publication_count": int(hydrated.get("estimated_publication_count") or 0),
+                        "missing_estimated_publication_count": int(hydrated.get("missing_estimated_publication_count") or 0),
+                    },
+                }
+            )
+
+        supported_rows = sum(1 for item in items if not bool(item["honesty"]["low_support"]))
+        if not items:
+            status = "empty"
+            reason = "No tracked listings are available for this comparison lens yet."
+        elif supported_rows == 0:
+            status = "thin-support"
+            reason = f"No lens value reaches the minimum support threshold of {support_threshold} tracked listings."
+        else:
+            status = "ok"
+            reason = None
+
+        return {
+            "lens": lens,
+            "title": title,
+            "support_threshold": support_threshold,
+            "status": status,
+            "reason": reason,
+            "total_rows": len(items),
+            "supported_rows": supported_rows,
+            "thin_support_rows": len(items) - supported_rows,
+            "rows": items,
+        }
+
+    def _explorer_filter_sql(
+        self,
+        *,
+        root: str | None = None,
+        catalog_id: int | None = None,
+        brand: str | None = None,
+        condition: str | None = None,
+        state: str | None = None,
+        price_band: str | None = None,
+        query: str | None = None,
+    ) -> tuple[str, list[object]]:
+        where_clauses: list[str] = []
+        params: list[object] = []
+        if root:
+            where_clauses.append("root_title = ?")
+            params.append(root)
+        if catalog_id is not None:
+            where_clauses.append("primary_catalog_id = ?")
+            params.append(catalog_id)
+        if brand:
+            where_clauses.append("COALESCE(brand, 'unknown-brand') = ?")
+            params.append(brand)
+        if condition:
+            where_clauses.append("COALESCE(condition_label, 'unknown-condition') = ?")
+            params.append(condition)
+        if state:
+            where_clauses.append("state_code = ?")
+            params.append(state)
+        if price_band:
+            where_clauses.append("price_band_code = ?")
+            params.append(price_band)
+        cleaned_query = _clean_query_text(query)
+        if cleaned_query:
+            like_query = f"%{cleaned_query}%"
+            where_clauses.append(
+                "("
+                "CAST(listing_id AS TEXT) LIKE ? "
+                "OR LOWER(COALESCE(title, '')) LIKE ? "
+                "OR LOWER(COALESCE(brand, '')) LIKE ? "
+                "OR LOWER(COALESCE(category_path, '')) LIKE ? "
+                "OR LOWER(COALESCE(user_login, '')) LIKE ?"
+                ")"
+            )
+            params.extend([like_query, like_query, like_query, like_query, like_query])
+        if not where_clauses:
+            return "", params
+        return "WHERE " + " AND ".join(where_clauses), params
+
+    def _explorer_sort_clause(self, sort: str) -> tuple[str, str]:
+        sort_map = {
+            "last_seen_desc": "last_seen_at DESC, listing_id DESC",
+            "price_desc": "price_amount_cents IS NULL, price_amount_cents DESC, last_seen_at DESC, listing_id DESC",
+            "price_asc": "price_amount_cents IS NULL, price_amount_cents ASC, last_seen_at DESC, listing_id DESC",
+            "favourite_desc": "favourite_count IS NULL, favourite_count DESC, last_seen_at DESC, listing_id DESC",
+            "view_desc": "view_count IS NULL, view_count DESC, last_seen_at DESC, listing_id DESC",
+            "created_at_desc": "created_at_ts IS NULL, created_at_ts DESC, last_seen_at DESC, listing_id DESC",
+            "first_seen_desc": "first_seen_at DESC, listing_id DESC",
+        }
+        return sort_map.get(sort, sort_map["last_seen_desc"]), sort if sort in sort_map else "last_seen_desc"
 
     def freshness_summary(self, *, now: str | None = None) -> dict[str, object]:
         summaries = self.listing_history_summaries(now=now)
@@ -1869,6 +2229,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         snapshot AS (
             SELECT
                 observation_summary.listing_id,
+                listings.canonical_url,
+                listings.source_url,
                 listings.primary_catalog_id,
                 listings.primary_root_catalog_id,
                 COALESCE(roots.title, 'Unknown') AS root_title,
@@ -1882,6 +2244,11 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 listings.total_price_amount_cents,
                 listings.total_price_currency,
                 listings.image_url,
+                listings.favourite_count,
+                listings.view_count,
+                listings.user_id,
+                listings.user_login,
+                listings.user_profile_url,
                 listings.created_at_ts,
                 observation_summary.observation_count,
                 observation_summary.total_sightings,

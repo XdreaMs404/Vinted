@@ -79,7 +79,7 @@ This milestone is complete only when all are true:
 - [x] **S03: Responsive French Product Shell + VPS Serving Path** `risk:high` `depends:[S01,S02]`
   > After this: the live radar is served through a production-style VPS path and opens as a coherent French-first responsive product on phone and desktop, with clear navigation across overview, explorer, detail, and runtime.
 
-- [ ] **S04: Full Explorer + Comparative Intelligence** `risk:high` `depends:[S01,S03]`
+- [x] **S04: Full Explorer + Comparative Intelligence** `risk:high` `depends:[S01,S03]`
   > After this: a user can explore the real tracked corpus with server-side filters, sorts, paging, and comparison modules across category, brand, price band, condition, and sold state without leaving the live product.
 
 - [ ] **S05: Listing Detail Narrative + Progressive Proof** `risk:medium` `depends:[S01,S03,S04]`

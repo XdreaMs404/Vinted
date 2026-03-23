@@ -80,6 +80,32 @@ This keeps the radar alive locally and serves the French market overview home fr
 - JSON listing detail payload: `http://127.0.0.1:8765/api/listings/<id>`
 - Health check: `http://127.0.0.1:8765/health`
 
+## Explorer workflow
+
+The explorer is now the main browse-and-compare workspace over the tracked corpus.
+
+Supported query parameters:
+
+- `root`
+- `catalog_id`
+- `brand`
+- `condition`
+- `state`
+- `price_band`
+- `q`
+- `sort`
+- `page`
+- `page_size`
+
+Comparison modules on `/explorer` are scoped to the currently filtered slice and keep low-support rows visible with explicit caution badges instead of hiding them.
+
+Opening a listing from `/explorer` preserves the current explorer query state on `/listings/<id>` and `/api/listings/<id>`, so the detail route can offer a direct return to the same analytical view.
+
+Example explorer URLs:
+
+- active high-price women slice: `http://127.0.0.1:8765/explorer?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=24`
+- drill into one category/brand slice from the current explorer state: `http://127.0.0.1:8765/explorer?root=Femmes&brand=Maje&q=robe&sort=view_desc&page_size=24`
+
 ## Proxy / VPS serving contract
 
 Use `--base-path` when the product sits behind a reverse-proxy path prefix, and use `--public-base-url` when CLI output and operator docs should advertise the external URL rather than the bind address.

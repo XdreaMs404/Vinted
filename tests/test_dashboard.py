@@ -10,6 +10,7 @@ from vinted_radar.dashboard import (
     ExplorerFilters,
     build_dashboard_payload,
     build_explorer_payload,
+    build_listing_detail_payload,
     build_runtime_payload,
 )
 from vinted_radar.repository import RadarRepository
@@ -187,17 +188,19 @@ def test_explorer_payload_pages_tracked_listings_from_sql(tmp_path: Path) -> Non
         )
 
     assert payload["results"]["total_listings"] == 4
+    assert payload["summary"]["inventory"]["matched_listings"] == 4
     assert payload["results"]["page"] == 1
     assert payload["results"]["page_size"] == 2
     assert payload["results"]["has_next_page"] is True
     assert len(payload["items"]) == 2
     assert [item["listing_id"] for item in payload["items"]] == [9003, 9001]
+    assert payload["comparisons"]["brand"]["status"] == "thin-support"
     assert payload["items"][0]["freshness_bucket"] == "first-pass-only"
     assert payload["items"][1]["freshness_bucket"] == "fresh-followup"
     assert payload["items"][0]["visible_likes_display"] == "41"
     assert payload["items"][0]["seller_display"] == "claire"
     assert payload["items"][0]["estimated_publication_at"] == "2024-03-23T10:00:00+00:00"
-    assert payload["items"][0]["detail_href"] == "/listings/9003"
+    assert payload["items"][0]["detail_href"] == "/listings/9003?root=Femmes&q=robe&page_size=2"
     assert payload["filters"]["available"]["catalogs"][1]["catalog_id"] == 2001
     assert payload["filters"]["available"]["brands"][1]["value"] == "Maje"
 
@@ -226,6 +229,41 @@ def test_explorer_payload_applies_sql_brand_condition_and_sort_filters(tmp_path:
     assert payload["items"][0]["seller_display"] == "alice"
     assert payload["items"][0]["visible_views_display"] == "120"
     assert payload["notes"]["estimated_publication"].startswith("La publication estimée")
+
+
+
+def test_explorer_payload_preserves_current_slice_in_comparison_links(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        payload = build_explorer_payload(
+            repository,
+            filters=ExplorerFilters(root="Femmes", query="robe", sort="view_desc", page_size=2),
+            now="2026-03-19T12:00:00+00:00",
+        )
+
+    brand_row = payload["comparisons"]["brand"]["rows"][0]
+    assert brand_row["drilldown"]["href"] == "/explorer?root=Femmes&q=robe&sort=view_desc&page_size=2&brand=Maje"
+
+
+
+def test_listing_detail_payload_exposes_back_link_for_explorer_context(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    with RadarRepository(db_path) as repository:
+        payload = build_listing_detail_payload(
+            repository,
+            listing_id=9001,
+            now="2026-03-19T12:00:00+00:00",
+            explorer_filters=ExplorerFilters(root="Femmes", brand="Zara", page=2, page_size=12),
+        )
+
+    assert payload is not None
+    assert payload["explorer_context"]["back_href"] == "/explorer?root=Femmes&brand=Zara&page=2&page_size=12"
+    assert payload["explorer_context"]["summary"].startswith("Vue active —")
+    assert payload["diagnostics"]["explorer_back"] == "/explorer?root=Femmes&brand=Zara&page=2&page_size=12"
 
 
 
@@ -285,6 +323,7 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     explorer_text = explorer_body.decode("utf-8")
     assert "Navigation principale du produit" in explorer_text
     assert "Filtres d’exploration" in explorer_text
+    assert "Comparer la tranche affichée" in explorer_text
     assert "Annonces du corpus" in explorer_text
     assert "JSON explorateur" in explorer_text
     assert "class=\"explorer-item\"" in explorer_text
@@ -294,12 +333,13 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert explorer_api_headers["Content-Type"].startswith("application/json")
     explorer_payload = json.loads(explorer_api_body)
     assert explorer_payload["results"]["total_listings"] == 4
+    assert explorer_payload["summary"]["inventory"]["matched_listings"] == 4
     assert explorer_payload["results"]["page_size"] == 2
     assert explorer_payload["results"]["sort"] == "favourite_desc"
     assert len(explorer_payload["items"]) == 2
     assert [item["listing_id"] for item in explorer_payload["items"]] == [9003, 9001]
     assert explorer_payload["items"][0]["visible_likes_display"] == "41"
-    assert explorer_payload["items"][0]["detail_api"] == "/api/listings/9003"
+    assert explorer_payload["items"][0]["detail_api"] == "/api/listings/9003?q=robe&sort=favourite_desc&page_size=2"
 
     assert runtime_page_status == "200 OK"
     assert runtime_page_headers["Content-Type"].startswith("text/html")
@@ -369,7 +409,7 @@ def test_dashboard_application_supports_base_path_links_and_prefixed_routes(tmp_
     assert dashboard_payload["diagnostics"]["home"] == "/radar/"
     assert dashboard_payload["featured_listings"][0]["detail_href"] == "/radar/listings/9003"
     assert explorer_payload["diagnostics"]["explorer"] == "/radar/explorer"
-    assert explorer_payload["items"][0]["detail_api"] == "/radar/api/listings/9003"
+    assert explorer_payload["items"][0]["detail_api"] == "/radar/api/listings/9003?page_size=2"
     assert runtime_payload["diagnostics"]["runtime"] == "/radar/runtime"
 
     app = DashboardApplication(
