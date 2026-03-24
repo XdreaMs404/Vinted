@@ -39,6 +39,8 @@ class RadarRuntimeOptions:
             "max_price": self.max_price,
             "target_catalogs": list(self.target_catalogs),
             "target_brands": list(self.target_brands),
+            "transport_mode": "proxy-pool" if self.proxies else "direct",
+            "proxy_pool_size": len(self.proxies),
         }
 
 

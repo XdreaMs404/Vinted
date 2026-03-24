@@ -131,6 +131,63 @@ def test_batch_cli_reports_runtime_cycle_and_serves_dashboard(monkeypatch, tmp_p
     }
 
 
+def test_batch_cli_defaults_to_bounded_price_filter(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRuntimeService:
+        def __init__(self, db_path: Path) -> None:
+            captured["db_path"] = db_path
+
+        def run_cycle(self, options, *, mode: str):
+            captured["options"] = options
+            captured["mode"] = mode
+            return RadarRuntimeCycleReport(
+                cycle_id="cycle-default-batch",
+                mode="batch",
+                status="completed",
+                phase="completed",
+                started_at="2026-03-20T10:00:00+00:00",
+                finished_at="2026-03-20T10:01:00+00:00",
+                discovery_run_id="run-default-batch",
+                state_probed_count=0,
+                tracked_listings=0,
+                freshness_counts={
+                    "first-pass-only": 0,
+                    "fresh-followup": 0,
+                    "aging-followup": 0,
+                    "stale-followup": 0,
+                },
+                last_error=None,
+                config={"state_refresh_limit": 10},
+                state_refresh_summary=None,
+            )
+
+    monkeypatch.setattr("vinted_radar.cli.RadarRuntimeService", FakeRuntimeService)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "batch",
+            "--db",
+            str(tmp_path / "runtime.db"),
+            "--page-limit",
+            "1",
+            "--max-leaf-categories",
+            "1",
+            "--request-delay",
+            "0.0",
+            "--timeout-seconds",
+            "5.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["mode"] == "batch"
+    assert captured["options"].min_price == 30.0
+    assert captured["options"].max_price == 0.0
+
+
 def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {"stopped": False}
 
@@ -255,6 +312,45 @@ def test_continuous_cli_starts_dashboard_and_prints_each_cycle(monkeypatch, tmp_
     assert captured["stopped"] is True
 
 
+def test_continuous_cli_defaults_to_bounded_price_filter(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRuntimeService:
+        def __init__(self, db_path: Path) -> None:
+            captured["db_path"] = db_path
+
+        def run_continuous(self, options, *, interval_seconds: float, max_cycles: int | None, continue_on_error: bool, on_cycle_complete):
+            captured["options"] = options
+            captured["interval_seconds"] = interval_seconds
+            captured["max_cycles"] = max_cycles
+            captured["continue_on_error"] = continue_on_error
+            return []
+
+    monkeypatch.setattr("vinted_radar.cli.RadarRuntimeService", FakeRuntimeService)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "continuous",
+            "--db",
+            str(tmp_path / "runtime.db"),
+            "--interval-seconds",
+            "1",
+            "--max-cycles",
+            "1",
+            "--request-delay",
+            "0.0",
+            "--timeout-seconds",
+            "5.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["options"].min_price == 30.0
+    assert captured["options"].max_price == 0.0
+
+
 def test_runtime_status_cli_emits_json_payload(tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     with RadarRepository(db_path) as repository:
@@ -372,6 +468,8 @@ def test_state_refresh_cli_accepts_proxy_pool_and_emits_probe_summary(monkeypatc
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
+    assert payload["transport"]["mode"] == "proxy-pool"
+    assert payload["transport"]["proxy_pool_size"] == 2
     assert payload["probe_summary"]["status"] == "degraded"
     assert payload["probe_summary"]["anti_bot_challenge_count"] == 1
     assert captured["factory"] == {
@@ -382,6 +480,130 @@ def test_state_refresh_cli_accepts_proxy_pool_and_emits_probe_summary(monkeypatc
     }
     assert captured["refresh"] == {"limit": 1, "listing_id": None, "now": None}
     assert captured["repository_closed"] is True
+
+
+
+def test_state_refresh_cli_loads_proxy_file(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    proxy_file = tmp_path / "proxies.txt"
+    proxy_file.write_text(
+        "\n".join(
+            [
+                "45.39.4.37:5462:alice:secret",
+                "216.173.80.190:6447:bob:token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeRepository:
+        def close(self) -> None:
+            return None
+
+    class FakeStateRefreshService:
+        def __init__(self) -> None:
+            self.repository = FakeRepository()
+
+        def refresh(self, *, limit: int = 10, listing_id: int | None = None, now: str | None = None) -> StateRefreshReport:
+            return StateRefreshReport(
+                probed_count=0,
+                probed_listing_ids=[],
+                probe_summary={},
+                state_summary={"generated_at": now or "2026-03-23T10:00:00+00:00", "overall": {"tracked_listings": 0}, "by_root": []},
+            )
+
+    def fake_factory(*, db_path: str, timeout_seconds: float, request_delay: float, proxies=None):
+        captured["proxies"] = proxies
+        return FakeStateRefreshService()
+
+    monkeypatch.setattr("vinted_radar.cli.build_default_state_refresh_service", fake_factory)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "state-refresh",
+            "--db",
+            str(tmp_path / "runtime.db"),
+            "--request-delay",
+            "0.0",
+            "--timeout-seconds",
+            "5.0",
+            "--proxy-file",
+            str(proxy_file),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["transport"]["proxy_pool_size"] == 2
+    assert captured["proxies"] == [
+        "http://alice:secret@45.39.4.37:5462",
+        "http://bob:token@216.173.80.190:6447",
+    ]
+
+
+
+def test_proxy_preflight_cli_emits_safe_json_summary(monkeypatch, tmp_path: Path) -> None:
+    proxy_file = tmp_path / "proxies.txt"
+    proxy_file.write_text("45.39.4.37:5462:alice:secret\n216.173.80.190:6447:bob:token\n", encoding="utf-8")
+
+    async def fake_preflight(*, proxies: tuple[str, ...], sample_size: int, timeout_seconds: float):
+        assert proxies == (
+            "http://alice:secret@45.39.4.37:5462",
+            "http://bob:token@216.173.80.190:6447",
+        )
+        assert sample_size == 2
+        assert timeout_seconds == 5.0
+        return {
+            "summary": {
+                "configured_proxy_count": 2,
+                "sampled_routes": 2,
+                "successful_routes": 2,
+                "failed_routes": 0,
+                "unique_exit_ip_count": 2,
+                "vinted_success_count": 2,
+                "vinted_challenge_count": 0,
+            },
+            "routes": [
+                {
+                    "route": "http://***@45.39.4.37:5462",
+                    "exit_ip": "45.39.4.37",
+                    "ip_echo_status": 200,
+                    "vinted_status": 200,
+                    "challenge_suspected": False,
+                    "vinted_ok": True,
+                    "ok": True,
+                    "error": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr("vinted_radar.cli._run_proxy_preflight", fake_preflight)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "proxy-preflight",
+            "--proxy-file",
+            str(proxy_file),
+            "--sample-size",
+            "2",
+            "--timeout-seconds",
+            "5.0",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["unique_exit_ip_count"] == 2
+    assert payload["routes"][0]["route"] == "http://***@45.39.4.37:5462"
+    assert "alice:secret" not in result.stdout
 
 
 

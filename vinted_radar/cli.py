@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import sqlite3
@@ -9,6 +10,9 @@ import typer
 
 from vinted_radar.dashboard import serve_dashboard, start_dashboard_server
 from vinted_radar.db_health import inspect_sqlite_database
+from vinted_radar.http import VintedHttpClient
+from vinted_radar.long_run_audit import build_long_run_audit_report, render_long_run_audit_markdown
+from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
@@ -19,6 +23,29 @@ from vinted_radar.state_machine import evaluate_listing_state, summarize_state_e
 
 app = typer.Typer(add_completion=False, help="Local-first Vinted Homme/Femme radar CLI.")
 
+_AUTO_PROXY_CONCURRENCY_CAP = 24
+_PROXY_PREFLIGHT_IP_ECHO_URL = "https://api.ipify.org?format=json"
+_PROXY_PREFLIGHT_VINTED_URL = "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1439&page=1&per_page=1"
+
+
+def _resolve_cli_proxies(*, proxy: list[str] | None, proxy_file: Path | None) -> tuple[str, ...]:
+    return tuple(resolve_proxy_pool(inline=proxy, proxy_file=proxy_file))
+
+
+def _resolve_cli_concurrency(concurrency: int | None, *, proxies: tuple[str, ...]) -> int:
+    if concurrency is not None:
+        return concurrency
+    if proxies:
+        return max(1, min(len(proxies), _AUTO_PROXY_CONCURRENCY_CAP))
+    return 1
+
+
+def _render_transport_summary(*, proxies: tuple[str, ...], concurrency: int | None = None) -> str:
+    if not proxies:
+        return "Transport: direct"
+    resolved_concurrency = _resolve_cli_concurrency(concurrency, proxies=proxies)
+    return f"Transport: proxy-pool ({len(proxies)} routes, concurrency {resolved_concurrency})"
+
 
 @app.command()
 def discover(
@@ -26,13 +53,17 @@ def discover(
     page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in the run."),
     root_scope: str = typer.Option("both", "--root-scope", help="Which root catalogs to scan: both, women, or men."),
+    min_price: float = typer.Option(30.0, "--min-price", min=0.0, help="Minimum listing price in euros. Defaults to 30.0; use 0 to force an explicit unbounded debug or benchmark run."),
+    max_price: float = typer.Option(0.0, "--max-price", min=0.0, help="Maximum listing price in euros. Defaults to 0.0, which keeps the upper bound disabled."),
     request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
-    concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
-    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
+    concurrency: int | None = typer.Option(None, "--concurrency", min=1, help="Max requests in flight across all catalogs. Defaults to 1 in direct mode and auto-scales up to 24 when a proxy pool is configured."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy entry. Accepts either http://user:pass@host:port or host:port:user:pass. Repeatable for pool."),
+    proxy_file: Path | None = typer.Option(None, "--proxy-file", help="Optional local proxy list file. If omitted, commands auto-load data/proxies.txt when it exists."),
 ) -> None:
-    proxies = list(proxy) if proxy else None
-    service = build_default_service(db_path=str(db), timeout_seconds=timeout_seconds, request_delay=request_delay, proxies=proxies)
+    proxies = _resolve_cli_proxies(proxy=proxy, proxy_file=proxy_file)
+    resolved_concurrency = _resolve_cli_concurrency(concurrency, proxies=proxies)
+    service = build_default_service(db_path=str(db), timeout_seconds=timeout_seconds, request_delay=request_delay, proxies=list(proxies) or None)
     try:
         report = service.run(
             DiscoveryOptions(
@@ -40,13 +71,16 @@ def discover(
                 max_leaf_categories=max_leaf_categories,
                 root_scope=root_scope,
                 request_delay=request_delay,
-                concurrency=concurrency,
+                concurrency=resolved_concurrency,
+                min_price=min_price,
+                max_price=max_price,
             )
         )
     finally:
         service.repository.close()
 
     typer.echo(f"Run: {report.run_id}")
+    typer.echo(_render_transport_summary(proxies=proxies, concurrency=resolved_concurrency))
     typer.echo(f"Seeds synced: {report.total_seed_catalogs} catalogs ({report.total_leaf_catalogs} leaf catalogs)")
     typer.echo(f"Leaf catalogs scanned: {report.scanned_leaf_catalogs}")
     typer.echo(f"Page scans: {report.successful_scans} successful, {report.failed_scans} failed")
@@ -60,22 +94,24 @@ def batch_run(
     page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in the batch cycle."),
     root_scope: str = typer.Option("both", "--root-scope", help="Which root catalogs to scan: both, women, or men."),
-    min_price: float = typer.Option(30.0, "--min-price", min=0.0, help="Minimum listing price in euros."),
-    max_price: float = typer.Option(0.0, "--max-price", min=0.0, help="Maximum listing price in euros. 0 disables the upper bound."),
+    min_price: float = typer.Option(30.0, "--min-price", min=0.0, help="Minimum listing price in euros. Defaults to 30.0; use 0 to force an explicit unbounded debug or benchmark run."),
+    max_price: float = typer.Option(0.0, "--max-price", min=0.0, help="Maximum listing price in euros. Defaults to 0.0, which keeps the upper bound disabled."),
     target_catalogs: list[int] | None = typer.Option(None, "--target-catalogs", help="Catalog ID to scan. Repeatable."),
     target_brands: list[str] | None = typer.Option(None, "--target-brands", help="Brand name to allow. Repeatable."),
     state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after discovery."),
     request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
-    concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
-    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
+    concurrency: int | None = typer.Option(None, "--concurrency", min=1, help="Max requests in flight across all catalogs. Defaults to 1 in direct mode and auto-scales up to 24 when a proxy pool is configured."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy entry. Accepts either http://user:pass@host:port or host:port:user:pass. Repeatable for pool."),
+    proxy_file: Path | None = typer.Option(None, "--proxy-file", help="Optional local proxy list file. If omitted, commands auto-load data/proxies.txt when it exists."),
     dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard after the batch cycle completes."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
     base_path: str = typer.Option("", "--base-path", help="Optional route prefix when the dashboard is mounted behind a reverse proxy (example: /radar)."),
     public_base_url: str | None = typer.Option(None, "--public-base-url", help="Optional external base URL prefix advertised to operators and used for absolute dashboard links (example: https://radar.example.com/radar)."),
 ) -> None:
-    proxies = tuple(proxy) if proxy else ()
+    proxies = _resolve_cli_proxies(proxy=proxy, proxy_file=proxy_file)
+    resolved_concurrency = _resolve_cli_concurrency(concurrency, proxies=proxies)
     runtime_service = RadarRuntimeService(db)
     options = _build_runtime_options(
         page_limit=page_limit,
@@ -88,7 +124,7 @@ def batch_run(
         state_refresh_limit=state_refresh_limit,
         request_delay=request_delay,
         timeout_seconds=timeout_seconds,
-        concurrency=concurrency,
+        concurrency=resolved_concurrency,
         proxies=proxies,
     )
     try:
@@ -115,8 +151,8 @@ def continuous_run(
     page_limit: int = typer.Option(5, "--page-limit", min=1, help="How many catalog pages to fetch per leaf category."),
     max_leaf_categories: int | None = typer.Option(None, "--max-leaf-categories", min=1, help="Limit the number of leaf categories scanned in each cycle."),
     root_scope: str = typer.Option("both", "--root-scope", help="Which root catalogs to scan: both, women, or men."),
-    min_price: float = typer.Option(30.0, "--min-price", min=0.0, help="Minimum listing price in euros."),
-    max_price: float = typer.Option(0.0, "--max-price", min=0.0, help="Maximum listing price in euros. 0 disables the upper bound."),
+    min_price: float = typer.Option(30.0, "--min-price", min=0.0, help="Minimum listing price in euros. Defaults to 30.0; use 0 to force an explicit unbounded debug or benchmark run."),
+    max_price: float = typer.Option(0.0, "--max-price", min=0.0, help="Maximum listing price in euros. Defaults to 0.0, which keeps the upper bound disabled."),
     target_catalogs: list[int] | None = typer.Option(None, "--target-catalogs", help="Catalog ID to scan. Repeatable."),
     target_brands: list[str] | None = typer.Option(None, "--target-brands", help="Brand name to allow. Repeatable."),
     state_refresh_limit: int = typer.Option(10, "--state-refresh-limit", min=1, help="How many listing item pages to probe after each discovery cycle."),
@@ -124,15 +160,17 @@ def continuous_run(
     max_cycles: int | None = typer.Option(None, "--max-cycles", min=1, help="Optional cycle cap for smoke runs or tests."),
     request_delay: float = typer.Option(3.0, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
-    concurrency: int = typer.Option(1, "--concurrency", min=1, help="Max requests in flight across all catalogs."),
-    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
+    concurrency: int | None = typer.Option(None, "--concurrency", min=1, help="Max requests in flight across all catalogs. Defaults to 1 in direct mode and auto-scales up to 24 when a proxy pool is configured."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy entry. Accepts either http://user:pass@host:port or host:port:user:pass. Repeatable for pool."),
+    proxy_file: Path | None = typer.Option(None, "--proxy-file", help="Optional local proxy list file. If omitted, commands auto-load data/proxies.txt when it exists."),
     dashboard: bool = typer.Option(False, "--dashboard/--no-dashboard", help="Serve the local dashboard alongside the continuous loop."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host interface to bind the local dashboard server when --dashboard is enabled."),
     port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port to bind the local dashboard server when --dashboard is enabled."),
     base_path: str = typer.Option("", "--base-path", help="Optional route prefix when the dashboard is mounted behind a reverse proxy (example: /radar)."),
     public_base_url: str | None = typer.Option(None, "--public-base-url", help="Optional external base URL prefix advertised to operators and used for absolute dashboard links (example: https://radar.example.com/radar)."),
 ) -> None:
-    proxies = tuple(proxy) if proxy else ()
+    proxies = _resolve_cli_proxies(proxy=proxy, proxy_file=proxy_file)
+    resolved_concurrency = _resolve_cli_concurrency(concurrency, proxies=proxies)
     runtime_service = RadarRuntimeService(db)
     options = _build_runtime_options(
         page_limit=page_limit,
@@ -145,7 +183,7 @@ def continuous_run(
         state_refresh_limit=state_refresh_limit,
         request_delay=request_delay,
         timeout_seconds=timeout_seconds,
-        concurrency=concurrency,
+        concurrency=resolved_concurrency,
         proxies=proxies,
     )
     dashboard_server = None
@@ -160,6 +198,7 @@ def continuous_run(
         _echo_dashboard_urls(host=host, port=port, base_path=base_path, public_base_url=public_base_url)
 
     typer.echo(f"Database: {db}")
+    typer.echo(_render_transport_summary(proxies=proxies, concurrency=resolved_concurrency))
     typer.echo(f"Continuous interval: {interval_seconds:.1f}s")
     if max_cycles is not None:
         typer.echo(f"Cycle cap: {max_cycles}")
@@ -176,6 +215,65 @@ def continuous_run(
     finally:
         if dashboard_server is not None:
             dashboard_server.stop()
+
+
+@app.command("proxy-preflight")
+def proxy_preflight(
+    sample_size: int = typer.Option(8, "--sample-size", min=1, help="How many proxy routes to sample from the configured pool."),
+    timeout_seconds: float = typer.Option(10.0, "--timeout-seconds", min=1.0, help="Per-request timeout in seconds for each sampled route."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy entry. Accepts either http://user:pass@host:port or host:port:user:pass. Repeatable for pool."),
+    proxy_file: Path | None = typer.Option(None, "--proxy-file", help="Optional local proxy list file. If omitted, commands auto-load data/proxies.txt when it exists."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    proxies = _resolve_cli_proxies(proxy=proxy, proxy_file=proxy_file)
+    if not proxies:
+        raise typer.BadParameter("No proxy pool is configured. Provide --proxy, --proxy-file, or create data/proxies.txt.")
+
+    report = asyncio.run(
+        _run_proxy_preflight(
+            proxies=proxies,
+            sample_size=sample_size,
+            timeout_seconds=timeout_seconds,
+        )
+    )
+
+    if output_format == "json":
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    summary = dict(report.get("summary") or {})
+    typer.echo(_render_transport_summary(proxies=proxies))
+    typer.echo(
+        "Preflight: sampled {sampled}/{configured} routes | success {success} | failed {failed} | unique exits {unique_exit_ips}".format(
+            sampled=summary.get("sampled_routes") or 0,
+            configured=summary.get("configured_proxy_count") or 0,
+            success=summary.get("successful_routes") or 0,
+            failed=summary.get("failed_routes") or 0,
+            unique_exit_ips=summary.get("unique_exit_ip_count") or 0,
+        )
+    )
+    typer.echo(
+        "Vinted reachability: success {success} | challenge suspects {challenge}".format(
+            success=summary.get("vinted_success_count") or 0,
+            challenge=summary.get("vinted_challenge_count") or 0,
+        )
+    )
+    for route in list(report.get("routes") or []):
+        typer.echo(
+            "- {route}: ip {ip_status}/{exit_ip} | vinted {vinted_status} | ok {ok}".format(
+                route=route.get("route") or "unknown",
+                ip_status=route.get("ip_echo_status") or "n/a",
+                exit_ip=route.get("exit_ip") or "n/a",
+                vinted_status=route.get("vinted_status") or "n/a",
+                ok="yes" if route.get("ok") else "no",
+            )
+        )
+        if route.get("error"):
+            _echo(f"  error: {route['error']}")
+        if route.get("challenge_suspected"):
+            _echo("  note: Vinted challenge suspected on this route")
 
 
 @app.command("runtime-pause")
@@ -315,6 +413,38 @@ def db_health(
         raise typer.BadParameter("--format must be either 'table' or 'json'.")
 
     if not report["healthy"]:
+        raise typer.Exit(code=1)
+
+
+@app.command("audit-long-run")
+def audit_long_run(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    hours: float = typer.Option(12.0, "--hours", min=0.1, help="How many trailing hours to audit."),
+    issue_limit: int = typer.Option(5, "--issue-limit", min=1, help="How many failing catalogs, degraded listings, and failure samples to include."),
+    revisit_limit: int = typer.Option(10, "--revisit-limit", min=1, help="How many revisit candidates to include."),
+    output_format: str = typer.Option("table", "--format", help="table, json, or markdown."),
+    integrity: bool = typer.Option(False, "--integrity/--quick", help="Run full integrity_check before trusting the audit. Recommended on copied VPS snapshots."),
+    now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic audit windows."),
+) -> None:
+    report = build_long_run_audit_report(
+        db,
+        hours=hours,
+        now=now,
+        include_integrity_check=integrity,
+        issue_limit=issue_limit,
+        revisit_limit=revisit_limit,
+    )
+
+    if output_format == "json":
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    elif output_format == "markdown":
+        _echo(render_long_run_audit_markdown(report))
+    elif output_format == "table":
+        _render_long_run_audit_report(report)
+    else:
+        raise typer.BadParameter("--format must be either 'table', 'json', or 'markdown'.")
+
+    if not bool(((report.get("db") or {}).get("health") or {}).get("healthy")):
         raise typer.Exit(code=1)
 
 
@@ -504,15 +634,17 @@ def state_refresh(
     listing_id: int | None = typer.Option(None, "--listing-id", min=1, help="Refresh a specific listing instead of selecting probe candidates."),
     request_delay: float = typer.Option(0.5, "--request-delay", min=0.0, help="Delay between HTTP requests in seconds."),
     timeout_seconds: float = typer.Option(20.0, "--timeout-seconds", min=1.0, help="HTTP timeout per request in seconds."),
-    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy URL (http://user:pass@host:port). Repeatable for pool."),
+    proxy: list[str] | None = typer.Option(None, "--proxy", help="Proxy entry. Accepts either http://user:pass@host:port or host:port:user:pass. Repeatable for pool."),
+    proxy_file: Path | None = typer.Option(None, "--proxy-file", help="Optional local proxy list file. If omitted, commands auto-load data/proxies.txt when it exists."),
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic evaluation."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
 ) -> None:
+    proxies = _resolve_cli_proxies(proxy=proxy, proxy_file=proxy_file)
     service = build_default_state_refresh_service(
         db_path=str(db),
         timeout_seconds=timeout_seconds,
         request_delay=request_delay,
-        proxies=list(proxy) if proxy else None,
+        proxies=list(proxies) or None,
     )
     try:
         report = service.refresh(limit=limit, listing_id=listing_id, now=now)
@@ -523,6 +655,10 @@ def state_refresh(
         typer.echo(
             json.dumps(
                 {
+                    "transport": {
+                        "mode": "proxy-pool" if proxies else "direct",
+                        "proxy_pool_size": len(proxies),
+                    },
                     "probed_count": report.probed_count,
                     "probed_listing_ids": report.probed_listing_ids,
                     "probe_summary": report.probe_summary,
@@ -538,6 +674,7 @@ def state_refresh(
         raise typer.BadParameter("--format must be either 'table' or 'json'.")
 
     typer.echo(f"Database: {db}")
+    typer.echo(_render_transport_summary(proxies=proxies))
     typer.echo(f"Probed listings: {report.probed_count}")
     if report.probed_listing_ids:
         typer.echo(f"Listing IDs: {', '.join(str(item) for item in report.probed_listing_ids)}")
@@ -782,6 +919,128 @@ def _echo_dashboard_urls(
 
 
 
+async def _run_proxy_preflight(
+    *,
+    proxies: tuple[str, ...],
+    sample_size: int,
+    timeout_seconds: float,
+) -> dict[str, object]:
+    selected = list(proxies[:sample_size])
+    results = await asyncio.gather(
+        *(
+            _probe_single_proxy(proxy_url=proxy_url, timeout_seconds=timeout_seconds)
+            for proxy_url in selected
+        )
+    )
+    unique_exit_ips = {
+        str(item.get("exit_ip"))
+        for item in results
+        if item.get("exit_ip")
+    }
+    successful_routes = sum(1 for item in results if item.get("ok"))
+    failed_routes = len(results) - successful_routes
+    vinted_success_count = sum(1 for item in results if item.get("vinted_ok"))
+    vinted_challenge_count = sum(1 for item in results if item.get("challenge_suspected"))
+    return {
+        "summary": {
+            "configured_proxy_count": len(proxies),
+            "sampled_routes": len(results),
+            "successful_routes": successful_routes,
+            "failed_routes": failed_routes,
+            "unique_exit_ip_count": len(unique_exit_ips),
+            "vinted_success_count": vinted_success_count,
+            "vinted_challenge_count": vinted_challenge_count,
+        },
+        "routes": results,
+    }
+
+
+async def _probe_single_proxy(*, proxy_url: str, timeout_seconds: float) -> dict[str, object]:
+    route_label = mask_proxy_url(proxy_url)
+    payload: dict[str, object] = {
+        "route": route_label,
+        "exit_ip": None,
+        "ip_echo_status": None,
+        "vinted_status": None,
+        "challenge_suspected": False,
+        "vinted_ok": False,
+        "ok": False,
+        "error": None,
+    }
+    client = VintedHttpClient(
+        proxies=[proxy_url],
+        request_delay=0.0,
+        timeout_seconds=timeout_seconds,
+        max_retries=1,
+    )
+    try:
+        ip_response = await client.get_text_async(_PROXY_PREFLIGHT_IP_ECHO_URL)
+        payload["ip_echo_status"] = ip_response.status_code
+        if ip_response.status_code < 400:
+            payload["exit_ip"] = _extract_exit_ip(ip_response.text)
+
+        vinted_response = await client.get_text_async(_PROXY_PREFLIGHT_VINTED_URL)
+        challenge_suspected = _response_looks_like_vinted_challenge(vinted_response.text)
+        payload["vinted_status"] = vinted_response.status_code
+        payload["challenge_suspected"] = challenge_suspected
+        payload["vinted_ok"] = (
+            vinted_response.status_code < 400
+            and not challenge_suspected
+            and _response_looks_like_json(vinted_response.text)
+        )
+        payload["ok"] = (
+            ip_response.status_code < 400
+            and payload["exit_ip"] is not None
+            and bool(payload["vinted_ok"])
+        )
+    except Exception as exc:  # noqa: BLE001
+        payload["error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        await client.close_async()
+        client.close()
+    return payload
+
+
+def _extract_exit_ip(text: str) -> str | None:
+    candidate = text.strip()
+    if not candidate:
+        return None
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        return candidate or None
+    if isinstance(payload, dict):
+        ip_value = payload.get("ip") or payload.get("origin")
+        return None if ip_value is None else str(ip_value)
+    return candidate
+
+
+def _response_looks_like_json(text: str) -> bool:
+    candidate = text.strip()
+    if not candidate:
+        return False
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, dict)
+
+
+def _response_looks_like_vinted_challenge(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "captcha",
+            "turnstile",
+            "cloudflare",
+            "just a moment",
+            "attention required",
+            "__cf_chl",
+        )
+    )
+
+
 def _build_runtime_options(
     *,
     page_limit: int,
@@ -820,6 +1079,12 @@ def _render_runtime_cycle_report(report: RadarRuntimeCycleReport, *, db: Path) -
     typer.echo(f"Status: {report.status} (phase {report.phase})")
     typer.echo(f"Started: {report.started_at}")
     typer.echo(f"Finished: {report.finished_at or 'still running'}")
+    typer.echo(
+        _render_transport_summary(
+            proxies=tuple(["proxy"] * int(report.config.get("proxy_pool_size") or 0)),
+            concurrency=int(report.config.get("concurrency") or 0) or None,
+        )
+    )
     typer.echo(f"Discovery run: {report.discovery_run_id or 'n/a'}")
     if report.discovery_report is not None:
         successful_scans = report.discovery_report.successful_scans
@@ -865,6 +1130,182 @@ def _render_runtime_cycle_report(report: RadarRuntimeCycleReport, *, db: Path) -
     )
     if report.last_error:
         _echo(f"Last error: {report.last_error}")
+
+
+def _render_long_run_audit_report(report: dict[str, object]) -> None:
+    db = dict(report.get("db") or {})
+    db_health = dict(db.get("health") or {})
+    verdict = dict(report.get("verdict") or {})
+    runtime = dict(report.get("runtime") or {})
+    discovery = dict(report.get("discovery") or {})
+    acquisition = dict(report.get("acquisition") or {})
+    freshness = dict(report.get("freshness") or {})
+    freshness_overall = dict(freshness.get("overall") or {})
+    probe_totals = dict(acquisition.get("probe_totals") or {})
+
+    typer.echo(f"Database: {db.get('path')}")
+    typer.echo(
+        "Audit window: {hours}h ({start} → {end})".format(
+            hours=report.get("window_hours"),
+            start=report.get("window_started_at"),
+            end=report.get("window_finished_at"),
+        )
+    )
+    typer.echo(
+        "Verdict: {status} — {summary}".format(
+            status=verdict.get("status") or "unknown",
+            summary=verdict.get("summary") or "n/a",
+        )
+    )
+    typer.echo(
+        "Database health: {healthy} | size {size} bytes".format(
+            healthy="yes" if db_health.get("healthy") else "no",
+            size=db_health.get("size_bytes") or 0,
+        )
+    )
+
+    typer.echo("Runtime:")
+    typer.echo(
+        "- cycles {cycle_count} | completed {completed_cycles} | failed {failed_cycles} | interrupted {interrupted_cycles} | running {running_cycles}".format(
+            **runtime,
+        )
+    )
+    typer.echo(
+        "- success rate {success_rate} | average cycle {avg}".format(
+            success_rate=runtime.get("success_rate") if runtime.get("success_rate") is not None else "n/a",
+            avg=_format_duration_seconds(runtime.get("average_cycle_seconds")),
+        )
+    )
+    typer.echo(
+        "- controller now {status} (phase {phase})".format(
+            status=runtime.get("latest_controller_status") or "n/a",
+            phase=runtime.get("latest_controller_phase") or "n/a",
+        )
+    )
+    latest_cycle = runtime.get("latest_window_cycle") or {}
+    if latest_cycle:
+        typer.echo(
+            "- latest cycle {cycle_id} | {status} | phase {phase} | tracked {tracked_listings} | probes {state_probed_count}".format(
+                **latest_cycle,
+            )
+        )
+    failure_phases = list(runtime.get("failure_phases") or [])
+    if failure_phases:
+        typer.echo("- failure phases:")
+        for item in failure_phases:
+            typer.echo(f"  - {item['label']}: {item['count']}")
+
+    typer.echo("Discovery:")
+    typer.echo(
+        "- runs {run_count} | unique leaf catalogs {unique_leaf_catalogs_scanned}/{total_leaf_catalogs_known} | scans ok {sum_successful_scans} | scans failed {sum_failed_scans}".format(
+            **discovery,
+        )
+    )
+    typer.echo(
+        "- unique listing hits total {hits} | avg per run {avg} | repeated scan factor {factor}".format(
+            hits=discovery.get("sum_unique_listing_hits") or 0,
+            avg=discovery.get("average_unique_listing_hits_per_run") if discovery.get("average_unique_listing_hits_per_run") is not None else "n/a",
+            factor=discovery.get("repeated_scan_factor") if discovery.get("repeated_scan_factor") is not None else "n/a",
+        )
+    )
+    typer.echo(
+        "- narrow coverage suspected: {value}".format(
+            value="yes" if discovery.get("narrow_coverage_suspected") else "no",
+        )
+    )
+    for reason in list(discovery.get("narrow_coverage_reasons") or []):
+        _echo(f"  - {reason}")
+    failing_catalogs = list(discovery.get("top_failing_catalogs") or [])
+    if failing_catalogs:
+        typer.echo("- top failing catalogs:")
+        for item in failing_catalogs:
+            typer.echo(
+                "  - {catalog_path}: {failure_count} failures | latest {latest_failure_at} | 403s {http_403_count}".format(
+                    **item,
+                )
+            )
+
+    typer.echo("Acquisition:")
+    typer.echo(
+        "- latest status {status}".format(
+            status=acquisition.get("latest_status") or "unknown",
+        )
+    )
+    typer.echo(
+        "- window healthy {healthy} | partial {partial} | degraded {degraded} | unknown {unknown}".format(
+            **dict(acquisition.get("window_cycle_status_counts") or {}),
+        )
+    )
+    typer.echo(
+        "- probes direct {direct} | inconclusive {inconclusive} | degraded {degraded}".format(
+            direct=probe_totals.get("direct_signal_count") or 0,
+            inconclusive=probe_totals.get("inconclusive_probe_count") or 0,
+            degraded=probe_totals.get("degraded_probe_count") or 0,
+        )
+    )
+    typer.echo(
+        "- anti-bot {anti_bot} | http errors {http_error} | transport errors {transport}".format(
+            anti_bot=probe_totals.get("anti_bot_challenge_count") or 0,
+            http_error=probe_totals.get("http_error_count") or 0,
+            transport=probe_totals.get("transport_error_count") or 0,
+        )
+    )
+    probe_reasons = list(acquisition.get("top_probe_reasons") or [])
+    if probe_reasons:
+        typer.echo("- top probe reasons:")
+        for item in probe_reasons:
+            typer.echo(f"  - {item['reason']}: {item['count']}")
+
+    degraded_examples = list(acquisition.get("degraded_listing_examples") or [])
+    if degraded_examples:
+        typer.echo("- degraded listing examples:")
+        for item in degraded_examples:
+            _echo(
+                "  - {listing_id} | count {degraded_probe_count} | {title}".format(
+                    listing_id=item.get("listing_id"),
+                    degraded_probe_count=item.get("degraded_probe_count"),
+                    title=item.get("title") or "(untitled)",
+                )
+            )
+
+    typer.echo("Freshness:")
+    typer.echo(
+        "- tracked {tracked_listings} | first-pass {first} | fresh {fresh} | aging {aging} | stale {stale}".format(
+            tracked_listings=freshness_overall.get("tracked_listings") or 0,
+            first=freshness_overall.get("first-pass-only") or 0,
+            fresh=freshness_overall.get("fresh-followup") or 0,
+            aging=freshness_overall.get("aging-followup") or 0,
+            stale=freshness_overall.get("stale-followup") or 0,
+        )
+    )
+
+    findings = list(report.get("findings") or [])
+    if findings:
+        typer.echo("Findings:")
+        for item in findings:
+            _echo(f"- {item}")
+
+    recommendations = list(report.get("recommendations") or [])
+    if recommendations:
+        typer.echo("Recommendations:")
+        for item in recommendations:
+            _echo(f"- {item}")
+
+    revisit = dict(report.get("revisit") or {})
+    top_candidates = list(revisit.get("top_candidates") or [])
+    if top_candidates:
+        typer.echo("Revisit candidates:")
+        for item in top_candidates:
+            _echo(
+                "- {listing_id} | score {priority_score} | {freshness_bucket} | obs {observation_count} | age {last_seen_age_hours}h | {title}".format(
+                    listing_id=item.get("listing_id"),
+                    priority_score=item.get("priority_score"),
+                    freshness_bucket=item.get("freshness_bucket"),
+                    observation_count=item.get("observation_count"),
+                    last_seen_age_hours=item.get("last_seen_age_hours"),
+                    title=item.get("title") or "(untitled)",
+                )
+            )
 
 
 def _render_state_summary(summary: dict[str, object]) -> None:

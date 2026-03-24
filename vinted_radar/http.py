@@ -1,22 +1,25 @@
 """HTTP transport layer for Vinted Radar.
 
-Uses *curl_cffi* with TLS-impersonation to avoid WAF fingerprint
-blocks.  A single ``VintedHttpClient`` instance manages:
+Uses *curl_cffi* with TLS impersonation to avoid WAF fingerprint
+blocks. A single ``VintedHttpClient`` instance now manages a pool of
+route-local sync/async sessions:
 
-* **Session warm-up** – hits the Vinted homepage to acquire the
-  ``_vinted_fr_session`` cookie, with configurable retry + backoff.
-* **Automatic re-warm-up** – transparently re-acquires the cookie
-  whenever the server responds with a 403.
-* **Rate-limiting** – enforces a minimum delay between requests.
-* **Thread-safety** – the warm-up path is guarded by a lock so the
-  client can safely be shared across threads.
-* **Proxy pool** – optional list of residential proxies; on retryable
-  errors (403 / 429 / network) the client rotates to the next proxy,
-  rebuilds the session, re-warms, and retries the request.
+* **Session warm-up** per route – acquires the Vinted session cookie on
+  the specific direct/proxy lane that will carry the request.
+* **Route-local throttling** – request delay is tracked per route rather
+  than globally, so a healthy proxy pool can provide real throughput.
+* **Retry-aware cooldowns** – retryable HTTP/network failures degrade
+  only the affected route instead of resetting the whole transport.
+* **Proxy pool support** – accepts normalized proxy URLs and raw
+  Webshare ``host:port:user:pass`` entries.
+* **Safe diagnostics** – route logs use masked proxy labels and never
+  emit credentials or cookie values.
 
-Both **synchronous** (``get_text``) and **asynchronous** (``get_text_async``)
-interfaces are provided.  The async path uses ``curl_cffi.requests.AsyncSession``
-and ``asyncio.Lock`` / ``asyncio.sleep`` for cooperative concurrency.
+Both **synchronous** (``get_text``) and **asynchronous**
+(``get_text_async``) interfaces are provided. Discovery uses the async
+path so concurrent catalog scans can spread across multiple warmed proxy
+routes instead of pinning the whole run to one active proxy until
+failure.
 """
 
 from __future__ import annotations
@@ -25,37 +28,27 @@ import asyncio
 import logging
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from curl_cffi.requests import AsyncSession, Session
 
+from vinted_radar.proxies import mask_proxy_url, parse_proxy_entries
+
 logger = logging.getLogger(__name__)
 
-# ------------------------------------------------------------------
-# Constants
-# ------------------------------------------------------------------
 VINTED_HOME = "https://www.vinted.fr/"
-# Vinted uses various session cookies. We check for these to confirm warmup success.
 SESSION_COOKIE_NAMES = ("access_token_web", "_vinted_fr_session")
-
-# We only force the locale; all other headers (User-Agent, Accept,
-# sec-ch-ua, …) are injected by curl_cffi's impersonation engine.
 DEFAULT_HEADERS = {
     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
 }
 
-# Warm-up retry defaults
 _WARMUP_MAX_RETRIES = 3
-_WARMUP_BACKOFF_BASE = 2.0  # seconds – multiplied by attempt number
-
-# Retry-with-rotation defaults
+_WARMUP_BACKOFF_BASE = 2.0
 _DEFAULT_MAX_RETRIES = 3
 _RETRYABLE_STATUS_CODES = frozenset({403, 429})
+_ROUTE_COOLDOWN_SECONDS = 15.0
 
 
-# ------------------------------------------------------------------
-# Value object returned by every fetch
-# ------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class FetchedPage:
     url: str
@@ -63,31 +56,56 @@ class FetchedPage:
     text: str
 
 
-# ------------------------------------------------------------------
-# HTTP client
-# ------------------------------------------------------------------
+@dataclass(slots=True)
+class _TransportRoute:
+    index: int
+    proxy_url: str | None
+    label: str
+    session: Session | None = None
+    async_session: AsyncSession | None = None
+    sync_warmed_up: bool = False
+    async_warmed_up: bool = False
+    sync_rebuild_required: bool = False
+    async_rebuild_required: bool = False
+    last_request_at_sync: float = 0.0
+    last_request_at_async: float = 0.0
+    request_count_sync: int = 0
+    request_count_async: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    consecutive_failures: int = 0
+    disabled_until_monotonic: float = 0.0
+    async_requests_in_flight: int = 0
+    sync_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    async_lock: asyncio.Lock | None = field(default=None, repr=False)
+
+    def ensure_async_lock(self) -> asyncio.Lock:
+        if self.async_lock is None:
+            self.async_lock = asyncio.Lock()
+        return self.async_lock
+
+
 class VintedHttpClient:
     """Thin HTTP wrapper with TLS impersonation, session management,
-    and optional proxy rotation.
+    and real multi-route proxy pool support.
 
     Parameters
     ----------
     request_delay:
-        Minimum gap (seconds) between two consecutive HTTP requests.
+        Minimum gap (seconds) between two consecutive HTTP requests on
+        the same route.
     timeout_seconds:
         Per-request read/connect timeout.
     impersonate:
         Browser fingerprint profile forwarded to *curl_cffi*.
     warmup_retries:
-        How many times ``warm_up`` retries before raising.
+        How many times each route warm-up retries before raising.
     proxies:
-        Optional list of proxy URLs (``http://user:pass@host:port``).
-        When set, every request is routed through a proxy from this
-        pool.  On retryable errors the client rotates to the next
-        proxy, rebuilds the underlying session, and re-warms.
+        Optional list of proxy URLs or raw Webshare
+        ``host:port:user:pass`` entries.
     max_retries:
-        Maximum number of retry-with-rotation attempts for a single
-        request when a retryable error occurs (403, 429, network).
+        Maximum number of retry attempts for a single request when a
+        retryable error occurs (403, 429, network).
     """
 
     def __init__(
@@ -106,420 +124,430 @@ class VintedHttpClient:
         self._impersonate = impersonate
         self._max_retries = max(max_retries, 1)
 
-        # --- Proxy pool ---
-        self._proxies: list[str] = list(proxies) if proxies else []
-        self._proxy_index: int = 0
+        normalized_proxies = parse_proxy_entries(proxies)
+        self._routes: list[_TransportRoute] = []
+        if normalized_proxies:
+            for index, proxy_url in enumerate(normalized_proxies):
+                self._routes.append(
+                    _TransportRoute(
+                        index=index,
+                        proxy_url=proxy_url,
+                        label=mask_proxy_url(proxy_url),
+                    )
+                )
+        else:
+            self._routes.append(_TransportRoute(index=0, proxy_url=None, label="direct"))
 
-        # --- Sync transport ---
-        self._session = self._make_sync_session()
-        self._last_request_at = 0.0
-        self._warmed_up = False
-        self._lock = threading.Lock()
+        self._async_pool_lock: asyncio.Lock | None = None
 
-        # --- Async transport (lazily initialised) ---
-        self._async_session: AsyncSession | None = None
-        self._async_warmed_up = False
-        self._async_lock: asyncio.Lock | None = None
-        self._last_request_at_async = 0.0
-
-    # ==================================================================
-    # Proxy helpers
-    # ==================================================================
+    # ------------------------------------------------------------------
+    # Public diagnostics
+    # ------------------------------------------------------------------
     @property
-    def _current_proxy(self) -> str | None:
-        """Return the current proxy URL, or ``None`` if no proxies."""
-        if not self._proxies:
-            return None
-        return self._proxies[self._proxy_index % len(self._proxies)]
+    def proxy_pool_size(self) -> int:
+        return sum(1 for route in self._routes if route.proxy_url is not None)
 
-    def _advance_proxy(self) -> str | None:
-        """Move to the next proxy in the pool (round-robin).
+    @property
+    def transport_mode(self) -> str:
+        return "proxy-pool" if self.proxy_pool_size else "direct"
 
-        Returns the newly selected proxy URL, or ``None`` if the pool
-        is empty.
-        """
-        if not self._proxies:
-            return None
-        self._proxy_index = (self._proxy_index + 1) % len(self._proxies)
-        proxy = self._proxies[self._proxy_index]
-        logger.info("Rotated to proxy %d/%d", self._proxy_index + 1, len(self._proxies))
-        return proxy
-
-    # ==================================================================
+    # ------------------------------------------------------------------
     # Session factories
-    # ==================================================================
-    def _make_sync_session(self) -> Session:
-        """Build a fresh sync ``Session`` with the current proxy."""
-        proxy = self._current_proxy
-        sess = Session(impersonate=self._impersonate, proxy=proxy) if proxy else Session(impersonate=self._impersonate)
-        return sess
+    # ------------------------------------------------------------------
+    def _make_sync_session(self, route: _TransportRoute) -> Session:
+        if route.proxy_url:
+            return Session(impersonate=self._impersonate, proxy=route.proxy_url)
+        return Session(impersonate=self._impersonate)
 
-    def _make_async_session(self) -> AsyncSession:
-        """Build a fresh async ``AsyncSession`` with the current proxy."""
-        proxy = self._current_proxy
-        sess = AsyncSession(impersonate=self._impersonate, proxy=proxy) if proxy else AsyncSession(impersonate=self._impersonate)
-        return sess
+    def _make_async_session(self, route: _TransportRoute) -> AsyncSession:
+        if route.proxy_url:
+            return AsyncSession(impersonate=self._impersonate, proxy=route.proxy_url)
+        return AsyncSession(impersonate=self._impersonate)
 
-    def _rebuild_sync_session(self) -> None:
-        """Close & recreate the sync session (e.g. after proxy rotation)."""
-        try:
-            self._session.close()
-        except Exception:  # noqa: BLE001
-            pass
-        self._session = self._make_sync_session()
-        self._warmed_up = False
+    def _ensure_sync_session(self, route: _TransportRoute) -> Session:
+        if route.session is None or route.sync_rebuild_required:
+            if route.session is not None:
+                try:
+                    route.session.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            route.session = self._make_sync_session(route)
+            route.sync_rebuild_required = False
+            route.sync_warmed_up = False
+        return route.session
 
-    async def _rebuild_async_session(self) -> None:
-        """Close & recreate the async session (e.g. after proxy rotation)."""
-        if self._async_session is not None:
-            try:
-                await self._async_session.close()
-            except Exception:  # noqa: BLE001
-                pass
-        self._async_session = self._make_async_session()
-        self._async_warmed_up = False
+    async def _ensure_async_session(self, route: _TransportRoute) -> AsyncSession:
+        if route.async_session is None or route.async_rebuild_required:
+            if route.async_session is not None:
+                try:
+                    await route.async_session.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            route.async_session = self._make_async_session(route)
+            route.async_rebuild_required = False
+            route.async_warmed_up = False
+        return route.async_session
 
-    # ==================================================================
-    # Async helpers – lazy init
-    # ==================================================================
-    def _ensure_async_session(self) -> AsyncSession:
-        """Create the ``AsyncSession`` on first async call."""
-        if self._async_session is None:
-            self._async_session = self._make_async_session()
-        return self._async_session
+    # ------------------------------------------------------------------
+    # Route selection
+    # ------------------------------------------------------------------
+    def _candidate_routes(self, *, exclude: set[int]) -> list[_TransportRoute]:
+        now = time.monotonic()
+        candidates = [route for route in self._routes if route.index not in exclude]
+        active = [route for route in candidates if route.disabled_until_monotonic <= now]
+        return active or candidates
 
-    def _ensure_async_lock(self) -> asyncio.Lock:
-        if self._async_lock is None:
-            self._async_lock = asyncio.Lock()
-        return self._async_lock
+    def _select_sync_route(self, *, exclude: set[int]) -> _TransportRoute:
+        candidates = self._candidate_routes(exclude=exclude)
+        now = time.monotonic()
+        return min(
+            candidates,
+            key=lambda route: (
+                max(route.disabled_until_monotonic - now, 0.0),
+                max(route.last_request_at_sync + self.request_delay - now, 0.0),
+                route.request_count_sync,
+                route.index,
+            ),
+        )
 
-    # ==================================================================
-    # SYNC – original interface (unchanged behaviour + retry rotation)
-    # ==================================================================
+    def _ensure_async_pool_lock(self) -> asyncio.Lock:
+        if self._async_pool_lock is None:
+            self._async_pool_lock = asyncio.Lock()
+        return self._async_pool_lock
+
+    async def _reserve_async_route(self, *, exclude: set[int]) -> _TransportRoute:
+        pool_lock = self._ensure_async_pool_lock()
+        while True:
+            async with pool_lock:
+                now = time.monotonic()
+                candidates = self._candidate_routes(exclude=exclude)
+                best_route: _TransportRoute | None = None
+                best_key: tuple[float, int, int, int] | None = None
+                for route in candidates:
+                    wait = 0.0
+                    if route.disabled_until_monotonic > now:
+                        wait = route.disabled_until_monotonic - now
+                    elif self.request_delay:
+                        wait = max(route.last_request_at_async + self.request_delay - now, 0.0)
+                    key = (wait, route.async_requests_in_flight, route.request_count_async, route.index)
+                    if best_key is None or key < best_key:
+                        best_key = key
+                        best_route = route
+                if best_route is None or best_key is None:  # pragma: no cover - defensive only
+                    raise ConnectionError("No transport route is available.")
+                wait_seconds = best_key[0]
+                if wait_seconds <= 0:
+                    best_route.async_requests_in_flight += 1
+                    best_route.request_count_async += 1
+                    best_route.last_request_at_async = now
+                    return best_route
+            await asyncio.sleep(max(wait_seconds, 0.01))
+
+    async def _release_async_route(self, route: _TransportRoute) -> None:
+        pool_lock = self._ensure_async_pool_lock()
+        async with pool_lock:
+            route.async_requests_in_flight = max(route.async_requests_in_flight - 1, 0)
+
+    # ------------------------------------------------------------------
+    # Warm-up helpers
+    # ------------------------------------------------------------------
     def warm_up(self) -> None:
-        """Ping the Vinted homepage to acquire the session cookie.
+        route = self._select_sync_route(exclude=set())
+        with route.sync_lock:
+            self._ensure_sync_route_ready(route)
 
-        Retries up to ``warmup_retries`` times with linear backoff.
-        The method is idempotent: concurrent callers wait on the lock,
-        and only the first one actually performs the network call.
-        """
-        with self._lock:
-            if self._warmed_up:
-                return
-            self._do_warm_up()
+    def _ensure_sync_route_ready(self, route: _TransportRoute) -> None:
+        self._ensure_sync_session(route)
+        if route.sync_warmed_up:
+            return
+        self._do_warm_up(route)
 
-    def _do_warm_up(self) -> None:
-        """Internal warm-up — must be called while holding ``_lock``."""
+    def _do_warm_up(self, route: _TransportRoute) -> None:
+        session = self._ensure_sync_session(route)
         last_exc: Exception | None = None
         for attempt in range(1, self._warmup_retries + 1):
             try:
-                proxy_label = self._current_proxy or "direct"
                 logger.info(
-                    "Session warm-up attempt %d/%d – GET %s (proxy: %s)",
+                    "Session warm-up attempt %d/%d – GET %s (route: %s)",
                     attempt,
                     self._warmup_retries,
                     VINTED_HOME,
-                    proxy_label,
+                    route.label,
                 )
-                resp = self._session.get(VINTED_HOME, timeout=self.timeout_seconds)
-                self._last_request_at = time.monotonic()
+                route.last_request_at_sync = time.monotonic()
+                response = session.get(VINTED_HOME, timeout=self.timeout_seconds)
 
-                cookie_value = self._extract_session_cookie()
-                if cookie_value:
+                if self._extract_session_cookie(route):
                     logger.info(
-                        "Session cookie acquired (%s…), status %s",
-                        cookie_value[:12],
-                        resp.status_code,
+                        "Session cookie acquired for %s (status %s)",
+                        route.label,
+                        response.status_code,
                     )
                 else:
                     logger.warning(
-                        "No session cookies (%s) in response (status %s) – "
-                        "subsequent requests may be rejected",
+                        "No session cookies (%s) in response for %s (status %s) — subsequent requests may be rejected",
                         ", ".join(SESSION_COOKIE_NAMES),
-                        resp.status_code,
+                        route.label,
+                        response.status_code,
                     )
-                self._warmed_up = True
+                route.sync_warmed_up = True
                 return
-
             except Exception as exc:
                 last_exc = exc
-                wait = _WARMUP_BACKOFF_BASE * attempt
+                wait_seconds = _WARMUP_BACKOFF_BASE * attempt
                 logger.warning(
-                    "Warm-up attempt %d/%d failed (%s) – retrying in %.1fs",
+                    "Warm-up attempt %d/%d failed on %s (%s) — retrying in %.1fs",
                     attempt,
                     self._warmup_retries,
+                    route.label,
                     exc,
-                    wait,
+                    wait_seconds,
                 )
                 if attempt < self._warmup_retries:
-                    time.sleep(wait)
-
-        # All retries exhausted
+                    time.sleep(wait_seconds)
         raise ConnectionError(
-            f"Session warm-up failed after {self._warmup_retries} attempts"
+            f"Session warm-up failed after {self._warmup_retries} attempts on {route.label}"
         ) from last_exc
 
-    def _extract_session_cookie(self) -> str | None:
-        """Return a valid session cookie value, or *None* if absent."""
+    def _extract_session_cookie(self, route: _TransportRoute) -> str | None:
+        if route.session is None:
+            return None
         for name in SESSION_COOKIE_NAMES:
-            val = self._session.cookies.get(name)
-            if val:
-                return val
+            value = route.session.cookies.get(name)
+            if value:
+                return value
         return None
 
-    def get_text(self, url: str) -> FetchedPage:
-        """Fetch *url* and return a :class:`FetchedPage`.
+    async def warm_up_async(self) -> None:
+        route = await self._reserve_async_route(exclude=set())
+        try:
+            await self._ensure_async_route_ready(route)
+        finally:
+            await self._release_async_route(route)
 
-        * Lazily triggers ``warm_up`` on the first call.
-        * On a retryable status (403, 429) or a network error, rotates
-          to the next proxy, rebuilds the session, re-warms, and retries
-          up to ``max_retries`` times.
-        * Respects ``request_delay`` between consecutive calls.
-        """
+    async def _ensure_async_route_ready(self, route: _TransportRoute) -> None:
+        lock = route.ensure_async_lock()
+        async with lock:
+            await self._ensure_async_session(route)
+            if route.async_warmed_up:
+                return
+            await self._do_warm_up_async(route)
+
+    async def _do_warm_up_async(self, route: _TransportRoute) -> None:
+        session = await self._ensure_async_session(route)
         last_exc: Exception | None = None
-
-        for attempt in range(1, self._max_retries + 1):
+        for attempt in range(1, self._warmup_retries + 1):
             try:
-                if not self._warmed_up:
-                    self.warm_up()
-
-                response = self._throttled_get(url)
-
-                if response.status_code not in _RETRYABLE_STATUS_CODES:
-                    return FetchedPage(
-                        url=str(response.url),
-                        status_code=response.status_code,
-                        text=response.text,
-                    )
-
-                # Retryable HTTP status ---------------------------------
-                logger.warning(
-                    "Attempt %d/%d – HTTP %d for %s, rotating proxy…",
+                logger.info(
+                    "Async session warm-up attempt %d/%d – GET %s (route: %s)",
                     attempt,
-                    self._max_retries,
-                    response.status_code,
-                    url,
+                    self._warmup_retries,
+                    VINTED_HOME,
+                    route.label,
                 )
-                if attempt < self._max_retries:
-                    self._rotate_and_rewarm_sync()
-                    continue
-
-                # Last attempt exhausted: return the error page as-is.
-                return FetchedPage(
-                    url=str(response.url),
-                    status_code=response.status_code,
-                    text=response.text,
-                )
-
+                route.last_request_at_async = time.monotonic()
+                response = await session.get(VINTED_HOME, timeout=self.timeout_seconds)
+                if self._extract_async_session_cookie(route):
+                    logger.info(
+                        "Async session cookie acquired for %s (status %s)",
+                        route.label,
+                        response.status_code,
+                    )
+                else:
+                    logger.warning(
+                        "No async session cookies (%s) in response for %s (status %s) — subsequent requests may be rejected",
+                        ", ".join(SESSION_COOKIE_NAMES),
+                        route.label,
+                        response.status_code,
+                    )
+                route.async_warmed_up = True
+                return
             except Exception as exc:
                 last_exc = exc
+                wait_seconds = _WARMUP_BACKOFF_BASE * attempt
                 logger.warning(
-                    "Attempt %d/%d – network error for %s (%s), rotating proxy…",
+                    "Async warm-up attempt %d/%d failed on %s (%s) — retrying in %.1fs",
+                    attempt,
+                    self._warmup_retries,
+                    route.label,
+                    exc,
+                    wait_seconds,
+                )
+                if attempt < self._warmup_retries:
+                    await asyncio.sleep(wait_seconds)
+        raise ConnectionError(
+            f"Async session warm-up failed after {self._warmup_retries} attempts on {route.label}"
+        ) from last_exc
+
+    def _extract_async_session_cookie(self, route: _TransportRoute) -> str | None:
+        if route.async_session is None:
+            return None
+        for name in SESSION_COOKIE_NAMES:
+            value = route.async_session.cookies.get(name)
+            if value:
+                return value
+        return None
+
+    # ------------------------------------------------------------------
+    # Request helpers
+    # ------------------------------------------------------------------
+    def get_text(self, url: str) -> FetchedPage:
+        last_exc: Exception | None = None
+        last_page: FetchedPage | None = None
+        attempted_routes: set[int] = set()
+
+        for attempt in range(1, self._max_retries + 1):
+            route = self._select_sync_route(exclude=attempted_routes)
+            attempted_routes.add(route.index)
+            try:
+                page = self._get_text_via_sync_route(route, url)
+                if page.status_code not in _RETRYABLE_STATUS_CODES:
+                    self._mark_route_success(route)
+                    return page
+                last_page = page
+                self._mark_route_failure(route, failure=f"HTTP {page.status_code}")
+                logger.warning(
+                    "Attempt %d/%d – HTTP %d for %s via %s, trying another route…",
+                    attempt,
+                    self._max_retries,
+                    page.status_code,
+                    url,
+                    route.label,
+                )
+            except Exception as exc:
+                last_exc = exc
+                self._mark_route_failure(route, failure=str(exc))
+                logger.warning(
+                    "Attempt %d/%d – network error for %s via %s (%s), trying another route…",
                     attempt,
                     self._max_retries,
                     url,
+                    route.label,
                     exc,
                 )
-                if attempt < self._max_retries:
-                    self._rotate_and_rewarm_sync()
-                    continue
-                raise
+            if attempt >= self._max_retries:
+                break
 
-        # Should not be reached, but satisfy the type checker.
-        raise ConnectionError(  # pragma: no cover
+        if last_page is not None:
+            return last_page
+        raise ConnectionError(
             f"All {self._max_retries} retry attempts exhausted for {url}"
         ) from last_exc
 
-    def _throttled_get(self, url: str):
-        """GET with rate-limit delay.  Returns the raw curl_cffi Response."""
+    def _get_text_via_sync_route(self, route: _TransportRoute, url: str) -> FetchedPage:
+        with route.sync_lock:
+            self._ensure_sync_route_ready(route)
+            response = self._throttled_get(route, url)
+        return FetchedPage(url=str(response.url), status_code=response.status_code, text=response.text)
+
+    def _throttled_get(self, route: _TransportRoute, url: str):
         now = time.monotonic()
-        elapsed = now - self._last_request_at
+        elapsed = now - route.last_request_at_sync
         if self.request_delay and elapsed < self.request_delay:
             time.sleep(self.request_delay - elapsed)
-
-        resp = self._session.get(url, timeout=self.timeout_seconds)
-        self._last_request_at = time.monotonic()
-        return resp
-
-    def _rotate_and_rewarm_sync(self) -> None:
-        """Advance proxy, rebuild session, and re-warm (sync)."""
-        self._advance_proxy()
-        with self._lock:
-            self._rebuild_sync_session()
-            self._do_warm_up()
-
-    def _invalidate_and_rewarm(self) -> None:
-        """Reset warm-up flag and re-acquire the session cookie."""
-        with self._lock:
-            self._warmed_up = False
-            self._do_warm_up()
-
-    # ==================================================================
-    # ASYNC – interface for concurrent discovery + retry rotation
-    # ==================================================================
-    async def warm_up_async(self) -> None:
-        """Async variant of :meth:`warm_up`.
-
-        Uses ``asyncio.Lock`` so multiple coroutines sharing the same
-        client cooperate correctly within the event loop.
-        """
-        lock = self._ensure_async_lock()
-        async with lock:
-            if self._async_warmed_up:
-                return
-            await self._do_warm_up_async()
-
-    async def _do_warm_up_async(self) -> None:
-        """Internal async warm-up — must be called while holding the async lock."""
-        session = self._ensure_async_session()
-        last_exc: Exception | None = None
-        for attempt in range(1, self._warmup_retries + 1):
-            try:
-                proxy_label = self._current_proxy or "direct"
-                logger.info(
-                    "Async session warm-up attempt %d/%d – GET %s (proxy: %s)",
-                    attempt,
-                    self._warmup_retries,
-                    VINTED_HOME,
-                    proxy_label,
-                )
-                resp = await session.get(VINTED_HOME, timeout=self.timeout_seconds)
-
-                cookie_value = self._extract_async_session_cookie()
-                if cookie_value:
-                    logger.info(
-                        "Async session cookie acquired (%s…), status %s",
-                        cookie_value[:12],
-                        resp.status_code,
-                    )
-                else:
-                    logger.warning(
-                        "No session cookies (%s) in async response (status %s) – "
-                        "subsequent requests may be rejected",
-                        ", ".join(SESSION_COOKIE_NAMES),
-                        resp.status_code,
-                    )
-                self._async_warmed_up = True
-                return
-
-            except Exception as exc:
-                last_exc = exc
-                wait = _WARMUP_BACKOFF_BASE * attempt
-                logger.warning(
-                    "Async warm-up attempt %d/%d failed (%s) – retrying in %.1fs",
-                    attempt,
-                    self._warmup_retries,
-                    exc,
-                    wait,
-                )
-                if attempt < self._warmup_retries:
-                    await asyncio.sleep(wait)
-
-        raise ConnectionError(
-            f"Async session warm-up failed after {self._warmup_retries} attempts"
-        ) from last_exc
-
-    def _extract_async_session_cookie(self) -> str | None:
-        """Return a valid async session cookie value, or *None* if absent."""
-        if self._async_session is None:
-            return None
-        for name in SESSION_COOKIE_NAMES:
-            val = self._async_session.cookies.get(name)
-            if val:
-                return val
-        return None
+        route.request_count_sync += 1
+        route.last_request_at_sync = time.monotonic()
+        session = self._ensure_sync_session(route)
+        return session.get(url, timeout=self.timeout_seconds)
 
     async def get_text_async(self, url: str) -> FetchedPage:
-        """Async variant of :meth:`get_text`.
-
-        * Lazily triggers :meth:`warm_up_async` on the first call.
-        * On a retryable status (403, 429) or a network error, rotates
-          to the next proxy, rebuilds the async session, re-warms, and
-          retries up to ``max_retries`` times.
-        """
         last_exc: Exception | None = None
+        last_page: FetchedPage | None = None
+        attempted_routes: set[int] = set()
 
         for attempt in range(1, self._max_retries + 1):
+            route = await self._reserve_async_route(exclude=attempted_routes)
+            attempted_routes.add(route.index)
             try:
-                if not self._async_warmed_up:
-                    await self.warm_up_async()
-
-                response = await self._async_get(url)
-
-                if response.status_code not in _RETRYABLE_STATUS_CODES:
-                    return FetchedPage(
-                        url=str(response.url),
-                        status_code=response.status_code,
-                        text=response.text,
-                    )
-
-                # Retryable HTTP status ---------------------------------
+                page = await self._get_text_via_async_route(route, url)
+                if page.status_code not in _RETRYABLE_STATUS_CODES:
+                    self._mark_route_success(route)
+                    return page
+                last_page = page
+                self._mark_route_failure(route, failure=f"HTTP {page.status_code}")
                 logger.warning(
-                    "Async attempt %d/%d – HTTP %d for %s, rotating proxy…",
+                    "Async attempt %d/%d – HTTP %d for %s via %s, trying another route…",
                     attempt,
                     self._max_retries,
-                    response.status_code,
+                    page.status_code,
                     url,
+                    route.label,
                 )
-                if attempt < self._max_retries:
-                    await self._rotate_and_rewarm_async()
-                    continue
-
-                # Last attempt exhausted: return the error page as-is.
-                return FetchedPage(
-                    url=str(response.url),
-                    status_code=response.status_code,
-                    text=response.text,
-                )
-
             except Exception as exc:
                 last_exc = exc
+                self._mark_route_failure(route, failure=str(exc))
                 logger.warning(
-                    "Async attempt %d/%d – network error for %s (%s), rotating proxy…",
+                    "Async attempt %d/%d – network error for %s via %s (%s), trying another route…",
                     attempt,
                     self._max_retries,
                     url,
+                    route.label,
                     exc,
                 )
-                if attempt < self._max_retries:
-                    await self._rotate_and_rewarm_async()
-                    continue
-                raise
+            finally:
+                await self._release_async_route(route)
+            if attempt >= self._max_retries:
+                break
 
-        # Should not be reached, but satisfy the type checker.
-        raise ConnectionError(  # pragma: no cover
+        if last_page is not None:
+            return last_page
+        raise ConnectionError(
             f"All {self._max_retries} async retry attempts exhausted for {url}"
         ) from last_exc
 
-    async def _async_get(self, url: str):
-        """Async GET.  Rate control is handled by the caller's semaphore and async sleep."""
-        now = time.monotonic()
-        elapsed = now - self._last_request_at_async
-        if self.request_delay and elapsed < self.request_delay:
-            await asyncio.sleep(self.request_delay - elapsed)
+    async def _get_text_via_async_route(self, route: _TransportRoute, url: str) -> FetchedPage:
+        await self._ensure_async_route_ready(route)
+        response = await self._async_get(route, url)
+        return FetchedPage(url=str(response.url), status_code=response.status_code, text=response.text)
 
-        session = self._ensure_async_session()
-        resp = await session.get(url, timeout=self.timeout_seconds)
-        self._last_request_at_async = time.monotonic()
-        return resp
+    async def _async_get(self, route: _TransportRoute, url: str):
+        session = await self._ensure_async_session(route)
+        return await session.get(url, timeout=self.timeout_seconds)
 
-    async def _rotate_and_rewarm_async(self) -> None:
-        """Advance proxy, rebuild async session, and re-warm."""
-        self._advance_proxy()
-        lock = self._ensure_async_lock()
-        async with lock:
-            await self._rebuild_async_session()
-            await self._do_warm_up_async()
+    # ------------------------------------------------------------------
+    # Route health
+    # ------------------------------------------------------------------
+    def _mark_route_success(self, route: _TransportRoute) -> None:
+        route.success_count += 1
+        route.consecutive_failures = 0
+        route.disabled_until_monotonic = 0.0
 
-    async def _invalidate_and_rewarm_async(self) -> None:
-        """Reset async warm-up flag and re-acquire the cookie."""
-        lock = self._ensure_async_lock()
-        async with lock:
-            self._async_warmed_up = False
-            await self._do_warm_up_async()
+    def _mark_route_failure(self, route: _TransportRoute, *, failure: str) -> None:
+        route.failure_count += 1
+        route.consecutive_failures += 1
+        route.disabled_until_monotonic = time.monotonic() + _ROUTE_COOLDOWN_SECONDS
+        route.sync_warmed_up = False
+        route.async_warmed_up = False
+        route.sync_rebuild_required = True
+        route.async_rebuild_required = True
+        logger.warning(
+            "Route %s marked degraded after %s (cooldown %.1fs)",
+            route.label,
+            failure,
+            _ROUTE_COOLDOWN_SECONDS,
+        )
+
+    # ------------------------------------------------------------------
+    # Resource cleanup
+    # ------------------------------------------------------------------
+    def close(self) -> None:
+        for route in self._routes:
+            if route.session is None:
+                continue
+            try:
+                route.session.close()
+            except Exception:  # noqa: BLE001
+                pass
+            route.session = None
+            route.sync_warmed_up = False
 
     async def close_async(self) -> None:
-        """Close the async session and free resources."""
-        if self._async_session is not None:
-            await self._async_session.close()
-            self._async_session = None
+        for route in self._routes:
+            if route.async_session is None:
+                continue
+            try:
+                await route.async_session.close()
+            except Exception:  # noqa: BLE001
+                pass
+            route.async_session = None
+            route.async_warmed_up = False

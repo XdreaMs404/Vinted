@@ -33,6 +33,7 @@
 - Retire the degraded-data honesty risk in **S06** by hardening the weak acquisition flank and surfacing degraded/partial conditions directly in the live product.
 - Retire the assembled-system risk in **S07** by proving the fully integrated product on the live VPS from both phone and desktop against a realistically large corpus.
 - Retire the unnecessary-request / ban-pressure risk in **S08** by proving `batch` and `continuous` pass native `price_from` / `price_to` bounds into the catalog API while persisted requested URLs and local safety filters stay truthful.
+- Retire the retry-only proxy underuse and operator ambiguity risk in **S09** by turning the Webshare proxy pool into a first-class local contract, real multi-route transport, and live preflight-backed acquisition path.
 
 ## Verification Classes
 
@@ -96,6 +97,9 @@ This milestone is complete only when all are true:
 
 - [x] **S08: Native API Price Bounds for Discovery** `risk:low` `depends:[S06]`
   > After this: `batch` and `continuous` can constrain both min and max price directly at the Vinted API boundary, while persisted requested URLs and client-side price guards still show the real acquisition contract.
+
+- [x] **S09: High-Throughput Proxy Pool + Webshare Acquisition Operator Flow** `risk:medium` `depends:[S06,S08]`
+  > After this: operators can load a local Webshare proxy pool without rewriting entries by hand, preflight exit-route diversity plus Vinted API reachability, and run discovery/runtime on a real multi-route transport instead of one-hot failure rotation.
 
 ## Boundary Map
 
@@ -181,3 +185,15 @@ Produces:
 Consumes:
 - acquisition/runtime plumbing from S06
 - integrated operator path from S07 so the new bound is available on the real shared runtime entrypoints
+
+### S06 + S08 → S09
+
+Produces:
+- a gitignored local proxy-pool contract that accepts raw Webshare exports without manual URL rewriting
+- route-local sync/async transport state so concurrent discovery can use multiple warmed proxy routes instead of one active route plus failure rotation
+- safe runtime metadata (`transport_mode`, `proxy_pool_size`) and a `proxy-preflight` operator check for exit-route diversity plus Vinted API reachability
+- live proof that a 100-route Webshare pool can back a real batch smoke without leaking credentials into persisted/runtime surfaces
+
+Consumes:
+- acquisition/runtime plumbing and degraded-mode honesty from S06
+- the API-bound discovery path from S08, which the new preflight now probes directly after warm-up

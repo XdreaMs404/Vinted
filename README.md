@@ -4,6 +4,8 @@ Local-first batch collector and analysis stack for Vinted Homme/Femme market sig
 
 ## Quick start
 
+Acquisition now defaults to the bounded API posture: `--min-price 30` and `--max-price 0` on the real acquisition entrypoints (`discover`, `batch`, `continuous`). Use `--min-price 0` only when you explicitly want an unbounded debug or benchmark run.
+
 ### One batch cycle
 
 ```bash
@@ -55,6 +57,9 @@ This keeps the radar alive locally and serves the French market overview home fr
 ### Focused diagnostics
 
 - `python -m vinted_radar.cli discover --db data/vinted-radar.db --page-limit 1 --max-leaf-categories 6`
+
+`discover`, `batch`, and `continuous` all default to bounded API discovery with `--min-price 30` and `--max-price 0`. Pass `--min-price 0` only for an explicit unbounded override.
+
 - `python -m vinted_radar.cli db-health --db data/vinted-radar.db --integrity`
 - `python -m vinted_radar.cli coverage --db data/vinted-radar.db`
 - `python -m vinted_radar.cli freshness --db data/vinted-radar.db`
@@ -67,6 +72,47 @@ This keeps the radar alive locally and serves the French market overview home fr
 - `python -m vinted_radar.cli rankings --db data/vinted-radar.db --kind premium --limit 10`
 - `python -m vinted_radar.cli market-summary --db data/vinted-radar.db --limit 8`
 - `python -m vinted_radar.cli score --db data/vinted-radar.db --listing-id <id>`
+- `python -m vinted_radar.cli proxy-preflight --proxy-file data/proxies.txt --sample-size 8 --format json`
+
+## Proxy pool contract
+
+The acquisition commands now understand both proxy URL form and raw Webshare exports:
+
+- URL form: `http://user:pass@host:port`
+- Webshare form: `host:port:user:pass`
+
+Supported operator inputs:
+
+- repeatable `--proxy` on `discover`, `batch`, `continuous`, `state-refresh`, and `proxy-preflight`
+- `--proxy-file <path>` on those same commands
+- implicit local autoload from `data/proxies.txt` when that file exists and no explicit proxy source is passed
+
+Recommended local setup for the provided Webshare pool:
+
+1. Store the pool in `data/proxies.txt` (the `data/` directory is gitignored).
+2. Run a preflight before longer collection work:
+
+```bash
+python -m vinted_radar.cli proxy-preflight \
+  --proxy-file data/proxies.txt \
+  --sample-size 8 \
+  --format json
+```
+
+3. Then run the real operator command, for example:
+
+```bash
+python -m vinted_radar.cli batch \
+  --db data/vinted-radar.db \
+  --page-limit 1 \
+  --max-leaf-categories 6 \
+  --state-refresh-limit 10 \
+  --proxy-file data/proxies.txt
+```
+
+When a proxy pool is active and `--concurrency` is omitted, discovery auto-scales from the old direct-mode default of `1` up to `min(proxy_pool_size, 24)` so the pool actually contributes throughput. Explicit `--concurrency` still wins.
+
+Runtime-facing config now keeps only safe transport metadata (`transport_mode`, `proxy_pool_size`) and never persists proxy credentials.
 
 ## Overview + diagnostics routes
 
@@ -212,6 +258,34 @@ Use these surfaces depending on the question:
 - JSON runtime payload: `http://127.0.0.1:8765/api/runtime`
 
 A healthy waiting loop should now appear as `scheduled`, not as a misleadingly "completed" runtime.
+
+### Consolidated long-run audit
+
+For copied VPS snapshots or any long unattended run, use the consolidated DB-first audit command instead of stitching together `db-health`, `runtime-status`, `coverage`, `freshness`, and `revisit-plan` manually:
+
+```bash
+python -m vinted_radar.cli audit-long-run \
+  --db data/vinted-radar.db \
+  --hours 12 \
+  --integrity
+```
+
+Useful variants:
+
+- JSON for automation: `python -m vinted_radar.cli audit-long-run --db data/vinted-radar.db --hours 12 --format json`
+- Markdown report: `python -m vinted_radar.cli audit-long-run --db data/vinted-radar.db --hours 12 --format markdown`
+- deterministic replay against a copied snapshot: `python -m vinted_radar.cli audit-long-run --db data/vinted-radar.db --hours 12 --now 2026-03-24T10:00:00+00:00`
+
+What the audit consolidates:
+
+- DB health and whether the snapshot is safe to trust
+- runtime stability across the requested window (`completed` / `failed` / `interrupted`, average cycle duration, failure phases)
+- discovery breadth vs repeated-subset risk (including the common `--max-leaf-categories` false-confidence trap)
+- acquisition quality across the window (`healthy` / `partial` / `degraded`, anti-bot hits, degraded probes, recent scan failures)
+- current freshness mix and top revisit candidates
+- an overall verdict plus concrete recommendations for the next VPS run
+
+Keep `scripts/verify_vps_serving.py` as the complementary HTTP/public-entrypoint proof. `audit-long-run` is intentionally DB-first and does not replace the public serving smoke check.
 
 ## Degraded acquisition visibility
 
