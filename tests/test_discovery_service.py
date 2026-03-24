@@ -69,9 +69,74 @@ class FakeHttpClient:
         return self.get_text(url)
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+def test_discovery_service_defaults_to_bounded_api_price_filter(tmp_path: Path) -> None:
+    catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
+    bounded_items = [
+        _make_api_item(9301, title="Robe premium", brand="Mango", size="M", status_id=3, price="35.00", total_price="38.00", image_url="https://images1.vinted.net/t/women-9301.webp"),
+    ]
+    women_api_url = _build_api_catalog_url(2001, 1, price_from=30.0)
+
+    pages = {
+        "https://www.vinted.fr/catalog": FetchedPage("https://www.vinted.fr/catalog", 200, catalog_root),
+        women_api_url: FetchedPage(women_api_url, 200, _make_api_page(bounded_items, current_page=1, total_pages=1)),
+    }
+
+    with RadarRepository(tmp_path / "radar.db") as repository:
+        service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
+        report = service.run(
+            DiscoveryOptions(
+                page_limit=1,
+                max_leaf_categories=1,
+                root_scope="women",
+                request_delay=0.0,
+            )
+        )
+        scan = repository.connection.execute(
+            "SELECT requested_url FROM catalog_scans WHERE run_id = ? AND catalog_id = ? AND page_number = 1",
+            (report.run_id, 2001),
+        ).fetchone()
+
+        assert report.successful_scans == 1
+        assert scan is not None
+        assert scan["requested_url"] == women_api_url
+        assert "price_from=30.0" in scan["requested_url"]
+
+
+def test_discovery_service_min_price_zero_disables_api_price_bound(tmp_path: Path) -> None:
+    catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
+    unbounded_items = [
+        _make_api_item(9302, title="Robe libre", brand="Mango", size="S", status_id=3, price="12.00", total_price="15.00", image_url="https://images1.vinted.net/t/women-9302.webp"),
+    ]
+    women_api_url = _build_api_catalog_url(2001, 1)
+
+    pages = {
+        "https://www.vinted.fr/catalog": FetchedPage("https://www.vinted.fr/catalog", 200, catalog_root),
+        women_api_url: FetchedPage(women_api_url, 200, _make_api_page(unbounded_items, current_page=1, total_pages=1)),
+    }
+
+    with RadarRepository(tmp_path / "radar.db") as repository:
+        service = DiscoveryService(repository=repository, http_client=FakeHttpClient(pages))
+        report = service.run(
+            DiscoveryOptions(
+                page_limit=1,
+                max_leaf_categories=1,
+                root_scope="women",
+                request_delay=0.0,
+                min_price=0.0,
+                max_price=0.0,
+            )
+        )
+        scan = repository.connection.execute(
+            "SELECT requested_url FROM catalog_scans WHERE run_id = ? AND catalog_id = ? AND page_number = 1",
+            (report.run_id, 2001),
+        ).fetchone()
+
+        assert report.successful_scans == 1
+        assert scan is not None
+        assert scan["requested_url"] == women_api_url
+        assert "price_from" not in scan["requested_url"]
+        assert "price_to" not in scan["requested_url"]
+
 
 def test_discovery_service_persists_catalogs_listings_and_coverage(tmp_path: Path) -> None:
     catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
