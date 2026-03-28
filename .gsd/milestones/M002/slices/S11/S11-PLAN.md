@@ -8,7 +8,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/parsers/api_catalog_page.py, vinted_radar/parsers/catalog_page.py, vinted_radar/card_payload.py, vinted_radar/models.py, tests/test_api_catalog_page.py, tests/test_card_payload.py
   - Verify: python -m pytest tests/test_api_catalog_page.py tests/test_card_payload.py -q
-- [ ] **T02: Parquet writer + object-store manifests** — Implement the Parquet lake writer and manifest registry. Add partitioned Parquet writing with schema versioning and ZSTD compression, S3-compatible upload support, manifest/checksum recording, and a local MinIO-backed integration path so evidence batches can be staged and read back safely.
+- [x] **T02: Added an immutable S3-backed Parquet batch writer with uploaded manifests and MinIO round-trip tests.** — Implement the Parquet lake writer and manifest registry. Add partitioned Parquet writing with schema versioning and ZSTD compression, S3-compatible upload support, manifest/checksum recording, and a local MinIO-backed integration path so evidence batches can be staged and read back safely.
   - Estimate: 2 sessions
   - Files: vinted_radar/platform/lake_writer.py, vinted_radar/platform/object_store.py, vinted_radar/domain/manifests.py, vinted_radar/cli.py, tests/test_lake_writer.py
   - Verify: python -m pytest tests/test_lake_writer.py -q

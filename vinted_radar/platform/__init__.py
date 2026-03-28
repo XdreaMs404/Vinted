@@ -37,6 +37,19 @@ from vinted_radar.platform.health import (
     render_platform_report_text,
     summarize_platform_health,
 )
+from vinted_radar.platform.lake_writer import (
+    PARQUET_CONTENT_TYPE,
+    PARQUET_LAKE_COMPRESSION,
+    PARQUET_LAKE_SCHEMA_VERSION,
+    LakeWriteResult,
+    ParquetLakeWriter,
+)
+from vinted_radar.platform.object_store import (
+    ObjectStoreObject,
+    ObjectStoreReadResult,
+    S3ObjectStore,
+    create_s3_client,
+)
 from vinted_radar.platform.outbox import ClaimedOutboxRecord, OutboxPublishResult, PostgresOutbox
 
 __all__ = [
@@ -59,7 +72,12 @@ __all__ = [
     "OBJECT_STORE_REGION_ENV",
     "OBJECT_STORE_SECRET_KEY_ENV",
     "ObjectStorageStatus",
+    "ObjectStoreObject",
+    "ObjectStoreReadResult",
     "OutboxPublishResult",
+    "PARQUET_CONTENT_TYPE",
+    "PARQUET_LAKE_COMPRESSION",
+    "PARQUET_LAKE_SCHEMA_VERSION",
     "PARQUET_PREFIX_ENV",
     "POSTGRES_DSN_ENV",
     "POSTGRES_SCHEMA_VERSION_ENV",
@@ -68,9 +86,13 @@ __all__ = [
     "PlatformHealthSnapshot",
     "PostgresOutbox",
     "RAW_EVENTS_PREFIX_ENV",
+    "S3ObjectStore",
     "SchemaSystemStatus",
     "ClaimedOutboxRecord",
+    "LakeWriteResult",
+    "ParquetLakeWriter",
     "bootstrap_data_platform",
+    "create_s3_client",
     "doctor_data_platform",
     "load_platform_config",
     "render_platform_report_lines",

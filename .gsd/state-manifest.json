@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T20:03:30.762Z",
+  "exported_at": "2026-03-28T20:14:59.411Z",
   "milestones": [
     {
       "id": "M001",
@@ -828,19 +828,29 @@
       "milestone_id": "M002",
       "slice_id": "S11",
       "id": "T02",
-      "title": "Parquet writer + object-store manifests",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added an immutable S3-backed Parquet batch writer with uploaded manifests and MinIO round-trip tests.",
+      "status": "complete",
+      "one_liner": "Added an immutable S3-backed Parquet batch writer with uploaded manifests and MinIO round-trip tests.",
+      "narrative": "Added vinted_radar/platform/object_store.py with a reusable checksum-aware S3-compatible object-store client that can create buckets, upload/download bytes/text/JSON, expose manifest-ready object metadata, and reject same-key rewrites when the recorded SHA-256 differs. Added vinted_radar/platform/lake_writer.py with a ParquetLakeWriter that anchors each evidence batch on a batch EventEnvelope, stages ZSTD-compressed Parquet locally, uploads the batch event JSON plus the partitioned Parquet file, and publishes an EvidenceManifest that references both objects under deterministic keys. Exported the new platform types through vinted_radar/platform/__init__.py, added unit and MinIO-backed integration coverage in tests/test_lake_writer.py, and recorded the immutable-key checksum rule in project knowledge plus architecture decision D039.",
+      "verification_result": "Ran the task-plan verification command `python -m pytest tests/test_lake_writer.py -q`. It passed with three green checks covering deterministic manifest/parquet writing against a fake S3 backend, immutable key rejection for divergent rewrites, and a real MinIO round-trip that restored the batch event, manifest, and Parquet rows from object storage.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-28T20:14:59.347Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "The slice roadmap mentioned vinted_radar/domain/manifests.py and vinted_radar/cli.py as likely touchpoints, but the existing manifest model and CLI surfaces were already sufficient for this task, so I kept the implementation scoped to the new object-store/writer modules, package exports, tests, and knowledge/decision updates.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/platform/object_store.py",
+        "vinted_radar/platform/lake_writer.py",
+        "vinted_radar/platform/__init__.py",
+        "tests/test_lake_writer.py",
+        ".gsd/KNOWLEDGE.md",
+        ".gsd/milestones/M002/slices/S11/tasks/T02-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Anchor each evidence batch on a deterministic batch EventEnvelope and store the batch JSON, Parquet object, and manifest under deterministic keys.",
+        "Treat object-store keys as immutable by recording SHA-256 metadata and rejecting same-key rewrites when the bytes differ."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S11\nmilestone: M002\nkey_files:\n  - vinted_radar/platform/object_store.py\n  - vinted_radar/platform/lake_writer.py\n  - vinted_radar/platform/__init__.py\n  - tests/test_lake_writer.py\n  - .gsd/KNOWLEDGE.md\n  - .gsd/milestones/M002/slices/S11/tasks/T02-SUMMARY.md\nkey_decisions:\n  - Anchor each evidence batch on a deterministic batch EventEnvelope and store the batch JSON, Parquet object, and manifest under deterministic keys.\n  - Treat object-store keys as immutable by recording SHA-256 metadata and rejecting same-key rewrites when the bytes differ.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T20:14:59.348Z\nblocker_discovered: false\n---\n\n# T02: Added an immutable S3-backed Parquet batch writer with uploaded manifests and MinIO round-trip tests.\n\n**Added an immutable S3-backed Parquet batch writer with uploaded manifests and MinIO round-trip tests.**\n\n## What Happened\n\nAdded vinted_radar/platform/object_store.py with a reusable checksum-aware S3-compatible object-store client that can create buckets, upload/download bytes/text/JSON, expose manifest-ready object metadata, and reject same-key rewrites when the recorded SHA-256 differs. Added vinted_radar/platform/lake_writer.py with a ParquetLakeWriter that anchors each evidence batch on a batch EventEnvelope, stages ZSTD-compressed Parquet locally, uploads the batch event JSON plus the partitioned Parquet file, and publishes an EvidenceManifest that references both objects under deterministic keys. Exported the new platform types through vinted_radar/platform/__init__.py, added unit and MinIO-backed integration coverage in tests/test_lake_writer.py, and recorded the immutable-key checksum rule in project knowledge plus architecture decision D039.\n\n## Verification\n\nRan the task-plan verification command `python -m pytest tests/test_lake_writer.py -q`. It passed with three green checks covering deterministic manifest/parquet writing against a fake S3 backend, immutable key rejection for divergent rewrites, and a real MinIO round-trip that restored the batch event, manifest, and Parquet rows from object storage.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python -m pytest tests/test_lake_writer.py -q` | 0 | ✅ pass | 18300ms |\n\n\n## Deviations\n\nThe slice roadmap mentioned vinted_radar/domain/manifests.py and vinted_radar/cli.py as likely touchpoints, but the existing manifest model and CLI surfaces were already sufficient for this task, so I kept the implementation scoped to the new object-store/writer modules, package exports, tests, and knowledge/decision updates.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/platform/object_store.py`\n- `vinted_radar/platform/lake_writer.py`\n- `vinted_radar/platform/__init__.py`\n- `tests/test_lake_writer.py`\n- `.gsd/KNOWLEDGE.md`\n- `.gsd/milestones/M002/slices/S11/tasks/T02-SUMMARY.md`\n",
       "description": "Implement the Parquet lake writer and manifest registry. Add partitioned Parquet writing with schema versioning and ZSTD compression, S3-compatible upload support, manifest/checksum recording, and a local MinIO-backed integration path so evidence batches can be staged and read back safely.",
       "estimate": "2 sessions",
       "files": [
@@ -2045,6 +2055,18 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 160,
+      "id": "D039",
+      "when_context": "M002/S11/T02",
+      "scope": "architecture",
+      "decision": "How evidence-lake batches are published and referenced across object storage and manifests",
+      "choice": "Anchor each evidence batch on a deterministic batch EventEnvelope, upload that JSON plus the partitioned Parquet object under deterministic keys, and reject same-key rewrites when the recorded SHA-256 differs.",
+      "rationale": "This keeps the Parquet lake immutable and idempotent, lets EvidenceManifest stay compatible with the existing event_id/outbox seam, and gives downstream slices one stable object graph to inspect or replay: batch event JSON -> Parquet batch -> manifest.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -2157,6 +2179,17 @@
       "verdict": "✅ pass",
       "duration_ms": 1378,
       "created_at": "2026-03-28T20:03:30.701Z"
+    },
+    {
+      "id": 11,
+      "task_id": "T02",
+      "slice_id": "S11",
+      "milestone_id": "M002",
+      "command": "python -m pytest tests/test_lake_writer.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 18300,
+      "created_at": "2026-03-28T20:14:59.347Z"
     }
   ]
 }
