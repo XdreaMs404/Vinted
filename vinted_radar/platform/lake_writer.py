@@ -19,8 +19,9 @@ from vinted_radar.domain.events import (
     sanitize_storage_segment,
 )
 from vinted_radar.domain.manifests import EvidenceManifest
-from vinted_radar.platform.config import PlatformConfig
+from vinted_radar.platform.config import PlatformConfig, load_platform_config
 from vinted_radar.platform.object_store import ObjectStoreObject, S3ObjectStore
+from vinted_radar.platform.outbox import OutboxPublishResult, PostgresOutbox
 
 PARQUET_LAKE_SCHEMA_VERSION = 1
 PARQUET_LAKE_COMPRESSION = "zstd"
@@ -50,6 +51,24 @@ class LakeWriteResult:
             "event_object": self.event_object.as_dict(),
             "parquet_object": self.parquet_object.as_dict(),
             "manifest_object": self.manifest_object.as_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceBatchEmissionResult:
+    batch_event: EventEnvelope
+    row_count: int
+    lake_write: LakeWriteResult | None = None
+    outbox_publish: OutboxPublishResult | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "event_id": self.batch_event.event_id,
+            "event_type": self.batch_event.event_type,
+            "row_count": self.row_count,
+            "manifest_id": None if self.lake_write is None else self.lake_write.manifest.manifest_id,
+            "lake_write": None if self.lake_write is None else self.lake_write.as_dict(),
+            "outbox_publish": None if self.outbox_publish is None else self.outbox_publish.as_dict(),
         }
 
 
@@ -115,7 +134,6 @@ class ParquetLakeWriter:
         }
         parquet_key = self.parquet_object_key(batch_event)
         event_key = batch_event.object_key(self.raw_events_prefix)
-        manifest_key: str | None = None
 
         event_object = self.object_store.put_text(
             key=event_key,
@@ -244,6 +262,111 @@ class ParquetLakeWriter:
             return stage_path.read_bytes()
 
 
+class CollectorEvidencePublisher:
+    def __init__(
+        self,
+        *,
+        lake_writer: ParquetLakeWriter | None = None,
+        outbox: PostgresOutbox | None = None,
+        sinks: Sequence[str] = (),
+        closeables: Sequence[object] = (),
+    ) -> None:
+        self.lake_writer = lake_writer
+        self.outbox = outbox
+        self.sinks = _normalize_sinks(sinks)
+        self._closeables = tuple(closeables)
+
+    @classmethod
+    def from_environment(
+        cls,
+        *,
+        config: PlatformConfig | None = None,
+        s3_client: object | None = None,
+        postgres_connection: object | None = None,
+        ensure_bucket: bool = True,
+    ) -> CollectorEvidencePublisher | None:
+        resolved_config = load_platform_config() if config is None else config
+        lake_writer: ParquetLakeWriter | None = None
+        outbox: PostgresOutbox | None = None
+        sinks: list[str] = []
+        closeables: list[object] = []
+
+        created_s3_client = False
+        created_postgres_connection = False
+
+        if resolved_config.cutover.enable_object_storage_writes:
+            lake_writer = ParquetLakeWriter.from_config(resolved_config, client=s3_client)
+            if ensure_bucket:
+                lake_writer.object_store.ensure_bucket()
+            created_s3_client = s3_client is None
+            if created_s3_client:
+                closeables.append(lake_writer.object_store.client)
+
+        if resolved_config.cutover.enable_postgres_writes:
+            connection = postgres_connection
+            if connection is None:
+                import psycopg
+
+                connection = psycopg.connect(resolved_config.postgres.dsn)
+                created_postgres_connection = True
+            outbox = PostgresOutbox(connection)
+            if resolved_config.cutover.enable_clickhouse_writes:
+                sinks.append("clickhouse")
+            if resolved_config.cutover.enable_object_storage_writes:
+                sinks.append("parquet")
+            if created_postgres_connection:
+                closeables.append(connection)
+
+        if lake_writer is None and outbox is None:
+            return None
+        return cls(
+            lake_writer=lake_writer,
+            outbox=outbox,
+            sinks=sinks,
+            closeables=closeables,
+        )
+
+    def emit_batch(
+        self,
+        *,
+        batch_event: EventEnvelope,
+        rows: Sequence[Mapping[str, Any]],
+        manifest_metadata: Mapping[str, Any] | None = None,
+        manifest_type: str = "parquet-evidence-batch",
+        sinks: Sequence[str] | None = None,
+    ) -> EvidenceBatchEmissionResult | None:
+        if not rows:
+            return None
+
+        lake_write: LakeWriteResult | None = None
+        if self.lake_writer is not None:
+            lake_write = self.lake_writer.write_batch(
+                batch_event=batch_event,
+                rows=rows,
+                manifest_metadata=manifest_metadata,
+                manifest_type=manifest_type,
+            )
+
+        normalized_sinks = self.sinks if sinks is None else _normalize_sinks(sinks)
+        outbox_publish: OutboxPublishResult | None = None
+        if self.outbox is not None and normalized_sinks:
+            outbox_publish = self.outbox.publish(
+                batch_event,
+                sinks=normalized_sinks,
+                manifest=None if lake_write is None else lake_write.manifest,
+            )
+
+        return EvidenceBatchEmissionResult(
+            batch_event=batch_event,
+            row_count=len(rows),
+            lake_write=lake_write,
+            outbox_publish=outbox_publish,
+        )
+
+    def close(self) -> None:
+        for resource in self._closeables:
+            _close_resource_quietly(resource)
+
 
 def _build_storage_row(
     *,
@@ -291,7 +414,34 @@ def _occurred_on(value: str) -> str:
     return parsed.astimezone(UTC).date().isoformat()
 
 
+
+def _normalize_sinks(sinks: Sequence[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for sink in sinks:
+        candidate = str(sink).strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+    return tuple(normalized)
+
+
+
+def _close_resource_quietly(resource: object) -> None:
+    for method_name in ("close", "close_connections"):
+        method = getattr(resource, method_name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+
+
 __all__ = [
+    "CollectorEvidencePublisher",
+    "EvidenceBatchEmissionResult",
     "LakeWriteResult",
     "PARQUET_CONTENT_TYPE",
     "PARQUET_LAKE_COMPRESSION",

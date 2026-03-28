@@ -127,7 +127,7 @@ class RadarRuntimeService:
                     )
                 )
             finally:
-                discovery_service.repository.close()
+                _close_service(discovery_service)
 
             current_phase = "state_refresh"
             self._update_phase(cycle_id, current_phase)
@@ -140,7 +140,7 @@ class RadarRuntimeService:
             try:
                 state_report = state_refresh_service.refresh(limit=options.state_refresh_limit, include_state_summary=False)
             finally:
-                state_refresh_service.repository.close()
+                _close_service(state_refresh_service)
 
             current_phase = "summarizing"
             self._update_phase(cycle_id, current_phase)
@@ -509,3 +509,16 @@ class RadarRuntimeService:
             discovery_report=discovery_report,
             state_report=state_report,
         )
+
+
+def _close_service(service: object) -> None:
+    close = getattr(service, "close", None)
+    if callable(close):
+        close()
+        return
+    repository = getattr(service, "repository", None)
+    if repository is None:
+        return
+    repository_close = getattr(repository, "close", None)
+    if callable(repository_close):
+        repository_close()

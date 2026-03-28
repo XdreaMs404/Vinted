@@ -12,7 +12,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/platform/lake_writer.py, vinted_radar/platform/object_store.py, vinted_radar/domain/manifests.py, vinted_radar/cli.py, tests/test_lake_writer.py
   - Verify: python -m pytest tests/test_lake_writer.py -q
-- [ ] **T03: Collector emission to evidence lake** — Connect discovery and state-refresh to the new raw-evidence path. Emit listing-seen and probe evidence batches through the outbox/manifests seam, keep write operations idempotent, and make sure one collected run can produce retrievable raw evidence without yet requiring the mutable/read cutover slices.
+- [x] **T03: Wired discovery and state-refresh to emit deterministic Parquet evidence batches with manifests and outbox metadata.** — Connect discovery and state-refresh to the new raw-evidence path. Emit listing-seen and probe evidence batches through the outbox/manifests seam, keep write operations idempotent, and make sure one collected run can produce retrievable raw evidence without yet requiring the mutable/read cutover slices.
   - Estimate: 2 sessions
   - Files: vinted_radar/services/discovery.py, vinted_radar/services/state_refresh.py, vinted_radar/platform/outbox.py, vinted_radar/platform/lake_writer.py, tests/test_discovery_service.py, tests/test_runtime_service.py, tests/test_evidence_batches.py
   - Verify: python -m pytest tests/test_evidence_batches.py tests/test_discovery_service.py tests/test_runtime_service.py -q

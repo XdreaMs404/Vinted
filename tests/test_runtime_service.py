@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 
+from vinted_radar.http import FetchedPage
 from vinted_radar.models import CatalogNode, ListingCard
+from vinted_radar.platform.lake_writer import CollectorEvidencePublisher, ParquetLakeWriter
+from vinted_radar.platform.object_store import S3ObjectStore
+from vinted_radar.platform.outbox import PostgresOutbox
 from vinted_radar.repository import RadarRepository
-from vinted_radar.services.discovery import DiscoveryRunReport
+from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryRunReport, DiscoveryService, _build_api_catalog_url
 from vinted_radar.services.runtime import RadarRuntimeOptions, RadarRuntimeService
-from vinted_radar.services.state_refresh import StateRefreshReport
+from vinted_radar.services.state_refresh import StateRefreshReport, StateRefreshService
+
+from tests.platform_test_fakes import FakePostgresConnection, FakeS3Client
 
 
 class PersistingDiscoveryService:

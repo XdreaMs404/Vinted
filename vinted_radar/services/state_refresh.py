@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Callable
 
+from vinted_radar.domain.events import EventEnvelope
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.parsers.item_page import parse_item_page_probe
+from vinted_radar.platform.lake_writer import CollectorEvidencePublisher
 from vinted_radar.repository import RadarRepository
 from vinted_radar.state_machine import STATE_ORDER, evaluate_listing_state, summarize_state_evaluations
 
@@ -16,6 +18,7 @@ class StateRefreshReport:
     state_summary: dict[str, object]
     probed_listing_ids: list[int]
     probe_summary: dict[str, object]
+    evidence_batches: tuple[dict[str, object], ...] = ()
 
 
 class StateRefreshService:
@@ -25,10 +28,23 @@ class StateRefreshService:
         http_client: VintedHttpClient,
         *,
         now_provider: Callable[[], str] | None = None,
+        evidence_publisher: CollectorEvidencePublisher | None = None,
     ) -> None:
         self.repository = repository
         self.http_client = http_client
         self.now_provider = now_provider or _utc_now
+        self.evidence_publisher = evidence_publisher
+
+    def close(self) -> None:
+        self.repository.close()
+        close = getattr(self.http_client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                pass
+        if self.evidence_publisher is not None:
+            self.evidence_publisher.close()
 
     def refresh(
         self,
@@ -49,9 +65,10 @@ class StateRefreshService:
 
         for target in targets:
             listing_id_value = int(target["listing_id"])
+            requested_url = str(target["canonical_url"])
             probed_at = self.now_provider()
             try:
-                page = self.http_client.get_text(str(target["canonical_url"]))
+                page = self.http_client.get_text(requested_url)
                 parsed = parse_item_page_probe(
                     listing_id=listing_id_value,
                     response_status=page.status_code,
@@ -60,7 +77,7 @@ class StateRefreshService:
                 self.repository.record_item_page_probe(
                     listing_id=listing_id_value,
                     probed_at=probed_at,
-                    requested_url=str(target["canonical_url"]),
+                    requested_url=requested_url,
                     final_url=page.url,
                     response_status=page.status_code,
                     probe_outcome=parsed.probe_outcome,
@@ -71,9 +88,12 @@ class StateRefreshService:
                     {
                         "listing_id": listing_id_value,
                         "probed_at": probed_at,
+                        "requested_url": requested_url,
+                        "final_url": page.url,
                         "probe_outcome": parsed.probe_outcome,
                         "response_status": page.status_code,
                         "reason": parsed.detail.get("reason"),
+                        "detail": dict(parsed.detail),
                         "error_message": None,
                     }
                 )
@@ -83,7 +103,7 @@ class StateRefreshService:
                 self.repository.record_item_page_probe(
                     listing_id=listing_id_value,
                     probed_at=probed_at,
-                    requested_url=str(target["canonical_url"]),
+                    requested_url=requested_url,
                     final_url=None,
                     response_status=None,
                     probe_outcome="unknown",
@@ -94,13 +114,27 @@ class StateRefreshService:
                     {
                         "listing_id": listing_id_value,
                         "probed_at": probed_at,
+                        "requested_url": requested_url,
+                        "final_url": None,
                         "probe_outcome": "unknown",
                         "response_status": None,
                         "reason": "probe_exception",
+                        "detail": detail,
                         "error_message": error_message,
                     }
                 )
             probed_listing_ids.append(listing_id_value)
+
+        evidence_batches: list[dict[str, object]] = []
+        probe_batch = self._emit_probe_batch(
+            reference_now=reference_now,
+            requested_limit=limit,
+            listing_id=listing_id,
+            targets=targets,
+            probe_records=probe_records,
+        )
+        if probe_batch is not None:
+            evidence_batches.append(probe_batch)
 
         if include_state_summary:
             refreshed_inputs = self.repository.listing_state_inputs(now=reference_now, listing_id=listing_id)
@@ -118,7 +152,46 @@ class StateRefreshService:
             state_summary=summary,
             probed_listing_ids=probed_listing_ids,
             probe_summary=probe_summary,
+            evidence_batches=tuple(evidence_batches),
         )
+
+    def _emit_probe_batch(
+        self,
+        *,
+        reference_now: str,
+        requested_limit: int,
+        listing_id: int | None,
+        targets: list[dict[str, object]],
+        probe_records: list[dict[str, object]],
+    ) -> dict[str, object] | None:
+        if self.evidence_publisher is None or not probe_records:
+            return None
+
+        batch_event = _build_probe_batch_event(
+            reference_now=reference_now,
+            requested_limit=requested_limit,
+            listing_id=listing_id,
+            probe_records=probe_records,
+        )
+        rows = _build_probe_batch_rows(
+            reference_now=reference_now,
+            listing_id=listing_id,
+            probe_records=probe_records,
+        )
+        emission = self.evidence_publisher.emit_batch(
+            batch_event=batch_event,
+            rows=rows,
+            manifest_type="probe-evidence-batch",
+            manifest_metadata={
+                "reference_now": reference_now,
+                "requested_limit": requested_limit,
+                "targeted_listing_id": listing_id,
+                "selected_target_count": len(targets),
+                "row_count": len(probe_records),
+                "probed_listing_ids": [int(record["listing_id"]) for record in probe_records],
+            },
+        )
+        return None if emission is None else emission.as_dict()
 
 
 def _skipped_state_summary(generated_at: str) -> dict[str, object]:
@@ -149,7 +222,12 @@ def build_default_state_refresh_service(
 ) -> StateRefreshService:
     repository = RadarRepository(db_path)
     http_client = VintedHttpClient(timeout_seconds=timeout_seconds, request_delay=request_delay, proxies=proxies)
-    return StateRefreshService(repository=repository, http_client=http_client)
+    evidence_publisher = CollectorEvidencePublisher.from_environment()
+    return StateRefreshService(
+        repository=repository,
+        http_client=http_client,
+        evidence_publisher=evidence_publisher,
+    )
 
 
 def _select_probe_targets(inputs: list[dict[str, object]], *, limit: int, listing_id: int | None) -> list[dict[str, object]]:
@@ -250,6 +328,69 @@ def _build_probe_summary(
         "reason_counts": dict(sorted(reason_counts.items())),
         "degraded_listing_ids": degraded_listing_ids,
     }
+
+
+def _build_probe_batch_event(
+    *,
+    reference_now: str,
+    requested_limit: int,
+    listing_id: int | None,
+    probe_records: list[dict[str, object]],
+) -> EventEnvelope:
+    probed_listing_ids = [int(record["listing_id"]) for record in probe_records]
+    occurred_at = str(probe_records[0].get("probed_at") or reference_now)
+    return EventEnvelope.create(
+        schema_version=1,
+        event_type="vinted.state-refresh.probe.batch",
+        aggregate_type="state-refresh",
+        aggregate_id="all" if listing_id is None else f"listing:{listing_id}",
+        occurred_at=occurred_at,
+        producer="vinted_radar.services.state_refresh",
+        partition_key=listing_id if listing_id is not None else probed_listing_ids[0],
+        payload={
+            "reference_now": reference_now,
+            "requested_limit": requested_limit,
+            "targeted_listing_id": listing_id,
+            "row_count": len(probe_records),
+            "probed_listing_ids": probed_listing_ids,
+        },
+        metadata={
+            "capture_source": "item_page_probe",
+            "mode": "targeted" if listing_id is not None else "bulk",
+        },
+        identity={
+            "reference_now": reference_now,
+            "requested_limit": requested_limit,
+            "targeted_listing_id": listing_id,
+            "probed_listing_ids": probed_listing_ids,
+        },
+    )
+
+
+def _build_probe_batch_rows(
+    *,
+    reference_now: str,
+    listing_id: int | None,
+    probe_records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for record in probe_records:
+        rows.append(
+            {
+                "reference_now": reference_now,
+                "targeted_listing_id": listing_id,
+                "listing_id": int(record["listing_id"]),
+                "probed_at": str(record["probed_at"]),
+                "requested_url": record.get("requested_url"),
+                "final_url": record.get("final_url"),
+                "probe_outcome": record.get("probe_outcome"),
+                "response_status": record.get("response_status"),
+                "reason": record.get("reason"),
+                "detail": dict(record.get("detail") or {}),
+                "error_message": record.get("error_message"),
+            }
+        )
+    return rows
 
 
 def _is_degraded_probe_record(*, reason: str, response_status: object, error_message: object) -> bool:

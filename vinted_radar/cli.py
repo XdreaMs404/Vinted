@@ -53,6 +53,19 @@ def _render_transport_summary(*, proxies: tuple[str, ...], concurrency: int | No
     return f"Transport: proxy-pool ({len(proxies)} routes, concurrency {resolved_concurrency})"
 
 
+def _close_service(service: object) -> None:
+    close = getattr(service, "close", None)
+    if callable(close):
+        close()
+        return
+    repository = getattr(service, "repository", None)
+    if repository is None:
+        return
+    repository_close = getattr(repository, "close", None)
+    if callable(repository_close):
+        repository_close()
+
+
 @app.command()
 def discover(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
@@ -83,7 +96,7 @@ def discover(
             )
         )
     finally:
-        service.repository.close()
+        _close_service(service)
 
     typer.echo(f"Run: {report.run_id}")
     typer.echo(_render_transport_summary(proxies=proxies, concurrency=resolved_concurrency))
@@ -689,7 +702,7 @@ def state_refresh(
     try:
         report = service.refresh(limit=limit, listing_id=listing_id, now=now)
     finally:
-        service.repository.close()
+        _close_service(service)
 
     if output_format == "json":
         typer.echo(

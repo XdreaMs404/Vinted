@@ -10,10 +10,12 @@ from datetime import UTC, datetime
 from itertools import zip_longest
 from urllib.parse import urlencode
 
+from vinted_radar.domain.events import EventEnvelope
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.models import CatalogNode, ListingCard
 from vinted_radar.parsers.api_catalog_page import parse_api_catalog_page
 from vinted_radar.parsers.catalog_tree import parse_catalog_tree_from_html
+from vinted_radar.platform.lake_writer import CollectorEvidencePublisher
 from vinted_radar.repository import RadarRepository
 
 logger = logging.getLogger(__name__)
@@ -52,15 +54,18 @@ class DiscoveryRunReport:
     failed_scans: int
     raw_listing_hits: int
     unique_listing_hits: int
+    evidence_batches: tuple[dict[str, object], ...] = ()
 
 
 @dataclass
 class _CatalogScanResult:
     """Mutable accumulator returned by each catalog scan coroutine."""
+
     successful_scans: int = 0
     failed_scans: int = 0
     raw_listing_hits: int = 0
     unique_listing_ids: set[int] = field(default_factory=set)
+    evidence_batches: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,10 +86,23 @@ class DiscoveryService:
         http_client: VintedHttpClient,
         *,
         now_provider: Callable[[], str] | None = None,
+        evidence_publisher: CollectorEvidencePublisher | None = None,
     ) -> None:
         self.repository = repository
         self.http_client = http_client
         self.now_provider = now_provider or _utc_now
+        self.evidence_publisher = evidence_publisher
+
+    def close(self) -> None:
+        self.repository.close()
+        close = getattr(self.http_client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                pass
+        if self.evidence_publisher is not None:
+            self.evidence_publisher.close()
 
     # ------------------------------------------------------------------
     # Public: sync wrapper  (keeps CLI / runtime / tests backward-compat)
@@ -100,6 +118,7 @@ class DiscoveryService:
             # Already inside an event-loop (e.g. Jupyter, nested call).
             # Fall back to a dedicated thread to avoid "cannot nest".
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 return pool.submit(asyncio.run, self.run_async(options)).result()
 
@@ -130,6 +149,8 @@ class DiscoveryService:
         failed_scans = 0
         raw_listing_hits = 0
         unique_listing_ids: set[int] = set()
+        evidence_batches: list[dict[str, object]] = []
+        catalogs: list[CatalogNode] = []
 
         try:
             # 1. Fetch the catalog tree (single request, still via async).
@@ -191,6 +212,7 @@ class DiscoveryService:
                 failed_scans += result.failed_scans
                 raw_listing_hits += result.raw_listing_hits
                 unique_listing_ids.update(result.unique_listing_ids)
+                evidence_batches.extend(result.evidence_batches)
 
             self.repository.complete_run(
                 run_id,
@@ -227,6 +249,7 @@ class DiscoveryService:
             failed_scans=failed_scans,
             raw_listing_hits=raw_listing_hits,
             unique_listing_hits=len(unique_listing_ids),
+            evidence_batches=tuple(evidence_batches),
         )
 
     # ------------------------------------------------------------------
@@ -322,6 +345,18 @@ class DiscoveryService:
                     maximum_price_cents=maximum_price_cents,
                     target_brands=target_brands,
                 )
+                evidence_batch = self._emit_listing_seen_batch(
+                    run_id=run_id,
+                    catalog=catalog,
+                    observed_at=observed_at,
+                    page_number=page_number,
+                    page_telemetry=page_telemetry,
+                    parsed_page=parsed_page,
+                    requested_url=api_url,
+                )
+                if evidence_batch is not None:
+                    result.evidence_batches.append(evidence_batch)
+
                 result.successful_scans += 1
                 result.raw_listing_hits += page_telemetry.api_listing_count
                 logger.info(
@@ -417,6 +452,55 @@ class DiscoveryService:
 
         return result
 
+    def _emit_listing_seen_batch(
+        self,
+        *,
+        run_id: str,
+        catalog: CatalogNode,
+        observed_at: str,
+        page_number: int,
+        page_telemetry: _PageScanTelemetry,
+        parsed_page: object,
+        requested_url: str,
+    ) -> dict[str, object] | None:
+        if self.evidence_publisher is None or not page_telemetry.accepted_listings:
+            return None
+
+        rows = _build_listing_seen_batch_rows(
+            run_id=run_id,
+            catalog=catalog,
+            observed_at=observed_at,
+            page_number=page_number,
+            accepted_listings=page_telemetry.accepted_listings,
+        )
+        batch_event = _build_listing_seen_batch_event(
+            run_id=run_id,
+            catalog=catalog,
+            observed_at=observed_at,
+            page_number=page_number,
+            accepted_listings=page_telemetry.accepted_listings,
+        )
+        emission = self.evidence_publisher.emit_batch(
+            batch_event=batch_event,
+            rows=rows,
+            manifest_type="listing-seen-evidence-batch",
+            manifest_metadata={
+                "run_id": run_id,
+                "catalog_id": catalog.catalog_id,
+                "root_catalog_id": catalog.root_catalog_id,
+                "catalog_path": catalog.path_text,
+                "page_number": page_number,
+                "requested_url": requested_url,
+                "api_listing_count": page_telemetry.api_listing_count,
+                "accepted_listing_count": page_telemetry.accepted_listing_count,
+                "filtered_out_count": page_telemetry.filtered_out_count,
+                "pagination_current_page": parsed_page.current_page,
+                "pagination_total_pages": parsed_page.total_pages,
+                "next_page_url": parsed_page.next_page_url,
+            },
+        )
+        return None if emission is None else emission.as_dict()
+
 
 def build_default_service(
     *,
@@ -433,7 +517,12 @@ def build_default_service(
         proxies=proxies,
         max_retries=max_retries,
     )
-    return DiscoveryService(repository=repository, http_client=http_client)
+    evidence_publisher = CollectorEvidencePublisher.from_environment()
+    return DiscoveryService(
+        repository=repository,
+        http_client=http_client,
+        evidence_publisher=evidence_publisher,
+    )
 
 
 def _select_leaf_catalogs(
@@ -535,6 +624,85 @@ def _listing_matches_filters(
 
     normalized_brand = _normalize_filter_text(listing.brand)
     return normalized_brand in target_brands
+
+
+def _build_listing_seen_batch_event(
+    *,
+    run_id: str,
+    catalog: CatalogNode,
+    observed_at: str,
+    page_number: int,
+    accepted_listings: tuple[tuple[int, ListingCard], ...],
+) -> EventEnvelope:
+    listing_ids = [listing.listing_id for _, listing in accepted_listings]
+    return EventEnvelope.create(
+        schema_version=1,
+        event_type="vinted.discovery.listing-seen.batch",
+        aggregate_type="discovery-run",
+        aggregate_id=run_id,
+        occurred_at=observed_at,
+        producer="vinted_radar.services.discovery",
+        partition_key=catalog.root_catalog_id,
+        payload={
+            "run_id": run_id,
+            "catalog_id": catalog.catalog_id,
+            "root_catalog_id": catalog.root_catalog_id,
+            "page_number": page_number,
+            "row_count": len(accepted_listings),
+            "listing_ids": listing_ids,
+        },
+        metadata={
+            "capture_source": "api_catalog_page",
+            "root_title": catalog.root_title,
+            "catalog_title": catalog.title,
+            "catalog_path": catalog.path_text,
+        },
+        identity={
+            "run_id": run_id,
+            "catalog_id": catalog.catalog_id,
+            "page_number": page_number,
+            "observed_at": observed_at,
+        },
+    )
+
+
+def _build_listing_seen_batch_rows(
+    *,
+    run_id: str,
+    catalog: CatalogNode,
+    observed_at: str,
+    page_number: int,
+    accepted_listings: tuple[tuple[int, ListingCard], ...],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for card_position, listing in accepted_listings:
+        rows.append(
+            {
+                "run_id": run_id,
+                "observed_at": observed_at,
+                "catalog_id": catalog.catalog_id,
+                "root_catalog_id": catalog.root_catalog_id,
+                "root_title": catalog.root_title,
+                "catalog_title": catalog.title,
+                "catalog_path": catalog.path_text,
+                "page_number": page_number,
+                "card_position": card_position,
+                "listing_id": listing.listing_id,
+                "canonical_url": listing.canonical_url,
+                "source_url": listing.source_url,
+                "title": listing.title,
+                "brand": listing.brand,
+                "size_label": listing.size_label,
+                "condition_label": listing.condition_label,
+                "price_amount_cents": listing.price_amount_cents,
+                "price_currency": listing.price_currency,
+                "total_price_amount_cents": listing.total_price_amount_cents,
+                "total_price_currency": listing.total_price_currency,
+                "image_url": listing.image_url,
+                "raw_card": dict(listing.raw_card),
+            }
+        )
+    return rows
 
 
 def _normalize_filter_text(value: str | None) -> str:

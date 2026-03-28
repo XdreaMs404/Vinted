@@ -6,8 +6,13 @@ from pathlib import Path
 import pytest
 
 from vinted_radar.http import FetchedPage
+from vinted_radar.platform.lake_writer import CollectorEvidencePublisher, ParquetLakeWriter
+from vinted_radar.platform.object_store import S3ObjectStore
+from vinted_radar.platform.outbox import PostgresOutbox
 from vinted_radar.repository import RadarRepository
 from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryService, _build_api_catalog_url
+
+from tests.platform_test_fakes import FakePostgresConnection, FakeS3Client
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -67,6 +72,25 @@ class FakeHttpClient:
 
     async def get_text_async(self, url: str) -> FetchedPage:
         return self.get_text(url)
+
+
+def _build_evidence_publisher() -> tuple[CollectorEvidencePublisher, FakePostgresConnection]:
+    s3_client = FakeS3Client()
+    object_store = S3ObjectStore(s3_client, bucket="vinted-radar-test")
+    object_store.ensure_bucket()
+    postgres_connection = FakePostgresConnection()
+    publisher = CollectorEvidencePublisher(
+        lake_writer=ParquetLakeWriter(
+            object_store,
+            raw_events_prefix="tenant-a/events/raw",
+            manifests_prefix="tenant-a/manifests",
+            parquet_prefix="tenant-a/parquet",
+        ),
+        outbox=PostgresOutbox(postgres_connection),
+        sinks=("parquet",),
+    )
+    return publisher, postgres_connection
+
 
 
 def test_discovery_service_defaults_to_bounded_api_price_filter(tmp_path: Path) -> None:
@@ -371,3 +395,44 @@ def test_discovery_service_restricts_scans_to_target_catalog_ids(tmp_path: Path)
         assert report.raw_listing_hits == 1
         assert report.unique_listing_hits == 1
         assert repository.count_rows("listings") == 1
+
+
+
+def test_discovery_service_emits_retrievable_listing_seen_evidence_batches(tmp_path: Path) -> None:
+    catalog_root = (FIXTURES / "catalog-root.html").read_text(encoding="utf-8")
+    women_api_url = _build_api_catalog_url(2001, 1)
+    pages = {
+        "https://www.vinted.fr/catalog": FetchedPage("https://www.vinted.fr/catalog", 200, catalog_root),
+        women_api_url: FetchedPage(women_api_url, 200, _make_api_page(WOMEN_ITEMS, current_page=1, total_pages=1)),
+    }
+    publisher, postgres_connection = _build_evidence_publisher()
+
+    with RadarRepository(tmp_path / "radar.db") as repository:
+        service = DiscoveryService(
+            repository=repository,
+            http_client=FakeHttpClient(pages),
+            evidence_publisher=publisher,
+        )
+        report = service.run(
+            DiscoveryOptions(
+                page_limit=1,
+                max_leaf_categories=1,
+                root_scope="women",
+                request_delay=0.0,
+                min_price=0.0,
+            )
+        )
+
+        assert len(report.evidence_batches) == 1
+        batch = report.evidence_batches[0]
+        assert batch["event_type"] == "vinted.discovery.listing-seen.batch"
+        assert batch["row_count"] == 2
+        assert batch["outbox_publish"]["sinks"] == ["parquet"]
+        assert batch["outbox_publish"]["delivery_rows_created"] == 1
+
+        parquet_key = str(batch["lake_write"]["parquet_object"]["key"])
+        rows = publisher.lake_writer.read_rows(parquet_key) if publisher.lake_writer is not None else []
+        assert [row["listing_id"] for row in rows] == [9001, 9002]
+        assert rows[0]["catalog_id"] == 2001
+        assert json.loads(str(rows[0]["raw_card"]))["evidence_source"] == "api"
+        assert len(postgres_connection.outbox) == 1

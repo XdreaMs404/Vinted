@@ -38,6 +38,8 @@ from vinted_radar.platform.health import (
     summarize_platform_health,
 )
 from vinted_radar.platform.lake_writer import (
+    CollectorEvidencePublisher,
+    EvidenceBatchEmissionResult,
     PARQUET_CONTENT_TYPE,
     PARQUET_LAKE_COMPRESSION,
     PARQUET_LAKE_SCHEMA_VERSION,
@@ -88,7 +90,9 @@ __all__ = [
     "RAW_EVENTS_PREFIX_ENV",
     "S3ObjectStore",
     "SchemaSystemStatus",
+    "CollectorEvidencePublisher",
     "ClaimedOutboxRecord",
+    "EvidenceBatchEmissionResult",
     "LakeWriteResult",
     "ParquetLakeWriter",
     "bootstrap_data_platform",
