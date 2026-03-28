@@ -16,7 +16,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/services/discovery.py, vinted_radar/services/state_refresh.py, vinted_radar/platform/outbox.py, vinted_radar/platform/lake_writer.py, tests/test_discovery_service.py, tests/test_runtime_service.py, tests/test_evidence_batches.py
   - Verify: python -m pytest tests/test_evidence_batches.py tests/test_discovery_service.py tests/test_runtime_service.py -q
-- [ ] **T04: Historical export + evidence lookup** — Add historical export and evidence inspection tooling. Provide a CLI/backfill command that can export legacy SQLite discovery/observation/probe raw evidence into the Parquet lake, and add an inspection command that resolves an event or manifest reference back to a concrete evidence fragment for debugging and proof drill-down.
+- [x] **T04: Added SQLite evidence backfill and manifest/event lookup commands for the Parquet lake.** — Add historical export and evidence inspection tooling. Provide a CLI/backfill command that can export legacy SQLite discovery/observation/probe raw evidence into the Parquet lake, and add an inspection command that resolves an event or manifest reference back to a concrete evidence fragment for debugging and proof drill-down.
   - Estimate: 1-2 sessions
   - Files: vinted_radar/cli.py, vinted_radar/services/evidence_export.py, vinted_radar/services/evidence_lookup.py, tests/test_evidence_export.py
   - Verify: python -m pytest tests/test_evidence_export.py -q

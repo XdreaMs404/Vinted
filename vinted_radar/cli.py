@@ -22,6 +22,8 @@ from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
+from vinted_radar.services.evidence_export import HistoricalEvidenceExportReport, HistoricalEvidenceExporter
+from vinted_radar.services.evidence_lookup import EvidenceLookupResult, EvidenceLookupService
 from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
 from vinted_radar.services.state_refresh import build_default_state_refresh_service
 from vinted_radar.serving import build_dashboard_urls
@@ -327,6 +329,82 @@ def platform_doctor(
     _emit_platform_report(report=report, output_format=output_format)
     if not report.ok:
         raise typer.Exit(code=1)
+
+
+@app.command("evidence-export")
+def evidence_export(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    dataset: list[str] | None = typer.Option(None, "--dataset", help="discoveries, observations, probes, or all. Repeatable."),
+    batch_size: int = typer.Option(500, "--batch-size", min=1, help="Maximum rows per exported batch inside a natural source group."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    exporter = HistoricalEvidenceExporter.from_config(db_path=db, config=config)
+    try:
+        report = exporter.export(datasets=dataset or (), batch_size=batch_size)
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Historical evidence export failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        exporter.close()
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_evidence_export_report(report=report, db=db, bucket=config.object_storage.bucket)
+
+
+@app.command("evidence-inspect")
+def evidence_inspect(
+    event_id: str | None = typer.Option(None, "--event-id", help="Resolve a batch by event ID."),
+    manifest_id: str | None = typer.Option(None, "--manifest-id", help="Resolve a batch by manifest ID."),
+    event_key: str | None = typer.Option(None, "--event-key", help="Resolve a batch by raw event object key."),
+    manifest_key: str | None = typer.Option(None, "--manifest-key", help="Resolve a batch by manifest object key."),
+    row_index: int | None = typer.Option(None, "--row-index", min=0, help="Select a concrete row by row_index."),
+    listing_id: int | None = typer.Option(None, "--listing-id", min=1, help="Select a concrete row by listing_id."),
+    probe_id: str | None = typer.Option(None, "--probe-id", help="Select a concrete probe row by probe_id."),
+    field_path: str | None = typer.Option(None, "--field-path", help="Dot path under row.*, event.*, or manifest.*."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    lookup_service = EvidenceLookupService.from_config(config=config)
+    try:
+        result = lookup_service.inspect(
+            event_id=event_id,
+            manifest_id=manifest_id,
+            event_key=event_key,
+            manifest_key=manifest_key,
+            row_index=row_index,
+            listing_id=listing_id,
+            probe_id=probe_id,
+            field_path=field_path,
+        )
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        typer.echo(f"Evidence lookup failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        lookup_service.close()
+
+    if output_format == "json":
+        typer.echo(json.dumps(result.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_evidence_lookup_result(result)
 
 
 @app.command("runtime-pause")
@@ -1500,6 +1578,49 @@ def _render_platform_object_storage_status(status: object) -> None:
     typer.echo(f"- detail: {getattr(status, 'detail', 'n/a')}")
     if getattr(status, 'error', None):
         typer.echo(f"- error: {getattr(status, 'error')}")
+
+
+def _render_evidence_export_report(*, report: HistoricalEvidenceExportReport, db: Path, bucket: str) -> None:
+    typer.echo(f"Database: {db}")
+    typer.echo(f"Object store bucket: {bucket}")
+    typer.echo(f"Datasets: {', '.join(report.datasets)}")
+    typer.echo(f"Batches written: {report.total_batches}")
+    typer.echo(f"Rows exported: {report.total_rows}")
+    typer.echo("Dataset totals:")
+    for dataset in report.datasets:
+        typer.echo(
+            f"- {dataset}: {report.batch_counts.get(dataset, 0)} batches, {report.row_counts.get(dataset, 0)} rows"
+        )
+
+    if not report.batches:
+        typer.echo("Batch refs: none (no legacy evidence rows were available)")
+        return
+
+    typer.echo("Batch refs:")
+    preview = list(report.batches[:10])
+    for batch in preview:
+        typer.echo(
+            "- {dataset} | {group_key} | rows {row_count} | event {event_id} | manifest {manifest_id}".format(
+                **batch.as_dict()
+            )
+        )
+    remaining = len(report.batches) - len(preview)
+    if remaining > 0:
+        typer.echo(f"- … {remaining} additional batches not shown; use --format json for the full reference list.")
+
+
+def _render_evidence_lookup_result(result: EvidenceLookupResult) -> None:
+    typer.echo(f"Event: {result.event.event_id} ({result.event.event_type})")
+    typer.echo(f"Manifest: {result.manifest.manifest_id} ({result.manifest.manifest_type})")
+    typer.echo(f"Event key: {result.event_key}")
+    typer.echo(f"Manifest key: {result.manifest_key}")
+    typer.echo(f"Parquet key: {result.parquet_object_key}")
+    typer.echo(f"Rows in batch: {result.row_count}")
+    if result.matched_row_index is not None:
+        typer.echo(f"Matched row index: {result.matched_row_index}")
+    typer.echo(f"Fragment root: {result.fragment_root}")
+    typer.echo(f"Fragment path: {result.fragment_path or '(whole row)'}")
+    _echo(json.dumps(result.fragment, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 def _format_money(amount_cents: object, currency: object) -> str:

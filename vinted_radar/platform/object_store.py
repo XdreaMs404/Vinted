@@ -267,6 +267,40 @@ class S3ObjectStore:
     def get_json(self, key: str, *, verify_checksum: bool = True) -> Any:
         return json.loads(self.get_text(key, verify_checksum=verify_checksum))
 
+    def list_keys(self, prefix: str, *, limit: int | None = None) -> list[str]:
+        normalized_prefix = normalize_prefix(prefix)
+        keys: list[str] = []
+        continuation_token: str | None = None
+
+        while True:
+            request: dict[str, object] = {
+                "Bucket": self.bucket,
+                "Prefix": normalized_prefix,
+            }
+            if continuation_token is not None:
+                request["ContinuationToken"] = continuation_token
+            response = self.client.list_objects_v2(**request)
+            contents = response.get("Contents") if isinstance(response, Mapping) else None
+            if isinstance(contents, list):
+                for item in contents:
+                    if not isinstance(item, Mapping):
+                        continue
+                    key = item.get("Key")
+                    if key is None:
+                        continue
+                    keys.append(str(key))
+                    if limit is not None and len(keys) >= limit:
+                        return keys[:limit]
+
+            if not isinstance(response, Mapping) or not response.get("IsTruncated"):
+                break
+            next_token = response.get("NextContinuationToken")
+            if next_token is None:
+                break
+            continuation_token = str(next_token)
+
+        return keys
+
     def delete(self, key: str) -> None:
         normalized_key = normalize_prefix(key)
         self.client.delete_object(Bucket=self.bucket, Key=normalized_key)
