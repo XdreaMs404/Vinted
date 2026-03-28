@@ -43,7 +43,10 @@ DEFAULT_OBJECT_STORE_PREFIX = "vinted-radar"
 DEFAULT_RAW_EVENTS_PREFIX_SUFFIX = "events/raw"
 DEFAULT_MANIFESTS_PREFIX_SUFFIX = "manifests"
 DEFAULT_PARQUET_PREFIX_SUFFIX = "parquet"
-DEFAULT_SCHEMA_VERSION = 1
+DEFAULT_POSTGRES_SCHEMA_VERSION = 2
+DEFAULT_CLICKHOUSE_SCHEMA_VERSION = 1
+DEFAULT_EVENT_SCHEMA_VERSION = 1
+DEFAULT_MANIFEST_SCHEMA_VERSION = 1
 _SECRET_MASK = "***"
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
@@ -200,7 +203,7 @@ def load_platform_config(env: Mapping[str, str] | None = None) -> PlatformConfig
         schema_version=_read_positive_int(
             environment,
             POSTGRES_SCHEMA_VERSION_ENV,
-            default=DEFAULT_SCHEMA_VERSION,
+            default=DEFAULT_POSTGRES_SCHEMA_VERSION,
         ),
     )
     clickhouse = ClickHouseConfig(
@@ -211,7 +214,7 @@ def load_platform_config(env: Mapping[str, str] | None = None) -> PlatformConfig
         schema_version=_read_positive_int(
             environment,
             CLICKHOUSE_SCHEMA_VERSION_ENV,
-            default=DEFAULT_SCHEMA_VERSION,
+            default=DEFAULT_CLICKHOUSE_SCHEMA_VERSION,
         ),
     )
     object_storage = ObjectStorageConfig(
@@ -239,12 +242,12 @@ def load_platform_config(env: Mapping[str, str] | None = None) -> PlatformConfig
         events=_read_positive_int(
             environment,
             EVENT_SCHEMA_VERSION_ENV,
-            default=DEFAULT_SCHEMA_VERSION,
+            default=DEFAULT_EVENT_SCHEMA_VERSION,
         ),
         manifests=_read_positive_int(
             environment,
             MANIFEST_SCHEMA_VERSION_ENV,
-            default=DEFAULT_SCHEMA_VERSION,
+            default=DEFAULT_MANIFEST_SCHEMA_VERSION,
         ),
     )
     cutover = CutoverFlags(

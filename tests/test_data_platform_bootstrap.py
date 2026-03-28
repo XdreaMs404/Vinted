@@ -149,6 +149,10 @@ def _write_migration_fixture(root: Path) -> tuple[Path, Path]:
         "CREATE TABLE IF NOT EXISTS platform_bootstrap_audit (event_id BIGSERIAL PRIMARY KEY);",
         encoding="utf-8",
     )
+    (postgres_dir / "V002__platform_event_outbox.sql").write_text(
+        "CREATE TABLE IF NOT EXISTS platform_outbox (outbox_id BIGSERIAL PRIMARY KEY);",
+        encoding="utf-8",
+    )
     (clickhouse_dir / "V001__platform_bootstrap_audit.sql").write_text(
         "CREATE TABLE IF NOT EXISTS platform_bootstrap_audit (component String) ENGINE = MergeTree ORDER BY component;",
         encoding="utf-8",
@@ -184,8 +188,8 @@ def test_bootstrap_data_platform_applies_pending_migrations_and_bootstraps_objec
 
     assert report.ok is True
     assert report.postgres.ok is True
-    assert report.postgres.applied_this_run == (1,)
-    assert report.postgres.current_version == 1
+    assert report.postgres.applied_this_run == (1, 2)
+    assert report.postgres.current_version == 2
     assert report.clickhouse.ok is True
     assert report.clickhouse.applied_this_run == (1,)
     assert report.clickhouse.current_version == 1
@@ -214,7 +218,7 @@ def test_doctor_data_platform_flags_missing_schema_and_bucket(monkeypatch, tmp_p
 
     assert report.ok is False
     assert report.postgres.ok is False
-    assert report.postgres.pending_versions == (1,)
+    assert report.postgres.pending_versions == (1, 2)
     assert report.clickhouse.ok is False
     assert report.clickhouse.pending_versions == (1,)
     assert report.object_storage.ok is False
@@ -232,15 +236,15 @@ def test_platform_bootstrap_cli_renders_table_output(monkeypatch) -> None:
             ok=True,
             endpoint="postgresql://***@127.0.0.1:5432/vinted_radar",
             migration_dir="infra/postgres/migrations",
-            expected_version=1,
-            available_version=1,
-            current_version=1,
-            applied_versions=(1,),
+            expected_version=2,
+            available_version=2,
+            current_version=2,
+            applied_versions=(1, 2),
             pending_versions=(),
-            applied_this_run=(1,),
+            applied_this_run=(1, 2),
             unexpected_versions=(),
             mismatched_checksums=(),
-            detail="PostgreSQL reachable; schema v1/1; applied V001",
+            detail="PostgreSQL reachable; schema v2/2; applied V001, V002",
         ),
         clickhouse=SchemaSystemStatus(
             name="clickhouse",
@@ -300,15 +304,15 @@ def test_platform_doctor_cli_exits_non_zero_when_checks_fail(monkeypatch) -> Non
             ok=False,
             endpoint="postgresql://***@127.0.0.1:5432/vinted_radar",
             migration_dir="infra/postgres/migrations",
-            expected_version=1,
-            available_version=1,
+            expected_version=2,
+            available_version=2,
             current_version=0,
             applied_versions=(),
-            pending_versions=(1,),
+            pending_versions=(1, 2),
             applied_this_run=(),
             unexpected_versions=(),
             mismatched_checksums=(),
-            detail="PostgreSQL reachable but unhealthy: pending migrations V001",
+            detail="PostgreSQL reachable but unhealthy: pending migrations V001, V002",
             error="pending",
         ),
         clickhouse=SchemaSystemStatus(

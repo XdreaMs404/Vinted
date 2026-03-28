@@ -12,7 +12,7 @@
   - Estimate: 2 sessions
   - Files: infra/docker-compose.data-platform.yml, infra/postgres/, infra/clickhouse/, vinted_radar/platform/migrations.py, vinted_radar/platform/bootstrap.py, vinted_radar/cli.py, tests/test_data_platform_bootstrap.py
   - Verify: python -m pytest tests/test_data_platform_bootstrap.py -q
-- [ ] **T03: Event envelopes + outbox/manifests** — Define the durable event, outbox, and manifest contracts that future slices will write once and project many times. Add versioned event envelope dataclasses/serializers, deterministic event IDs, evidence manifest IDs/checksums, and PostgreSQL outbox tables/interfaces that make multi-sink delivery idempotent instead of ad hoc.
+- [x] **T03: Added deterministic listing event envelopes, evidence manifests, and a leased PostgreSQL outbox contract.** — Define the durable event, outbox, and manifest contracts that future slices will write once and project many times. Add versioned event envelope dataclasses/serializers, deterministic event IDs, evidence manifest IDs/checksums, and PostgreSQL outbox tables/interfaces that make multi-sink delivery idempotent instead of ad hoc.
   - Estimate: 2 sessions
   - Files: vinted_radar/domain/events.py, vinted_radar/domain/manifests.py, vinted_radar/platform/outbox.py, vinted_radar/platform/postgres_schema/, tests/test_event_envelope.py, tests/test_outbox.py
   - Verify: python -m pytest tests/test_event_envelope.py tests/test_outbox.py -q

@@ -41,7 +41,7 @@ Shared environment contract loaded by `load_platform_config()`:
 | `VINTED_RADAR_PLATFORM_RAW_EVENTS_PREFIX` | `<root>/events/raw` | Raw event-envelope/object prefix. |
 | `VINTED_RADAR_PLATFORM_MANIFESTS_PREFIX` | `<root>/manifests` | Evidence/outbox manifest prefix. |
 | `VINTED_RADAR_PLATFORM_PARQUET_PREFIX` | `<root>/parquet` | Parquet/warehouse object prefix. |
-| `VINTED_RADAR_PLATFORM_POSTGRES_SCHEMA_VERSION` | `1` | Expected PostgreSQL migration baseline. |
+| `VINTED_RADAR_PLATFORM_POSTGRES_SCHEMA_VERSION` | `2` | Expected PostgreSQL migration baseline. |
 | `VINTED_RADAR_PLATFORM_CLICKHOUSE_SCHEMA_VERSION` | `1` | Expected ClickHouse migration baseline. |
 | `VINTED_RADAR_PLATFORM_EVENT_SCHEMA_VERSION` | `1` | Event-envelope schema version. |
 | `VINTED_RADAR_PLATFORM_MANIFEST_SCHEMA_VERSION` | `1` | Manifest schema version. |
@@ -78,7 +78,7 @@ python -m vinted_radar.cli platform-doctor
 
 What `platform-bootstrap` wires up:
 
-- PostgreSQL migrations from `infra/postgres/migrations/`
+- PostgreSQL migrations from `infra/postgres/migrations/`, including the event envelope, evidence manifest, and outbox tables
 - ClickHouse migrations from `infra/clickhouse/migrations/`
 - S3-compatible bucket/prefix bootstrap for `events/raw`, `manifests`, and `parquet`
 - write/delete probes under each configured object-store prefix so failures surface before ingestion work starts

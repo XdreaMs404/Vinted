@@ -31,6 +31,7 @@ from vinted_radar.platform.config import (
     PlatformConfig,
     load_platform_config,
 )
+from vinted_radar.platform.outbox import ClaimedOutboxRecord, OutboxPublishResult, PostgresOutbox
 
 __all__ = [
     "CLICKHOUSE_DATABASE_ENV",
@@ -52,13 +53,16 @@ __all__ = [
     "OBJECT_STORE_REGION_ENV",
     "OBJECT_STORE_SECRET_KEY_ENV",
     "ObjectStorageStatus",
+    "OutboxPublishResult",
     "PARQUET_PREFIX_ENV",
     "POSTGRES_DSN_ENV",
     "POSTGRES_SCHEMA_VERSION_ENV",
     "PlatformBootstrapReport",
     "PlatformConfig",
+    "PostgresOutbox",
     "RAW_EVENTS_PREFIX_ENV",
     "SchemaSystemStatus",
+    "ClaimedOutboxRecord",
     "bootstrap_data_platform",
     "doctor_data_platform",
     "load_platform_config",

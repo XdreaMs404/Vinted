@@ -26,7 +26,7 @@ def test_load_platform_config_uses_local_platform_defaults() -> None:
     config = load_platform_config(env={})
 
     assert config.postgres.dsn == "postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"
-    assert config.postgres.schema_version == 1
+    assert config.postgres.schema_version == 2
     assert config.clickhouse.url == "http://127.0.0.1:8123"
     assert config.clickhouse.database == "vinted_radar"
     assert config.object_storage.endpoint_url == "http://127.0.0.1:9000"
@@ -37,7 +37,7 @@ def test_load_platform_config_uses_local_platform_defaults() -> None:
     assert config.storage.manifests == "vinted-radar/manifests"
     assert config.storage.parquet == "vinted-radar/parquet"
     assert config.schema_versions.as_dict() == {
-        "postgres": 1,
+        "postgres": 2,
         "clickhouse": 1,
         "events": 1,
         "manifests": 1,
