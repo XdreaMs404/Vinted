@@ -16,7 +16,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/domain/events.py, vinted_radar/domain/manifests.py, vinted_radar/platform/outbox.py, vinted_radar/platform/postgres_schema/, tests/test_event_envelope.py, tests/test_outbox.py
   - Verify: python -m pytest tests/test_event_envelope.py tests/test_outbox.py -q
-- [ ] **T04: Foundation smoke proof** — Prove the foundation end to end in a narrow but real smoke path. Wire pytest fixtures/helpers for PostgreSQL, ClickHouse, and MinIO, and add one platform smoke that boots the stack, runs migrations, inserts a test outbox event, writes a manifest stub, and verifies all readiness/health diagnostics surface correctly.
+- [x] **T04: Added a Docker-backed platform smoke proof with shared health rendering and isolated compose fixtures.** — Prove the foundation end to end in a narrow but real smoke path. Wire pytest fixtures/helpers for PostgreSQL, ClickHouse, and MinIO, and add one platform smoke that boots the stack, runs migrations, inserts a test outbox event, writes a manifest stub, and verifies all readiness/health diagnostics surface correctly.
   - Estimate: 1 session
   - Files: tests/conftest.py, tests/test_data_platform_smoke.py, vinted_radar/platform/health.py, vinted_radar/cli.py
   - Verify: python -m pytest tests/test_data_platform_smoke.py -q

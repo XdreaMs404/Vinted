@@ -11,6 +11,7 @@ Agents read this before every unit. Add entries when you discover something wort
 | 2 | product-ui | Future dashboard work must default to a French, broad-audience product surface that separates market overview, full listing exploration, listing detail, and runtime administration instead of one compact technical page. | The user explicitly rejected the current dense dashboard and wants a usable market intelligence product, not a payload viewer. | 2026-03-18 |
 | 3 | operations | Never promote a synchronized SQLite file straight into `data/vinted-radar.db`; create a remote snapshot, copy to a temporary local path, run DB health checks, then rename atomically. | The app uses WAL and large live files; direct copies can expose partial or unhealthy transfers as if they were usable local truth. | 2026-03-22 |
 | 4 | platform-migrations | Keep provider-specific platform schema-version defaults instead of one shared default constant when PostgreSQL and ClickHouse migrations can advance independently. | S10/T03 added a PostgreSQL V002 outbox migration while ClickHouse stayed on V001; a shared default would have made local bootstrap/doctor expect a non-existent ClickHouse migration. | 2026-03-28 |
+| 5 | platform-dev-setup | On this Windows workstation, pin `psycopg[binary]` instead of bare `psycopg` for local PostgreSQL-backed platform bootstrap/smoke runs. | The real T04 stack proved that plain `psycopg` could import but could not load a usable `libpq` wrapper here, causing `platform-bootstrap` to fail before migrations ran. | 2026-03-28 |
 
 ## Patterns
 

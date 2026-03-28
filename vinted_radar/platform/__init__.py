@@ -31,6 +31,12 @@ from vinted_radar.platform.config import (
     PlatformConfig,
     load_platform_config,
 )
+from vinted_radar.platform.health import (
+    PlatformHealthSnapshot,
+    render_platform_report_lines,
+    render_platform_report_text,
+    summarize_platform_health,
+)
 from vinted_radar.platform.outbox import ClaimedOutboxRecord, OutboxPublishResult, PostgresOutbox
 
 __all__ = [
@@ -59,6 +65,7 @@ __all__ = [
     "POSTGRES_SCHEMA_VERSION_ENV",
     "PlatformBootstrapReport",
     "PlatformConfig",
+    "PlatformHealthSnapshot",
     "PostgresOutbox",
     "RAW_EVENTS_PREFIX_ENV",
     "SchemaSystemStatus",
@@ -66,4 +73,7 @@ __all__ = [
     "bootstrap_data_platform",
     "doctor_data_platform",
     "load_platform_config",
+    "render_platform_report_lines",
+    "render_platform_report_text",
+    "summarize_platform_health",
 ]

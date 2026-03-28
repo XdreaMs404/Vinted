@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: vinted
       POSTGRES_DB: vinted_radar
     ports:
-      - "5432:5432"
+      - "${VINTED_RADAR_PLATFORM_POSTGRES_PORT:-5432}:5432"
     volumes:
       - data-platform-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -23,8 +23,8 @@ services:
       CLICKHOUSE_DB: vinted_radar
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "${VINTED_RADAR_PLATFORM_CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${VINTED_RADAR_PLATFORM_CLICKHOUSE_NATIVE_PORT:-9002}:9000"
     volumes:
       - data-platform-clickhouse:/var/lib/clickhouse
       - data-platform-clickhouse-logs:/var/log/clickhouse-server
@@ -42,8 +42,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${VINTED_RADAR_PLATFORM_OBJECT_STORE_PORT:-9000}:9000"
+      - "${VINTED_RADAR_PLATFORM_OBJECT_STORE_CONSOLE_PORT:-9001}:9001"
     volumes:
       - data-platform-minio:/data
 

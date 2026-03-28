@@ -1,0 +1,2 @@
+[console_scripts]
+vinted-radar = vinted_radar.cli:main

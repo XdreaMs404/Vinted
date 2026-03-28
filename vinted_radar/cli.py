@@ -12,7 +12,12 @@ from vinted_radar.dashboard import serve_dashboard, start_dashboard_server
 from vinted_radar.db_health import inspect_sqlite_database
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.long_run_audit import build_long_run_audit_report, render_long_run_audit_markdown
-from vinted_radar.platform import bootstrap_data_platform, doctor_data_platform, load_platform_config
+from vinted_radar.platform import (
+    bootstrap_data_platform,
+    doctor_data_platform,
+    load_platform_config,
+    render_platform_report_lines,
+)
 from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
@@ -1423,31 +1428,8 @@ def _emit_platform_report(*, report: object, output_format: str) -> None:
 
 
 def _render_platform_report(report: object) -> None:
-    config = dict(getattr(report, "config") or {})
-    postgres = getattr(report, "postgres")
-    clickhouse = getattr(report, "clickhouse")
-    object_storage = getattr(report, "object_storage")
-
-    typer.echo(f"Mode: {getattr(report, 'mode', 'unknown')}")
-    typer.echo("Config snapshot:")
-    typer.echo(f"- Postgres: {dict(config.get('postgres') or {}).get('dsn') or 'n/a'}")
-    typer.echo(
-        "- ClickHouse: {url} / {database}".format(
-            url=dict(config.get('clickhouse') or {}).get('url') or 'n/a',
-            database=dict(config.get('clickhouse') or {}).get('database') or 'n/a',
-        )
-    )
-    typer.echo(
-        "- Object storage: {endpoint} / bucket {bucket}".format(
-            endpoint=dict(config.get('object_storage') or {}).get('endpoint_url') or 'n/a',
-            bucket=dict(config.get('object_storage') or {}).get('bucket') or 'n/a',
-        )
-    )
-    typer.echo(f"- Check writes: {'yes' if getattr(report, 'check_writes', False) else 'no'}")
-    _render_platform_system_status("PostgreSQL", postgres)
-    _render_platform_system_status("ClickHouse", clickhouse)
-    _render_platform_object_storage_status(object_storage)
-    typer.echo(f"Healthy: {'yes' if getattr(report, 'ok', False) else 'no'}")
+    for line in render_platform_report_lines(report):
+        typer.echo(line)
 
 
 def _render_platform_system_status(label: str, status: object) -> None:
