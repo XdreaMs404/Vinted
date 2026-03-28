@@ -1,0 +1,1961 @@
+{
+  "version": 1,
+  "exported_at": "2026-03-28T18:55:06.274Z",
+  "milestones": [
+    {
+      "id": "M001",
+      "title": "",
+      "status": "complete",
+      "depends_on": [],
+      "created_at": "2026-03-28T12:13:33.643Z",
+      "completed_at": null,
+      "vision": "",
+      "success_criteria": [],
+      "key_risks": [],
+      "proof_strategy": [],
+      "verification_contract": "",
+      "verification_integration": "",
+      "verification_operational": "",
+      "verification_uat": "",
+      "definition_of_done": [],
+      "requirement_coverage": "",
+      "boundary_map_markdown": ""
+    },
+    {
+      "id": "M002",
+      "title": "Enriched Market Intelligence Experience",
+      "status": "active",
+      "depends_on": [],
+      "created_at": "2026-03-28T12:13:33.588Z",
+      "completed_at": null,
+      "vision": "Keep the French-first M002 product surfaces delivered in S01-S09, but replace the underlying monolithic SQLite boundary with a production-grade polyglot data platform that can retain raw evidence cheaply, serve large-corpus analytics at low latency, keep mutable runtime truth bounded, and prepare grounded AI without another future storage rearchitecture.",
+      "success_criteria": [
+        "The default home on the live radar remains a French market overview that tells a broad audience what is moving now, what deserves attention, and how trustworthy the read currently is.",
+        "The home, explorer, and detail surfaces no longer depend on request-time full-corpus Python or SQLite history scans for their primary user paths.",
+        "Discovery continues to push both minimum and maximum price bounds directly into the Vinted catalog API while preserving local correctness guards.",
+        "A desktop user can explore the real tracked corpus with server-side filtering, sorting, and paging across category, brand, price band, condition, and sold state.",
+        "A listing detail explains why the listing matters in plain language before exposing technical proof, while preserving the boundary between observed facts, inferred state, estimated publication timing, and radar timestamps.",
+        "The runtime/admin surface truthfully shows running, paused, scheduled, failed, elapsed pause time, next resume timing, and recent errors from persisted runtime state.",
+        "The live VPS-served radar remains consultable from both phone and desktop through a responsive web experience.",
+        "When acquisition weakens or signals become partial, the product stays explicit about degraded coverage, freshness, confidence, and uncertainty instead of implying false precision.",
+        "The live collector no longer uses one monolithic SQLite database as the durable boundary for mutable runtime state, analytical serving, and raw evidence retention.",
+        "Mutable current-state and control-plane truth run on PostgreSQL, analytical facts and serving rollups run on ClickHouse, and immutable raw evidence lands in S3-compatible Parquet storage.",
+        "Retention, TTL, and reconciliation keep hot storage bounded while preserving auditable raw evidence and historical analytical continuity.",
+        "The new platform exposes AI-ready feature and evidence marts so future grounded AI work does not require another storage-layer redesign."
+      ],
+      "key_risks": [
+        {
+          "risk": "The current SQLite schema duplicates heavyweight card payload JSON across mutable and historical tables, so each successful cycle can still consume unacceptable disk even when runtime behavior is otherwise healthy.",
+          "whyItMatters": "This was the direct production failure mode on the VPS; leaving it unresolved makes every other product gain operationally fragile."
+        },
+        {
+          "risk": "Moving to a polyglot data platform can easily create data drift between mutable state, analytical facts, and raw evidence if the event/outbox contract is weak.",
+          "whyItMatters": "A storage split only helps if the three layers stay reconcilable; otherwise the product becomes faster but less trustworthy."
+        },
+        {
+          "risk": "Historical backfill from SQLite into PostgreSQL, ClickHouse, and Parquet could silently lose continuity or skew derived metrics.",
+          "whyItMatters": "The product promise depends on traceable history; a bad backfill would invalidate comparisons, cadence, and future AI grounding."
+        },
+        {
+          "risk": "The current application code concentrates persistence and querying inside SQLite-oriented seams, so a naive migration could create a bigger god-repository instead of a cleaner platform boundary.",
+          "whyItMatters": "If we do not introduce proper ports/adapters and projectors, the new architecture will be technically stronger on paper but harder to evolve than the current one."
+        },
+        {
+          "risk": "Retention, TTL, and proof-shape policy could be under-specified, causing ClickHouse or object storage to become the next unbounded sink.",
+          "whyItMatters": "The whole point of the rearchitecture is to keep the system bounded without sacrificing evidence; lifecycle mistakes would repeat the same failure on a different backend."
+        },
+        {
+          "risk": "Product read paths may accidentally keep hidden dependencies on SQLite-era query semantics during cutover.",
+          "whyItMatters": "That would leave the live app in a mixed state where some screens are fast and others still hinge on the old bottleneck."
+        },
+        {
+          "risk": "The platform could become technically impressive but over-complicated for the actual runtime if we add unnecessary infrastructure beyond the minimum needed split.",
+          "whyItMatters": "The goal is the best durable system, not maximal component count; complexity without clear responsibility boundaries would hurt operability."
+        }
+      ],
+      "proof_strategy": [
+        {
+          "riskOrUnknown": "The current home/dashboard path still materializes listing state inputs across the full corpus and scores in Python on each request.",
+          "retireIn": "S01",
+          "whatWillBeProven": "The default home runs on SQL-backed overview payloads with visible honesty/freshness signals instead of full-corpus request-time recomputation."
+        },
+        {
+          "riskOrUnknown": "The persisted runtime model does not honestly represent paused, scheduled, failed, and next-resume truth.",
+          "retireIn": "S02",
+          "whatWillBeProven": "Runtime state is first-class in persistence, API, CLI, health, and the runtime page."
+        },
+        {
+          "riskOrUnknown": "The product shell and VPS entrypoint are not yet coherent or reliable for phone/desktop remote consultation.",
+          "retireIn": "S03",
+          "whatWillBeProven": "Mounted/public serving works through one shared shell and route contract on phone and desktop."
+        },
+        {
+          "riskOrUnknown": "Explorer-scale browsing and comparison logic will become too expensive as the corpus grows if the product keeps broad request-time reshaping.",
+          "retireIn": "S04",
+          "whatWillBeProven": "A user can browse, filter, sort, and compare the real tracked corpus through SQL-first explorer contracts."
+        },
+        {
+          "riskOrUnknown": "Listing detail can remain technically accurate but too debugger-shaped for daily product use.",
+          "retireIn": "S05",
+          "whatWillBeProven": "Detail pages lead with plain-language narrative while preserving proof and provenance boundaries."
+        },
+        {
+          "riskOrUnknown": "Weak acquisition or anti-bot friction could silently degrade the product read.",
+          "retireIn": "S06",
+          "whatWillBeProven": "Degraded/partial acquisition truth is explicit across product, runtime, and health surfaces."
+        },
+        {
+          "riskOrUnknown": "The assembled product could still fail at realistic live VPS usage even if slice-level local proofs pass.",
+          "retireIn": "S07",
+          "whatWillBeProven": "Overview, explorer, detail, runtime, and degraded-mode honesty work end to end on the real VPS and realistic corpus."
+        },
+        {
+          "riskOrUnknown": "Discovery still wastes request budget if price filters remain only client-side.",
+          "retireIn": "S08",
+          "whatWillBeProven": "Native API-side `price_from` / `price_to` are used while local correctness guards remain truthful."
+        },
+        {
+          "riskOrUnknown": "The collector still underuses a large proxy pool and leaves operators with weak transport visibility.",
+          "retireIn": "S09",
+          "whatWillBeProven": "A large Webshare proxy pool can drive real multi-route throughput with safe metadata and preflight-backed operator checks."
+        },
+        {
+          "riskOrUnknown": "The codebase lacks a clean platform boundary for PostgreSQL, ClickHouse, object storage, migrations, and reliable multi-sink delivery.",
+          "retireIn": "S10",
+          "whatWillBeProven": "The repo can boot the final data-platform dependencies, validate configuration, and emit versioned idempotent event/outbox/manifests contracts."
+        },
+        {
+          "riskOrUnknown": "Raw evidence is still too heavy and too duplicated to leave the hot path bounded.",
+          "retireIn": "S11",
+          "whatWillBeProven": "Discovery/state-refresh persist minimal evidence fragments to partitioned Parquet manifests on object storage instead of duplicating heavyweight raw payload JSON in mutable tables."
+        },
+        {
+          "riskOrUnknown": "Mutable runtime truth and current-state writes still depend on the same SQLite boundary that just failed operationally.",
+          "retireIn": "S12",
+          "whatWillBeProven": "Runtime control, discovery runs, catalogs, and listing current-state projections operate correctly on PostgreSQL-backed writes and backfills."
+        },
+        {
+          "riskOrUnknown": "Analytical serving still depends on SQLite history scans rather than a low-latency columnar serving layer.",
+          "retireIn": "S13",
+          "whatWillBeProven": "Overview, explorer, detail, and AI-ready analytical marts read from ClickHouse raw facts and rollups with acceptable latency and truthful drill-down."
+        },
+        {
+          "riskOrUnknown": "Historical continuity and live app behavior may drift during migration and cutover.",
+          "retireIn": "S14",
+          "whatWillBeProven": "SQLite history is backfilled/reconciled into the new platform, reads are cut over end to end, and the live loop no longer depends on heavyweight SQLite history tables."
+        },
+        {
+          "riskOrUnknown": "Even after cutover, the new platform could drift or grow unbounded without explicit lifecycle and audit controls.",
+          "retireIn": "S15",
+          "whatWillBeProven": "Retention, TTL, reconciliation, and AI-ready feature/evidence marts keep the platform bounded, auditable, and ready for grounded intelligence work."
+        }
+      ],
+      "verification_contract": "Contract verification now covers both the already-delivered product contracts and the new platform seams: parser/payload normalization tests, event-envelope/outbox/manifests tests, PostgreSQL schema/projector tests, ClickHouse schema/query tests, object-store manifest tests, and route/query contract assertions for overview, explorer, detail, runtime, CLI, and health.",
+      "verification_integration": "Integration verification now includes end-to-end collector writes into PostgreSQL, ClickHouse, and object storage; historical backfill/reconciliation from SQLite; overview/explorer/detail/runtime routes exercised on the cut-over platform; and live proxy-backed collection plus product serving against the real integrated stack.",
+      "verification_operational": "Operational verification now includes platform bootstrap/readiness, delivery lag visibility, lifecycle/retention jobs, reconciliation health, cutover state, VPS long-run behavior, and restart/recovery proof on the new platform as well as the original product accessibility checks.",
+      "verification_uat": "UAT verification now requires that the product still feels coherent and truthful to a French-speaking user on phone and desktop after the platform cutover, while operators can understand collector/runtime state, platform health, and evidence provenance without reading internal storage details.",
+      "definition_of_done": [
+        "Every slice below is complete with substantive implementation rather than placeholder docs or scaffolding-only claims.",
+        "The live collector no longer depends on a monolithic SQLite history boundary for mutable runtime truth, analytical serving, and raw evidence retention at the same time.",
+        "PostgreSQL holds mutable control-plane/current-state truth, ClickHouse serves analytical product queries, and S3-compatible Parquet storage retains immutable raw evidence through one coherent event/manifests contract.",
+        "Overview, explorer, detail, runtime, CLI, and health surfaces operate correctly after the read/write cutover to the new platform.",
+        "Retention, reconciliation, and observability keep hot stores bounded while preserving auditability and future AI readiness.",
+        "Historical SQLite data needed for continuity has been backfilled or explicitly retired under a documented and verified cutover policy.",
+        "The final integrated acceptance is re-proven against the real live platform rather than against the retired SQLite-heavy path."
+      ],
+      "requirement_coverage": "M002 still directly covers the already-delivered product requirements R004, R007, R009, R010, R011, and R012. The new S10–S15 extension adds the missing durable data-platform foundation required to keep those capabilities credible under real growth, while also advancing the architectural prerequisites for R002 continuity, R013 product-level grouping, R014 grounded AI insights, R015 AI-assisted exploration, and R016 SaaS hardening without another future storage rewrite.",
+      "boundary_map_markdown": "### S01 → S03 foundational product path\n\nProduces:\n- SQL-backed overview home, truthful runtime snapshotting, and the mounted French-first shell that define the current M002 product contract\n- stable route, payload, and vocabulary seams for overview, explorer, detail, runtime, and health\n\nConsumes:\n- M001 listing/state/scoring/runtime evidence backbone\n- the existing Python service boundary and brownfield repository/WSGI seams\n\n### S04 → S07 product completion path\n\nProduces:\n- the scalable explorer workspace, narrative detail route, degraded-acquisition honesty contract, and realistic live VPS proof for the current product surface\n- the current public browsing/admin experience already proven on real data\n\nConsumes:\n- the S01–S03 overview/runtime/shell foundation\n- live acquisition/runtime behavior from the SQLite-era collector\n\n### S08 → S09 acquisition throughput path\n\nProduces:\n- native API price-window control and a high-throughput proxy-pool operator path that materially improved collection throughput\n- the current acquisition/runtime posture that the new platform must preserve while changing storage boundaries\n\nConsumes:\n- degraded-mode/runtime honesty from S06\n- the live operator path proven in S07\n\n### S09 → S10 platform foundation\n\nProduces:\n- provider-agnostic platform configuration, connection/bootstrap contracts, schema migration runners, and an idempotent event/outbox/manifests seam for the new data plane\n- one authoritative place where collector/runtime code resolves PostgreSQL, ClickHouse, and object-storage dependencies\n\nConsumes:\n- the proven M002 product and acquisition contracts from S01–S09\n- the post-S09 storage-growth incident that invalidated SQLite as the long-term durable boundary\n\n### S10 → S11 raw evidence path\n\nProduces:\n- a minimal evidence contract and partitioned Parquet object-store lake for immutable raw listing/probe evidence\n- manifest-backed proof retrieval that removes heavyweight raw payload duplication from hot mutable tables\n\nConsumes:\n- platform bootstrap, event envelope, and manifest seams from S10\n- current parser/card payload normalization logic from the SQLite-era collector\n\n### S10 + S11 → S12 mutable truth path\n\nProduces:\n- PostgreSQL-backed control-plane and current-state truth for runtime state, catalogs, discovery runs, listing current state, and recent presence projections\n- projector/backfill seams that stop the live loop from mutating heavyweight SQLite history tables\n\nConsumes:\n- platform/outbox seams from S10\n- raw evidence/lake manifests from S11\n\n### S10 + S11 + S12 → S13 analytical serving path\n\nProduces:\n- ClickHouse raw fact tables, materialized rollups, and serving marts for overview/explorer/detail analytics\n- a low-latency analytical boundary separate from mutable runtime truth\n\nConsumes:\n- event/outbox contracts from S10\n- minimal raw evidence and manifests from S11\n- PostgreSQL current-state/control-plane truth from S12\n\n### S12 + S13 → S14 cutover path\n\nProduces:\n- historical backfill from SQLite into PostgreSQL, ClickHouse, and the Parquet lake\n- end-to-end application read cutover plus runtime/collector cutover off heavyweight SQLite history tables\n\nConsumes:\n- PostgreSQL mutable truth from S12\n- ClickHouse serving marts from S13\n- historical SQLite data as migration input only\n\n### S14 → S15 lifecycle and AI-readiness path\n\nProduces:\n- retention/TTL/compaction policies, reconciliation/audit surfaces, and AI-ready feature/evidence marts that keep the new platform bounded and trustworthy\n- the durable platform contract required before grounded AI and SaaS hardening work can proceed without another storage rearchitecture\n\nConsumes:\n- the cut-over live platform from S14\n- the product/adoption goals that follow in M003 and M004"
+    },
+    {
+      "id": "M003",
+      "title": "",
+      "status": "active",
+      "depends_on": [],
+      "created_at": "2026-03-28T12:13:33.647Z",
+      "completed_at": null,
+      "vision": "",
+      "success_criteria": [],
+      "key_risks": [],
+      "proof_strategy": [],
+      "verification_contract": "",
+      "verification_integration": "",
+      "verification_operational": "",
+      "verification_uat": "",
+      "definition_of_done": [],
+      "requirement_coverage": "",
+      "boundary_map_markdown": ""
+    },
+    {
+      "id": "M004",
+      "title": "",
+      "status": "active",
+      "depends_on": [],
+      "created_at": "2026-03-28T12:13:33.649Z",
+      "completed_at": null,
+      "vision": "",
+      "success_criteria": [],
+      "key_risks": [],
+      "proof_strategy": [],
+      "verification_contract": "",
+      "verification_integration": "",
+      "verification_operational": "",
+      "verification_uat": "",
+      "definition_of_done": [],
+      "requirement_coverage": "",
+      "boundary_map_markdown": ""
+    }
+  ],
+  "slices": [
+    {
+      "milestone_id": "M002",
+      "id": "S01",
+      "title": "SQL-Backed Overview Home + First Comparative Modules",
+      "status": "complete",
+      "risk": "high",
+      "depends": [],
+      "demo": "After this: `/` is a real market-overview home rather than an M001 truth screen, powered by SQL-backed aggregates and plain-language coverage/freshness/confidence cues instead of full-corpus Python recomputation.",
+      "created_at": "2026-03-28T12:13:33.588Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Replace the old request-time full-corpus home path with a repository-owned SQL overview contract and first comparative modules.",
+      "success_criteria": "`/` and `/api/dashboard` are driven by SQL-backed overview payloads; coverage, freshness, confidence, and thin-support honesty remain visible; overview drill-downs land on the shared explorer contract.",
+      "proof_level": "Completed and validated on realistic-corpus repository, CLI, and browser proofs.",
+      "integration_closure": "Dashboard home, `/api/dashboard`, explorer drill-downs, and overview payload assembly share one SQL-backed contract.",
+      "observability_impact": "Adds explicit overview honesty, freshness, and comparison-support signals to the primary product path.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S02",
+      "title": "Runtime Truth + Pause/Resume Surface",
+      "status": "complete",
+      "risk": "high",
+      "depends": [
+        "S01"
+      ],
+      "demo": "After this: the product can truthfully show running, paused, scheduled, failed, elapsed pause time, next resume timing, and recent errors through the runtime page, API, and CLI on the same live DB.",
+      "created_at": "2026-03-28T12:13:33.589Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Make runtime controller/scheduler truth explicit in persistence and visible across CLI, runtime page, API, and health.",
+      "success_criteria": "Pause/resume/schedule state is persisted separately from cycle history; runtime UI/API/CLI show the same truth; observer callback ordering does not create stale state gaps.",
+      "proof_level": "Completed and validated through runtime schema/service tests plus local/browser runtime proof.",
+      "integration_closure": "`runtime_cycles`, `runtime_controller_state`, `/runtime`, `/api/runtime`, `/health`, and CLI controls agree on the same persisted truth.",
+      "observability_impact": "Adds controller heartbeat, pause/resume timing, and recent-error truth as first-class durable signals.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S03",
+      "title": "Responsive French Product Shell + VPS Serving Path",
+      "status": "complete",
+      "risk": "high",
+      "depends": [
+        "S01",
+        "S02"
+      ],
+      "demo": "After this: the live radar is served through a production-style VPS path and opens as a coherent French-first responsive product on phone and desktop, with clear navigation across overview, explorer, detail, and runtime.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Ship the shared mounted/public French product shell and serving contract used by the real VPS entrypoint.",
+      "success_criteria": "Overview, explorer, detail, runtime, and health all work under the production-style mounted/public entrypoint; the shell is coherent and responsive on phone and desktop.",
+      "proof_level": "Completed and validated through mounted/local/live verification plus browser checks on phone and desktop layouts.",
+      "integration_closure": "CLI serving, SSR route generation, health payloads, mounted paths, and the smoke verifier share one base-path/public-URL contract.",
+      "observability_impact": "Adds mounted-route diagnostics and serving-contract verification across local and live environments.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S04",
+      "title": "Full Explorer + Comparative Intelligence",
+      "status": "complete",
+      "risk": "high",
+      "depends": [
+        "S01",
+        "S03"
+      ],
+      "demo": "After this: a user can explore the real tracked corpus with server-side filters, sorts, paging, and comparison modules across category, brand, price band, condition, and sold state without leaving the live product.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Turn `/explorer` into the main browse-and-compare workspace over the real tracked corpus.",
+      "success_criteria": "Explorer queries stay SQL-first and scalable; comparison modules remain explicit about support/uncertainty; drill-down context survives overview → explorer → detail loops.",
+      "proof_level": "Completed and validated via repository, dashboard, CLI, and browser verification over realistic datasets.",
+      "integration_closure": "Explorer filters, paging, comparison modules, overview drill-downs, and detail back-navigation all share one repository-owned classified explorer contract.",
+      "observability_impact": "Keeps thin-support and evidence-honesty metadata visible inside the main browse path.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S05",
+      "title": "Listing Detail Narrative + Progressive Proof",
+      "status": "complete",
+      "risk": "medium",
+      "depends": [
+        "S01",
+        "S03",
+        "S04"
+      ],
+      "demo": "After this: opening a listing yields a French plain-language reading first, then richer seller, engagement, timing, state, and evidence detail behind progressive disclosure rather than leading with debugger vocabulary.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Make listing detail narrative-first while preserving raw proof, provenance, and drill-down continuity.",
+      "success_criteria": "Detail routes lead with plain-language usefulness, preserve observed/inferred/estimated boundaries, and keep technical proof accessible beneath progressive disclosure.",
+      "proof_level": "Completed and validated through dashboard tests, detail route verification, and browser UAT.",
+      "integration_closure": "`/listings/<id>` HTML, `/api/listings/<id>` JSON, explorer context links, and state/score explanation surfaces stay aligned.",
+      "observability_impact": "Separates product copy from raw diagnostics so proof stays literal while the visible route stays readable.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S06",
+      "title": "Acquisition Hardening + Degraded-Mode Visibility",
+      "status": "complete",
+      "risk": "high",
+      "depends": [
+        "S02",
+        "S03",
+        "S04",
+        "S05"
+      ],
+      "demo": "After this: proxy-aware state refresh, degraded acquisition telemetry, and explicit partial-signal messaging keep the product honest when live collection weakens instead of hiding uncertainty behind polished screens.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Persist and surface degraded acquisition truth across runtime and product surfaces.",
+      "success_criteria": "Acquisition weakness stays explicit across the live product; partial, degraded, and healthy states do not drift across surfaces.",
+      "proof_level": "Completed and validated through runtime/repository tests and end-to-end product checks.",
+      "integration_closure": "Runtime status, overview, explorer, detail, `/api/runtime`, and `/health` all read the same repository-owned degraded-acquisition contract.",
+      "observability_impact": "Adds persisted state-refresh summaries, anti-bot/degraded probe counts, and probe issue examples.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S07",
+      "title": "Live VPS End-to-End Acceptance Closure",
+      "status": "complete",
+      "risk": "medium",
+      "depends": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06"
+      ],
+      "demo": "After this: the assembled radar is proven through the real VPS entrypoint on phone and desktop with live overview, explorer, detail, runtime, and degraded-mode behavior all working together on a realistically large corpus.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Close the original product milestone with realistic end-to-end VPS proof.",
+      "success_criteria": "Phone and desktop users can consult the live radar remotely; overview, explorer, detail, runtime, and degraded truth work together on the realistic product path.",
+      "proof_level": "Completed and validated through local realistic-corpus proof and public VPS verification.",
+      "integration_closure": "The public VPS entrypoint, local realistic-corpus proof, and mounted verification scripts all confirm the same assembled product behavior.",
+      "observability_impact": "Locks in health/readiness and live accessibility proofs against the real remote surface.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S08",
+      "title": "Native API Price Bounds for Discovery",
+      "status": "complete",
+      "risk": "low",
+      "depends": [
+        "S06"
+      ],
+      "demo": "After this: `batch` and `continuous` can constrain both min and max price directly at the Vinted API boundary, while persisted requested URLs and client-side price guards still show the real acquisition contract.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Reduce wasted catalog traffic and ban pressure by pushing price windows directly into the discovery API.",
+      "success_criteria": "Configured min/max price bounds are applied at the API boundary and still enforced locally when cards arrive out of range.",
+      "proof_level": "Completed and validated through discovery/runtime tests and direct command proofs.",
+      "integration_closure": "CLI/runtime options, discovery requests, persisted scan diagnostics, and local price guards share one bounded price-window contract.",
+      "observability_impact": "Makes requested API bounds explicit in persisted scan/runtime diagnostics.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S09",
+      "title": "High-Throughput Proxy Pool + Webshare Acquisition Operator Flow",
+      "status": "complete",
+      "risk": "medium",
+      "depends": [
+        "S06",
+        "S08"
+      ],
+      "demo": "After this: operators can load a local Webshare proxy pool without rewriting entries by hand, preflight exit-route diversity plus Vinted API reachability, and run discovery/runtime on a real multi-route transport instead of one-hot failure rotation.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Turn a large Webshare proxy pool into a real multi-route acquisition path with safe operator ergonomics.",
+      "success_criteria": "A large proxy pool can be consumed directly from a gitignored local file, preflight proves route diversity and Vinted reachability, and live smoke runs complete on real multi-route transport.",
+      "proof_level": "Completed and validated through live benchmark runs, smoke commands, and proxy/runtime tests.",
+      "integration_closure": "CLI proxy config, HTTP transport sessions, runtime metadata, `proxy-preflight`, and live smoke runs all agree on the same pool contract.",
+      "observability_impact": "Adds transport mode, pool size, route-local degraded handling, and preflight operator evidence without leaking credentials.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S10",
+      "title": "Polyglot Data Platform Foundation",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S09"
+      ],
+      "demo": "After this: the repo can boot the final PostgreSQL + ClickHouse + S3-compatible platform locally and on the VPS, with versioned schemas, shared config, and idempotent event/outbox plumbing ready for real ingestion.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Introduce the final polyglot data-platform foundation without another future storage rewrite: shared config, versioned migrations, platform bootstrap/doctor commands, and idempotent event/outbox/manifests contracts for PostgreSQL, ClickHouse, and S3-compatible object storage.",
+      "success_criteria": "- The repo has one shared configuration contract for PostgreSQL, ClickHouse, and S3-compatible object storage.\n- Versioned migration/bootstrap runners exist for PostgreSQL and ClickHouse.\n- Domain event envelopes, manifests, and outbox identifiers are deterministic and idempotent.\n- A platform doctor/bootstrap command can prove local stack readiness before real ingestion starts.",
+      "proof_level": "Contract tests plus real bootstrap smoke against PostgreSQL, ClickHouse, and S3-compatible services.",
+      "integration_closure": "Collector/runtime code can resolve platform dependencies and write versioned event envelopes/manifests through one platform layer, while local/dev environments can boot and health-check the full stack reproducibly.",
+      "observability_impact": "Adds platform bootstrap diagnostics, per-store readiness checks, and delivery-lag/outbox visibility so future slices can tell whether writes are blocked in PostgreSQL, ClickHouse, or object storage.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S11",
+      "title": "Minimal Evidence Contract + Parquet Lake",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S10"
+      ],
+      "demo": "After this: discovery and state-refresh emit minimal evidence fragments into partitioned Parquet on object storage with manifests, so raw proof leaves the hot mutable path instead of bloating operational tables.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Replace heavyweight raw payload persistence with a deliberate minimal evidence contract and immutable Parquet lake so raw proof leaves the hot path while staying inspectable, replayable, and explainable.",
+      "success_criteria": "- API and HTML discovery paths emit the same minimal explainable evidence shape instead of storing full `dict(item)` payloads in hot tables.\n- Partitioned Parquet batches are written to object storage with manifests, checksums, and time-window metadata.\n- Historical SQLite evidence can be exported/backfilled into the lake.\n- Operators and future code can retrieve an evidence fragment by manifest/event reference without reading mutable state tables.",
+      "proof_level": "Parser/unit tests plus integration writes/reads against local object storage and historical export smoke.",
+      "integration_closure": "Parsers, card-payload normalization, object-store writers, manifests, and evidence inspection tools all agree on the same fragment schema and partitioning layout, and the collector can emit raw evidence batches without relying on duplicated JSON blobs in mutable tables.",
+      "observability_impact": "Adds manifest counts, partition coverage, object-store write diagnostics, and evidence retrieval checks so raw proof remains auditable after it moves off the hot mutable path.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S12",
+      "title": "PostgreSQL Control Plane + Current-State Projection",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S10",
+        "S11"
+      ],
+      "demo": "After this: runtime control, discovery runs, catalogs, and current listing truth live in PostgreSQL through projector-backed writes instead of SQLite mutation tables.",
+      "created_at": "2026-03-28T12:13:33.598Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Move mutable control-plane and current-state truth onto PostgreSQL while keeping the collector/event path idempotent, so runtime control and operational state are bounded and no longer share a monolithic SQLite history boundary with raw evidence and analytics.",
+      "success_criteria": "- Runtime controller truth, discovery runs, catalog metadata, and listing current-state projections live in PostgreSQL.\n- Projector and backfill logic are idempotent and replay-safe.\n- CLI/runtime surfaces can read PostgreSQL-backed mutable truth.\n- The live loop no longer needs SQLite mutation tables for current-state/control-plane writes.",
+      "proof_level": "PostgreSQL integration tests, projector/backfill smoke, and CLI/runtime proofs against the new control plane.",
+      "integration_closure": "Runtime commands, discovery bookkeeping, catalogs, listing current state, presence summaries, manifests, and outbox checkpoints read/write through PostgreSQL-backed repositories and projectors, while the old SQLite path remains only a migration input.",
+      "observability_impact": "Adds projection lag, projector failure state, PostgreSQL-backed runtime health, and explicit cutover status so operators can tell whether mutable truth is healthy independently of analytics and raw evidence.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S13",
+      "title": "ClickHouse Serving Warehouse + Rollups",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S10",
+        "S11",
+        "S12"
+      ],
+      "demo": "After this: overview, explorer, and listing-detail analytics read from ClickHouse raw facts and materialized rollups rather than SQLite full-history scans.",
+      "created_at": "2026-03-28T12:13:33.599Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Introduce the long-term serving warehouse in ClickHouse so overview, explorer, detail, and future AI-facing analytics read from raw facts and materialized rollups instead of SQLite full-history scans.",
+      "success_criteria": "- ClickHouse stores raw listing-seen/probe facts and materialized rollups with explicit partitioning and TTL.\n- Outbox/lake ingestion into ClickHouse is idempotent and replay-safe.\n- Overview, explorer, and detail queries can run from ClickHouse-backed marts with truthful drill-down.\n- The app no longer needs SQLite history scans for its primary analytical reads.",
+      "proof_level": "ClickHouse schema/query tests, ingestion/backfill smoke, and product-route verification against ClickHouse-backed reads.",
+      "integration_closure": "Outbox/lake ingestion, ClickHouse raw fact tables, materialized views, and query adapters feed overview, explorer, detail, and future feature surfaces without hidden SQLite fallbacks, while PostgreSQL remains the mutable control-plane source.",
+      "observability_impact": "Adds ingestion lag metrics, fact/rollup row-count checks, and query-latency visibility on the analytical boundary so serving health can be assessed separately from runtime/control-plane state.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S14",
+      "title": "Historical Backfill + Application Cutover",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S12",
+        "S13"
+      ],
+      "demo": "After this: historical SQLite evidence is backfilled into PostgreSQL, ClickHouse, and the Parquet lake, the product reads the new platform end to end, and the live collector no longer depends on heavyweight SQLite history tables.",
+      "created_at": "2026-03-28T12:13:33.599Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Migrate historical continuity, cut reads and writes over to the new platform end to end, and retire the SQLite-heavy live loop from the real product path without losing auditability or product truth.",
+      "success_criteria": "- Historical SQLite data required for continuity is backfilled or explicitly retired under policy.\n- Dashboard, CLI, health, and collector read/write paths run on PostgreSQL + ClickHouse + object storage end to end.\n- Reconciliation proves continuity across old and new stores during cutover.\n- The live collector no longer depends on heavyweight SQLite history tables for the real product path.",
+      "proof_level": "Historical backfill verification, dual-write reconciliation, browser/CLI route proof, and live cycle proof on the cut-over platform.",
+      "integration_closure": "Backfill, reconciliation, runtime/collector writes, dashboard reads, CLI reads, health, and cutover switches all operate coherently across PostgreSQL, ClickHouse, and object storage, with SQLite retained only as a historical migration input or offline artifact.",
+      "observability_impact": "Adds migration checkpoints, cutover state, reconciliation summaries, and fallback diagnostics so operators can see exactly which path is live and whether historical continuity is complete.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M002",
+      "id": "S15",
+      "title": "Retention, Reconciliation, and AI-Ready Feature Marts",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S14"
+      ],
+      "demo": "After this: TTL, compaction, reconciliation, and AI-ready feature/evidence marts keep the new platform bounded, auditable, and ready for grounded intelligence work.",
+      "created_at": "2026-03-28T12:13:33.599Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Close the platform migration with lifecycle discipline, reconciliation/audit surfaces, and AI-ready feature/evidence marts so the new stack stays bounded, trustworthy, and ready for grounded intelligence work without another storage redesign.",
+      "success_criteria": "- Hot stores stay bounded through explicit retention, TTL, and pruning policy.\n- Cross-store reconciliation and lag audits pass on the cut-over live platform.\n- AI-ready feature and evidence marts exist and link back to observed data and manifests.\n- Operators can inspect lifecycle/audit status without touching raw storage internals directly.",
+      "proof_level": "Lifecycle job tests, reconciliation proofs across all stores, and feature-mart verification against real migrated data.",
+      "integration_closure": "Retention jobs, ClickHouse TTL, object-store lifecycle policy, PostgreSQL pruning, feature marts, and audit tooling all operate on the cut-over live platform and expose one coherent view of freshness, lag, continuity, and bounded storage.",
+      "observability_impact": "Adds bounded-storage reporting, cross-store reconciliation surfaces, lifecycle job status, and AI-readiness diagnostics so future slices can tell whether the platform is healthy enough for grounded product and model work.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    }
+  ],
+  "tasks": [
+    {
+      "milestone_id": "M002",
+      "slice_id": "S10",
+      "id": "T01",
+      "title": "Added the shared polyglot platform config contract with dependency pins, env validation, redacted observability, and README docs.",
+      "status": "complete",
+      "one_liner": "Added the shared polyglot platform config contract with dependency pins, env validation, redacted observability, and README docs.",
+      "narrative": "Extended the project dependency base for the final data-platform stack, then introduced a shared `vinted_radar.platform.config` module that validates PostgreSQL, ClickHouse, and S3-compatible settings, normalizes object prefixes, carries schema-version expectations, and exposes redacted diagnostics for later bootstrap/doctor commands. Added focused pytest coverage for defaults, overrides, negative validation paths, and secret redaction, documented the new environment contract in the README, and recorded the architectural choice as D034 while keeping live product reads on SQLite.",
+      "verification_result": "`python -m pytest tests/test_platform_config.py -q` passed (5 tests). This verified default local settings, env override parsing, storage-prefix normalization, schema/cutover parsing, secret redaction, and invalid-value rejection. Python LSP diagnostics were attempted but no language server is configured in this workspace, so the concrete verification gate was the passing pytest run.",
+      "duration": "",
+      "completed_at": "2026-03-28T18:55:06.229Z",
+      "blocker_discovered": false,
+      "deviations": "Added `vinted_radar/platform/__init__.py` so the planned `vinted_radar.platform.config` module is importable as a real package boundary. No slice replan was needed.",
+      "known_issues": "None.",
+      "key_files": [
+        "pyproject.toml",
+        "vinted_radar/platform/__init__.py",
+        "vinted_radar/platform/config.py",
+        "tests/test_platform_config.py",
+        "README.md",
+        ".gsd/DECISIONS.md"
+      ],
+      "key_decisions": [
+        "D034: centralize the polyglot platform env contract in `vinted_radar.platform.config` with normalized storage prefixes, explicit schema versions, redacted diagnostics, and all cutover flags defaulting to false."
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S10\nmilestone: M002\nkey_files:\n  - pyproject.toml\n  - vinted_radar/platform/__init__.py\n  - vinted_radar/platform/config.py\n  - tests/test_platform_config.py\n  - README.md\n  - .gsd/DECISIONS.md\nkey_decisions:\n  - D034: centralize the polyglot platform env contract in `vinted_radar.platform.config` with normalized storage prefixes, explicit schema versions, redacted diagnostics, and all cutover flags defaulting to false.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T18:55:06.231Z\nblocker_discovered: false\n---\n\n# T01: Added the shared polyglot platform config contract with dependency pins, env validation, redacted observability, and README docs.\n\n**Added the shared polyglot platform config contract with dependency pins, env validation, redacted observability, and README docs.**\n\n## What Happened\n\nExtended the project dependency base for the final data-platform stack, then introduced a shared `vinted_radar.platform.config` module that validates PostgreSQL, ClickHouse, and S3-compatible settings, normalizes object prefixes, carries schema-version expectations, and exposes redacted diagnostics for later bootstrap/doctor commands. Added focused pytest coverage for defaults, overrides, negative validation paths, and secret redaction, documented the new environment contract in the README, and recorded the architectural choice as D034 while keeping live product reads on SQLite.\n\n## Verification\n\n`python -m pytest tests/test_platform_config.py -q` passed (5 tests). This verified default local settings, env override parsing, storage-prefix normalization, schema/cutover parsing, secret redaction, and invalid-value rejection. Python LSP diagnostics were attempted but no language server is configured in this workspace, so the concrete verification gate was the passing pytest run.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python -m pytest tests/test_platform_config.py -q` | 0 | ✅ pass | 1819ms |\n\n\n## Deviations\n\nAdded `vinted_radar/platform/__init__.py` so the planned `vinted_radar.platform.config` module is importable as a real package boundary. No slice replan was needed.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `pyproject.toml`\n- `vinted_radar/platform/__init__.py`\n- `vinted_radar/platform/config.py`\n- `tests/test_platform_config.py`\n- `README.md`\n- `.gsd/DECISIONS.md`\n",
+      "description": "Add the new platform dependency base and configuration layer. Extend `pyproject.toml` with PostgreSQL, ClickHouse, Parquet, and S3-compatible client libraries; introduce a shared platform config module that loads/validates connection settings, storage prefixes, schema versions, and cutover flags; and document the new environment contract without yet changing product reads.",
+      "estimate": "1-2 sessions",
+      "files": [
+        "pyproject.toml",
+        "vinted_radar/platform/config.py",
+        "vinted_radar/cli.py",
+        "README.md",
+        "tests/test_platform_config.py"
+      ],
+      "verify": "python -m pytest tests/test_platform_config.py -q",
+      "inputs": [
+        "pyproject.toml",
+        "README.md",
+        ".gsd/DECISIONS.md"
+      ],
+      "expected_output": [
+        "vinted_radar/platform/config.py",
+        "tests/test_platform_config.py",
+        "README.md"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S10",
+      "id": "T02",
+      "title": "Bootstrap stack + migration runners",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Introduce provider bootstrap and migration runners. Add versioned SQL migration directories for PostgreSQL and ClickHouse, local compose/bootstrap helpers for PostgreSQL + ClickHouse + MinIO, and CLI doctor/bootstrap commands that validate connectivity, schema version, and writable object-store prefixes.",
+      "estimate": "2 sessions",
+      "files": [
+        "infra/docker-compose.data-platform.yml",
+        "infra/postgres/",
+        "infra/clickhouse/",
+        "vinted_radar/platform/migrations.py",
+        "vinted_radar/platform/bootstrap.py",
+        "vinted_radar/cli.py",
+        "tests/test_data_platform_bootstrap.py"
+      ],
+      "verify": "python -m pytest tests/test_data_platform_bootstrap.py -q",
+      "inputs": [
+        "README.md",
+        "vinted_radar/cli.py",
+        "vinted_radar/db.py"
+      ],
+      "expected_output": [
+        "infra/docker-compose.data-platform.yml",
+        "vinted_radar/platform/migrations.py",
+        "tests/test_data_platform_bootstrap.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S10",
+      "id": "T03",
+      "title": "Event envelopes + outbox/manifests",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Define the durable event, outbox, and manifest contracts that future slices will write once and project many times. Add versioned event envelope dataclasses/serializers, deterministic event IDs, evidence manifest IDs/checksums, and PostgreSQL outbox tables/interfaces that make multi-sink delivery idempotent instead of ad hoc.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/domain/events.py",
+        "vinted_radar/domain/manifests.py",
+        "vinted_radar/platform/outbox.py",
+        "vinted_radar/platform/postgres_schema/",
+        "tests/test_event_envelope.py",
+        "tests/test_outbox.py"
+      ],
+      "verify": "python -m pytest tests/test_event_envelope.py tests/test_outbox.py -q",
+      "inputs": [
+        "vinted_radar/models.py",
+        "vinted_radar/repository.py",
+        "vinted_radar/parsers/api_catalog_page.py"
+      ],
+      "expected_output": [
+        "vinted_radar/domain/events.py",
+        "vinted_radar/platform/outbox.py",
+        "tests/test_event_envelope.py",
+        "tests/test_outbox.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S10",
+      "id": "T04",
+      "title": "Foundation smoke proof",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Prove the foundation end to end in a narrow but real smoke path. Wire pytest fixtures/helpers for PostgreSQL, ClickHouse, and MinIO, and add one platform smoke that boots the stack, runs migrations, inserts a test outbox event, writes a manifest stub, and verifies all readiness/health diagnostics surface correctly.",
+      "estimate": "1 session",
+      "files": [
+        "tests/conftest.py",
+        "tests/test_data_platform_smoke.py",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/cli.py"
+      ],
+      "verify": "python -m pytest tests/test_data_platform_smoke.py -q",
+      "inputs": [
+        "infra/docker-compose.data-platform.yml",
+        "vinted_radar/platform/migrations.py",
+        "vinted_radar/platform/outbox.py"
+      ],
+      "expected_output": [
+        "tests/test_data_platform_smoke.py",
+        "CLI doctor/bootstrap smoke proof"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S11",
+      "id": "T01",
+      "title": "Minimal evidence schema",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Redefine the listing-card evidence contract around minimal fragments. Replace the API parser's `raw_card=dict(item)` posture with the same targeted proof philosophy already used by the HTML parser, update `card_payload.py` and tests, and make the evidence contract explicit about what is preserved for explainability versus what is dropped from the hot path.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/parsers/api_catalog_page.py",
+        "vinted_radar/parsers/catalog_page.py",
+        "vinted_radar/card_payload.py",
+        "vinted_radar/models.py",
+        "tests/test_api_catalog_page.py",
+        "tests/test_card_payload.py"
+      ],
+      "verify": "python -m pytest tests/test_api_catalog_page.py tests/test_card_payload.py -q",
+      "inputs": [
+        "vinted_radar/parsers/api_catalog_page.py",
+        "vinted_radar/parsers/catalog_page.py",
+        "vinted_radar/card_payload.py",
+        ".gsd/KNOWLEDGE.md"
+      ],
+      "expected_output": [
+        "Unified minimal evidence schema for API + HTML cards",
+        "tests proving targeted fragment preservation"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S11",
+      "id": "T02",
+      "title": "Parquet writer + object-store manifests",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Implement the Parquet lake writer and manifest registry. Add partitioned Parquet writing with schema versioning and ZSTD compression, S3-compatible upload support, manifest/checksum recording, and a local MinIO-backed integration path so evidence batches can be staged and read back safely.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/platform/lake_writer.py",
+        "vinted_radar/platform/object_store.py",
+        "vinted_radar/domain/manifests.py",
+        "vinted_radar/cli.py",
+        "tests/test_lake_writer.py"
+      ],
+      "verify": "python -m pytest tests/test_lake_writer.py -q",
+      "inputs": [
+        "vinted_radar/platform/config.py",
+        "vinted_radar/domain/manifests.py",
+        "infra/docker-compose.data-platform.yml"
+      ],
+      "expected_output": [
+        "vinted_radar/platform/lake_writer.py",
+        "vinted_radar/platform/object_store.py",
+        "tests/test_lake_writer.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S11",
+      "id": "T03",
+      "title": "Collector emission to evidence lake",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Connect discovery and state-refresh to the new raw-evidence path. Emit listing-seen and probe evidence batches through the outbox/manifests seam, keep write operations idempotent, and make sure one collected run can produce retrievable raw evidence without yet requiring the mutable/read cutover slices.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/services/discovery.py",
+        "vinted_radar/services/state_refresh.py",
+        "vinted_radar/platform/outbox.py",
+        "vinted_radar/platform/lake_writer.py",
+        "tests/test_discovery_service.py",
+        "tests/test_runtime_service.py",
+        "tests/test_evidence_batches.py"
+      ],
+      "verify": "python -m pytest tests/test_evidence_batches.py tests/test_discovery_service.py tests/test_runtime_service.py -q",
+      "inputs": [
+        "vinted_radar/services/discovery.py",
+        "vinted_radar/services/state_refresh.py",
+        "vinted_radar/platform/outbox.py",
+        "vinted_radar/platform/lake_writer.py"
+      ],
+      "expected_output": [
+        "Collector-to-lake emission path",
+        "tests for listing-seen/probe evidence batches"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S11",
+      "id": "T04",
+      "title": "Historical export + evidence lookup",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Add historical export and evidence inspection tooling. Provide a CLI/backfill command that can export legacy SQLite discovery/observation/probe raw evidence into the Parquet lake, and add an inspection command that resolves an event or manifest reference back to a concrete evidence fragment for debugging and proof drill-down.",
+      "estimate": "1-2 sessions",
+      "files": [
+        "vinted_radar/cli.py",
+        "vinted_radar/services/evidence_export.py",
+        "vinted_radar/services/evidence_lookup.py",
+        "tests/test_evidence_export.py"
+      ],
+      "verify": "python -m pytest tests/test_evidence_export.py -q",
+      "inputs": [
+        "vinted_radar/db.py",
+        "vinted_radar/repository.py",
+        "vinted_radar/platform/lake_writer.py"
+      ],
+      "expected_output": [
+        "SQLite-to-lake export command",
+        "evidence inspection command",
+        "tests/test_evidence_export.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S12",
+      "id": "T01",
+      "title": "PostgreSQL mutable schema",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Design and migrate the PostgreSQL control-plane/current-state schema. Create versioned PostgreSQL tables for runtime controller state, runtime cycles, discovery runs, catalogs, listing identity/current state, recent presence summaries, manifests, and outbox checkpoints, with explicit keys and indexes for idempotent projectors and operational queries.",
+      "estimate": "2 sessions",
+      "files": [
+        "infra/postgres/",
+        "vinted_radar/platform/migrations.py",
+        "vinted_radar/platform/postgres_schema/",
+        "tests/test_postgres_schema.py"
+      ],
+      "verify": "python -m pytest tests/test_postgres_schema.py -q",
+      "inputs": [
+        "vinted_radar/db.py",
+        "vinted_radar/repository.py",
+        "vinted_radar/cli.py"
+      ],
+      "expected_output": [
+        "PostgreSQL schema migrations for mutable truth",
+        "tests/test_postgres_schema.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S12",
+      "id": "T02",
+      "title": "Projectors for current-state truth",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Implement PostgreSQL repositories and projectors for current-state truth. Add adapters that consume outbox events and update runtime/controller rows, discovery bookkeeping, catalog rows, listing current-state rows, and presence rollups in PostgreSQL without duplicating raw evidence blobs.",
+      "estimate": "2-3 sessions",
+      "files": [
+        "vinted_radar/platform/postgres_repository.py",
+        "vinted_radar/services/projectors.py",
+        "vinted_radar/services/discovery.py",
+        "vinted_radar/services/runtime.py",
+        "tests/test_postgres_projectors.py"
+      ],
+      "verify": "python -m pytest tests/test_postgres_projectors.py -q",
+      "inputs": [
+        "vinted_radar/platform/outbox.py",
+        "vinted_radar/domain/events.py",
+        "vinted_radar/repository.py"
+      ],
+      "expected_output": [
+        "vinted_radar/platform/postgres_repository.py",
+        "projector services",
+        "tests/test_postgres_projectors.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S12",
+      "id": "T03",
+      "title": "CLI/runtime cutover to PostgreSQL",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/cli.py",
+        "vinted_radar/services/runtime.py",
+        "vinted_radar/platform/postgres_repository.py",
+        "tests/test_runtime_cli_postgres.py"
+      ],
+      "verify": "python -m pytest tests/test_runtime_cli_postgres.py -q",
+      "inputs": [
+        "vinted_radar/cli.py",
+        "vinted_radar/services/runtime.py",
+        "vinted_radar/platform/postgres_repository.py"
+      ],
+      "expected_output": [
+        "PostgreSQL-backed runtime CLI path",
+        "tests/test_runtime_cli_postgres.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S12",
+      "id": "T04",
+      "title": "Backfill + PostgreSQL control-plane smoke",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQLite-to-PostgreSQL backfill for runtime/discovery/catalog/current-state data, then run a narrow batch/continuous smoke against PostgreSQL-backed mutable truth and assert that runtime-status and bookkeeping stay correct without SQLite mutation writes.",
+      "estimate": "1-2 sessions",
+      "files": [
+        "vinted_radar/services/postgres_backfill.py",
+        "vinted_radar/cli.py",
+        "tests/test_postgres_backfill.py",
+        "tests/test_runtime_service.py"
+      ],
+      "verify": "python -m pytest tests/test_postgres_backfill.py tests/test_runtime_service.py -q",
+      "inputs": [
+        "vinted_radar/db.py",
+        "vinted_radar/repository.py",
+        "vinted_radar/platform/postgres_repository.py"
+      ],
+      "expected_output": [
+        "SQLite-to-PostgreSQL backfill command",
+        "collector smoke proof on PostgreSQL"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S13",
+      "id": "T01",
+      "title": "ClickHouse fact + rollup schema",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Design the ClickHouse analytical schema. Add raw fact tables for listing-seen events, probe events, and derived change events; define partitions/order keys and TTL policy; and create the first materialized views/rollups for listing-hourly/daily, category/brand daily metrics, and other serving primitives the product needs.",
+      "estimate": "2 sessions",
+      "files": [
+        "infra/clickhouse/",
+        "vinted_radar/platform/clickhouse_schema/",
+        "vinted_radar/platform/migrations.py",
+        "tests/test_clickhouse_schema.py"
+      ],
+      "verify": "python -m pytest tests/test_clickhouse_schema.py -q",
+      "inputs": [
+        "vinted_radar/repository.py",
+        "vinted_radar/dashboard.py",
+        ".gsd/DECISIONS.md"
+      ],
+      "expected_output": [
+        "ClickHouse schema + materialized views",
+        "tests/test_clickhouse_schema.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S13",
+      "id": "T02",
+      "title": "Outbox/lake ingestion into ClickHouse",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Implement the ingestion worker from outbox/manifests into ClickHouse. Consume listing-seen and probe batches, map them into raw fact tables, maintain replay-safe inserts, and expose ingestion lag/error state so S14 cutover can trust whether analytical data is current.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/platform/clickhouse_ingest.py",
+        "vinted_radar/platform/outbox.py",
+        "vinted_radar/cli.py",
+        "tests/test_clickhouse_ingest.py"
+      ],
+      "verify": "python -m pytest tests/test_clickhouse_ingest.py -q",
+      "inputs": [
+        "vinted_radar/platform/outbox.py",
+        "vinted_radar/platform/lake_writer.py",
+        "vinted_radar/domain/events.py"
+      ],
+      "expected_output": [
+        "ClickHouse ingestion worker",
+        "tests/test_clickhouse_ingest.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S13",
+      "id": "T03",
+      "title": "Product query adapters on ClickHouse",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Build ClickHouse-backed analytical query adapters for overview, explorer, and detail. Move the heavy read paths out of the SQLite-oriented repository by introducing dedicated ClickHouse query modules and product-facing adapters that preserve existing payload/drill-down contracts while sourcing their aggregates and listing sets from ClickHouse.",
+      "estimate": "2-3 sessions",
+      "files": [
+        "vinted_radar/query/overview_clickhouse.py",
+        "vinted_radar/query/explorer_clickhouse.py",
+        "vinted_radar/query/detail_clickhouse.py",
+        "vinted_radar/dashboard.py",
+        "vinted_radar/cli.py",
+        "tests/test_clickhouse_queries.py",
+        "tests/test_dashboard.py"
+      ],
+      "verify": "python -m pytest tests/test_clickhouse_queries.py tests/test_dashboard.py -q",
+      "inputs": [
+        "vinted_radar/dashboard.py",
+        "vinted_radar/repository.py",
+        "tests/test_dashboard.py"
+      ],
+      "expected_output": [
+        "ClickHouse-backed overview/explorer/detail query layer",
+        "tests/test_clickhouse_queries.py",
+        "route contract tests"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S13",
+      "id": "T04",
+      "title": "Analytical parity + route proof",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Prove analytical correctness and performance on the new boundary. Add parity/reconciliation checks between representative SQLite-era outputs and ClickHouse marts during migration, then run focused dashboard/explorer/detail route verification so the cutover path has both correctness and latency evidence.",
+      "estimate": "1-2 sessions",
+      "files": [
+        "tests/test_clickhouse_parity.py",
+        "scripts/verify_clickhouse_routes.py",
+        "vinted_radar/dashboard.py"
+      ],
+      "verify": "python -m pytest tests/test_clickhouse_parity.py -q",
+      "inputs": [
+        "vinted_radar/query/overview_clickhouse.py",
+        "vinted_radar/query/explorer_clickhouse.py",
+        "vinted_radar/query/detail_clickhouse.py"
+      ],
+      "expected_output": [
+        "Analytical parity checks",
+        "ClickHouse-backed route verification proof"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S14",
+      "id": "T01",
+      "title": "Historical backfill pipeline",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Build the full historical backfill pipeline. Add commands/workers that migrate legacy SQLite discovery, observation, probe, and runtime history into PostgreSQL current-state/control-plane rows, ClickHouse facts/rollups, and Parquet evidence manifests, with resumable checkpoints and dry-run support for large corpora.",
+      "estimate": "2-3 sessions",
+      "files": [
+        "vinted_radar/services/full_backfill.py",
+        "vinted_radar/cli.py",
+        "tests/test_full_backfill.py"
+      ],
+      "verify": "python -m pytest tests/test_full_backfill.py -q",
+      "inputs": [
+        "vinted_radar/db.py",
+        "vinted_radar/repository.py",
+        "vinted_radar/platform/postgres_repository.py",
+        "vinted_radar/platform/clickhouse_ingest.py",
+        "vinted_radar/platform/lake_writer.py"
+      ],
+      "expected_output": [
+        "Full SQLite migration/backfill pipeline",
+        "tests/test_full_backfill.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S14",
+      "id": "T02",
+      "title": "Reconciliation + cutover controls",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Add reconciliation and cutover controls. Implement row-count/time-window reconciliation across SQLite, PostgreSQL, ClickHouse, and object storage manifests; expose cutover mode in config/health/runtime diagnostics; and make dual-write/read-cutover state explicit so deployment is observable instead of implicit.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/services/reconciliation.py",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/cli.py",
+        "tests/test_reconciliation.py"
+      ],
+      "verify": "python -m pytest tests/test_reconciliation.py -q",
+      "inputs": [
+        "vinted_radar/services/full_backfill.py",
+        "vinted_radar/platform/postgres_repository.py",
+        "vinted_radar/platform/clickhouse_ingest.py"
+      ],
+      "expected_output": [
+        "Cross-store reconciliation command",
+        "cutover state diagnostics",
+        "tests/test_reconciliation.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S14",
+      "id": "T03",
+      "title": "End-to-end application cutover",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Cut product and operator reads/writes over to the new platform. Switch dashboard, CLI, runtime status, health, and collector write paths so the live app resolves mutable truth from PostgreSQL, analytics from ClickHouse, and proof from manifests/object storage, while preserving existing user-visible contracts and adding an emergency fallback path only as a temporary migration safety valve.",
+      "estimate": "2-3 sessions",
+      "files": [
+        "vinted_radar/dashboard.py",
+        "vinted_radar/cli.py",
+        "vinted_radar/services/discovery.py",
+        "vinted_radar/services/runtime.py",
+        "vinted_radar/platform/health.py",
+        "tests/test_dashboard.py",
+        "tests/test_runtime_service.py"
+      ],
+      "verify": "python -m pytest tests/test_dashboard.py tests/test_runtime_service.py -q",
+      "inputs": [
+        "vinted_radar/query/overview_clickhouse.py",
+        "vinted_radar/query/explorer_clickhouse.py",
+        "vinted_radar/query/detail_clickhouse.py",
+        "vinted_radar/platform/postgres_repository.py"
+      ],
+      "expected_output": [
+        "New platform default read/write path",
+        "browser/CLI route proofs on cut-over stack"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S14",
+      "id": "T04",
+      "title": "Live cutover proof + runbook",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Prove the cut-over platform in a real live-cycle acceptance flow. Run a narrow but real collector cycle on PostgreSQL + ClickHouse + object storage, verify dashboard/runtime/health/browser behavior on that stack, and document the exact operational sequence for production cutover and rollback on the VPS.",
+      "estimate": "1-2 sessions",
+      "files": [
+        "README.md",
+        "scripts/verify_vps_serving.py",
+        "scripts/verify_cutover_stack.py",
+        "tests/test_cutover_smoke.py"
+      ],
+      "verify": "python -m pytest tests/test_cutover_smoke.py -q",
+      "inputs": [
+        "vinted_radar/cli.py",
+        "vinted_radar/dashboard.py",
+        "README.md"
+      ],
+      "expected_output": [
+        "Live cutover smoke proof",
+        "production cutover + rollback runbook"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S15",
+      "id": "T01",
+      "title": "Retention + bounded-storage jobs",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Implement bounded-storage lifecycle controls. Add ClickHouse TTL policy activation, PostgreSQL pruning/archival jobs for mutable transient data, object-store retention classes/lifecycle config, and reporting that makes current storage posture visible instead of implicit.",
+      "estimate": "2 sessions",
+      "files": [
+        "vinted_radar/services/lifecycle.py",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/cli.py",
+        "infra/clickhouse/",
+        "README.md",
+        "tests/test_lifecycle_jobs.py"
+      ],
+      "verify": "python -m pytest tests/test_lifecycle_jobs.py -q",
+      "inputs": [
+        "vinted_radar/platform/clickhouse_schema/",
+        "vinted_radar/platform/postgres_schema/",
+        "vinted_radar/platform/config.py"
+      ],
+      "expected_output": [
+        "Lifecycle jobs + storage posture report",
+        "tests/test_lifecycle_jobs.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S15",
+      "id": "T02",
+      "title": "Reconciliation + lag audit surfaces",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Add durable reconciliation and lag audit surfaces. Build commands and health payloads that compare PostgreSQL current-state windows, ClickHouse analytical windows, and Parquet manifest coverage, then expose lag/failure state for ingestion, lifecycle, and backfill paths so operators can trust the platform day to day.",
+      "estimate": "1-2 sessions",
+      "files": [
+        "vinted_radar/services/platform_audit.py",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/cli.py",
+        "tests/test_platform_audit.py"
+      ],
+      "verify": "python -m pytest tests/test_platform_audit.py -q",
+      "inputs": [
+        "vinted_radar/services/reconciliation.py",
+        "vinted_radar/platform/postgres_repository.py",
+        "vinted_radar/platform/clickhouse_ingest.py",
+        "vinted_radar/platform/lake_writer.py"
+      ],
+      "expected_output": [
+        "Cross-store audit commands",
+        "health/runtime data-platform audit surface",
+        "tests/test_platform_audit.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S15",
+      "id": "T03",
+      "title": "AI-ready feature + evidence marts",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Build AI-ready feature and evidence marts on top of the cut-over warehouse. Materialize listing/day, segment/day, price-change, state-transition, and evidence-pack style outputs that future grounded AI and product-level intelligence can consume without scanning raw events, while preserving traceability back to manifests and observed windows.",
+      "estimate": "2-3 sessions",
+      "files": [
+        "vinted_radar/query/feature_marts.py",
+        "infra/clickhouse/",
+        "vinted_radar/cli.py",
+        "tests/test_feature_marts.py"
+      ],
+      "verify": "python -m pytest tests/test_feature_marts.py -q",
+      "inputs": [
+        "vinted_radar/query/overview_clickhouse.py",
+        "vinted_radar/query/explorer_clickhouse.py",
+        "vinted_radar/query/detail_clickhouse.py",
+        ".gsd/REQUIREMENTS.md"
+      ],
+      "expected_output": [
+        "AI-ready feature marts",
+        "tests/test_feature_marts.py"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M002",
+      "slice_id": "S15",
+      "id": "T04",
+      "title": "Operational closure + final acceptance",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Close the migration operationally. Remove heavyweight SQLite history tables from the live runtime path, document the final operating model, and run one last integrated acceptance proving bounded storage, reconciliation health, dashboard/runtime behavior, and evidence drill-down on the new platform.",
+      "estimate": "1-2 sessions",
+      "files": [
+        "README.md",
+        "vinted_radar/cli.py",
+        "scripts/verify_cutover_stack.py",
+        "tests/test_integrated_platform_acceptance.py"
+      ],
+      "verify": "python -m pytest tests/test_integrated_platform_acceptance.py -q",
+      "inputs": [
+        "README.md",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/query/feature_marts.py"
+      ],
+      "expected_output": [
+        "Final operating model docs",
+        "integrated platform acceptance proof"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 121,
+      "id": "D001",
+      "when_context": "M001",
+      "scope": "scope",
+      "decision": "Market coverage focus",
+      "choice": "Vinted Homme and Femme categories plus all reachable sub-categories only",
+      "rationale": "Keeps the first radar focused enough to cover deeply and compare contextually.",
+      "revisable": "Yes — if a later milestone explicitly expands marketplace scope",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 122,
+      "id": "D002",
+      "when_context": "M001",
+      "scope": "arch",
+      "decision": "Data acquisition backbone",
+      "choice": "Public collection only, no login required, and no central dependency on undocumented private APIs",
+      "rationale": "Matches access constraints and reduces fragility risk.",
+      "revisable": "Yes — if an official supported data channel becomes available and complements public collection",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 123,
+      "id": "D003",
+      "when_context": "M001",
+      "scope": "pattern",
+      "decision": "Truth surface in product",
+      "choice": "Separate observed facts, inferred conclusions, and uncertain states everywhere that matters",
+      "rationale": "Product credibility depends on making evidence and uncertainty explicit.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 124,
+      "id": "D004",
+      "when_context": "M001",
+      "scope": "pattern",
+      "decision": "Primary product view",
+      "choice": "Mixed dashboard with market summary first and listing-level proof immediately underneath",
+      "rationale": "The product must tell a market story and let the user verify it quickly.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 125,
+      "id": "D005",
+      "when_context": "M001",
+      "scope": "operability",
+      "decision": "Local runtime modes",
+      "choice": "Support both batch mode and continuous mode in M001",
+      "rationale": "Batch supports testing and controlled reruns; continuous mode is required for a living radar.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 126,
+      "id": "D006",
+      "when_context": "M001",
+      "scope": "data",
+      "decision": "Listing state model posture",
+      "choice": "Use a prudent state machine covering active, sold observed/probable, unavailable non-conclusive, deleted when distinct, and unknown",
+      "rationale": "Avoids overclaiming from ambiguous public signals.",
+      "revisable": "Yes — if live evidence later justifies tighter or broader state distinctions",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 127,
+      "id": "D007",
+      "when_context": "M001",
+      "scope": "data",
+      "decision": "Ranking split",
+      "choice": "Provide separate “demande pure” and “premium” rankings",
+      "rationale": "These answer different market questions and should not collapse into one score.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 128,
+      "id": "D008",
+      "when_context": "M001",
+      "scope": "pattern",
+      "decision": "Premium score weighting",
+      "choice": "Price acts as an intelligent contextual factor, not the dominant driver",
+      "rationale": "The premium ranking should reward strong performance at relatively high price, not simply expensive listings.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 129,
+      "id": "D009",
+      "when_context": "M001",
+      "scope": "arch",
+      "decision": "Milestone sequencing",
+      "choice": "Build listing-level credibility first, then richer market reading, then product-level intelligence plus AI, then SaaS hardening",
+      "rationale": "Preserves the evidence backbone before richer analytics and commercialization.",
+      "revisable": "Yes — if execution proves a different sequence is materially safer or faster",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 130,
+      "id": "D010",
+      "when_context": "M001/S01 planning",
+      "scope": "arch",
+      "decision": "S01 collector delivery stack",
+      "choice": "Implement S01 as a Python package with a Typer batch CLI, public vinted.com HTML extraction over HTTP, SQLite persistence, and targeted raw evidence fragments rather than full-page archives by default.",
+      "rationale": "The repository is a blank slate, public SSR HTML already exposes enough catalog and item data for S01, SQLite keeps the system local-first, and targeted evidence retention preserves explainability without creating unnecessary archive volume.",
+      "revisable": "Yes — if public HTML extraction stops being viable or later slices need broader evidence retention.",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 131,
+      "id": "D011",
+      "when_context": "M001/S01 completion",
+      "scope": "architecture",
+      "decision": "Public acquisition shape for S01",
+      "choice": "Use Vinted's server-rendered `/catalog` HTML plus the embedded `catalogTree` flight payload for seed sync, and ingest listing cards from SSR `new-item-box__container` fragments into SQLite with targeted raw evidence retention.",
+      "rationale": "Live verification showed the public catalog page already exposes the full Homme/Femme category tree and enough listing-card fields to bootstrap discovery without browser automation or undocumented private APIs. This keeps the collector local-first, lowers anti-bot surface area, and preserves inspectable evidence without full-page archives.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 132,
+      "id": "D012",
+      "when_context": "M001/S02 completion",
+      "scope": "data-model",
+      "decision": "Observation history granularity for S02",
+      "choice": "Persist `listing_observations` as one normalized observation per listing per run, while keeping `listing_discoveries` as the per-sighting diagnostic layer.",
+      "rationale": "Per-run observations make first seen/last seen/cadence/freshness truthful and cheap to query, while the detailed discovery rows still preserve the lower-level evidence needed for debugging category/page behavior.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 133,
+      "id": "D013",
+      "when_context": "M001/S03 completion",
+      "scope": "state-machine",
+      "decision": "State evidence precedence for S03",
+      "choice": "Treat direct public item-page probe evidence as highest-priority state input: 404/410 map to `deleted`, parsed buy-state flags map to observed `active`/`sold`/`unavailable`, and only unresolved cases fall back to cautious history-based inference from follow-up misses.",
+      "rationale": "This keeps state claims grounded in the strongest public signal available while preserving prudent fallback behavior when public item pages are inconclusive or unchanged. It also keeps browserless collection viable by reusing escaped script data already present in the public HTML.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 134,
+      "id": "D014",
+      "when_context": "M001/S04 completion",
+      "scope": "scoring",
+      "decision": "S04 ranking model posture",
+      "choice": "Keep `demand` and `premium` as separate on-demand score surfaces; demand is anchored in state/history evidence, and premium reuses demand as the base score with only a modest contextual price boost when the peer group clears explicit support thresholds.",
+      "rationale": "This preserves the distinction between sell-through and high-price performance, keeps price from dominating the premium ranking, and avoids fake contextual precision when peer support is thin.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 135,
+      "id": "D015",
+      "when_context": "M001/S05 completion",
+      "scope": "ui-architecture",
+      "decision": "S05 dashboard delivery architecture",
+      "choice": "Serve the local dashboard as a server-rendered standard-library WSGI app with matching JSON diagnostics, reusing repository/state/scoring payloads instead of duplicating business logic in client code.",
+      "rationale": "This keeps the product local-first and dependency-light, and makes the UI more truthful because the browser surface and the debug endpoints are driven by the exact same server-side payload assembly.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 136,
+      "id": "D016",
+      "when_context": "M001/S06 completion",
+      "scope": "runtime-architecture",
+      "decision": "S06 local operator runtime observability architecture",
+      "choice": "Persist each batch or continuous radar cycle in SQLite `runtime_cycles` and expose that same runtime truth through `runtime-status`, `/api/runtime`, and the dashboard runtime card.",
+      "rationale": "Continuous mode needs durable phase/error visibility without diverging into separate scheduler state files; keeping runtime-cycle truth in SQLite lets the CLI and dashboard read the same source of truth and preserves failure context when a cycle dies mid-run.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 137,
+      "id": "D017",
+      "when_context": "2026-03-22 review follow-up",
+      "scope": "architecture",
+      "decision": "Primary acquisition backbone after the March 2026 review",
+      "choice": "Use Vinted's private `/api/v2/catalog/items` endpoint as the primary discovery surface, while keeping public item pages as the separate state-evidence path.",
+      "rationale": "The user explicitly chose to assume the private API tradeoff. It materially improves catalog discovery throughput and field richness, and the project already retains public item-page probes as an independent evidence layer for cautious state resolution.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 138,
+      "id": "D018",
+      "when_context": "2026-03-22 DB corruption follow-up",
+      "scope": "operability",
+      "decision": "How synchronized SQLite databases are promoted into the local working path",
+      "choice": "Create a consistent remote snapshot first, copy it to a temporary local file, run database health checks, then atomically rename it into place.",
+      "rationale": "The project runs SQLite in WAL mode and handles very large live databases. Directly copying into `data/vinted-radar.db` can expose partial, WAL-incomplete, or corrupted transfers as if they were usable local truth.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 139,
+      "id": "D019",
+      "when_context": "M002 roadmap planning",
+      "scope": "architecture",
+      "decision": "M002 delivery stack",
+      "choice": "Keep the existing Python + SQLite + server-rendered WSGI architecture for M002 and deepen repository-driven SQL payloads instead of doing a framework rewrite.",
+      "rationale": "The codebase already has the right brownfield seams in RadarRepository, the WSGI route split, and SQLite runtime persistence. The milestone risk is product shape, payload scalability, runtime truth, and VPS serving discipline—not a missing frontend framework.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 140,
+      "id": "D020",
+      "when_context": "M002/S01 planning",
+      "scope": "architecture",
+      "decision": "How the M002/S01 overview home retires the current home-path scale risk",
+      "choice": "Implement S01 around a repository-owned SQL overview contract for `/`, while keeping the existing WSGI route topology and `/api/dashboard` seam as the brownfield compatibility surface.",
+      "rationale": "The current default home still loads listing-state inputs across the full corpus and assembles market summary modules in Python. S01 needs to retire that primary-path risk without a framework rewrite or a second persisted state cache. Reusing the existing `/`, `/explorer`, and `/api/...` route split while moving overview summaries and first comparison modules into repository SQL keeps the change incremental, testable, and compatible with later S02-S05 slices.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 141,
+      "id": "D021",
+      "when_context": "M002/S01/T01",
+      "scope": "architecture",
+      "decision": "How the M002/S01 overview payload derives state counts and first comparison modules without full-corpus scoring.",
+      "choice": "Implement the overview home contract as a repository-owned `overview_snapshot()` built from SQL state classification that reuses `state_machine` thresholds/constants, and keep thin-support comparison rows visible with explicit low-support flags instead of filtering them away.",
+      "rationale": "This retires the current home-path scale risk while keeping the evidence vocabulary aligned with the existing Python state machine. Surfacing low-support rows and module reasons preserves honesty and makes empty/thin modules diagnosable in JSON instead of disappearing silently.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 142,
+      "id": "D022",
+      "when_context": "M002/S01/T02",
+      "scope": "architecture",
+      "decision": "Brownfield compatibility posture for the M002/S01 overview home",
+      "choice": "Keep `/api/dashboard` as the machine-readable compatibility endpoint while making `/` a SQL-backed French overview, and source featured listing drill-downs from the SQL explorer page instead of the legacy scored home payload.",
+      "rationale": "This preserves existing dashboard diagnostics and caller integrations while retiring full-corpus Python recomputation from the primary home path. It also keeps overview drill-down links SQL-first end to end, so future polish on `/` does not quietly reintroduce the old scoring-heavy assembly path.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 144,
+      "id": "D023",
+      "when_context": "M002/S02 planning",
+      "scope": "operability",
+      "decision": "How S02 exposes pause/resume control versus runtime visibility",
+      "choice": "Make pause/resume a CLI-driven, DB-persisted control surface in S02 and keep `/runtime` plus `/api/runtime` read-only visibility surfaces.",
+      "rationale": "The dashboard is currently GET-only and the slice's primary risk is truthful persistence and orchestration, not HTTP mutation handling. CLI controls are lower churn, easier to test, and still let the runtime page, overview, and API read the same persisted truth.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 145,
+      "id": "D024",
+      "when_context": "M002/S02 planning",
+      "scope": "operability",
+      "decision": "How S02 exposes pause/resume control versus runtime visibility",
+      "choice": "Make pause/resume a CLI-driven, DB-persisted control surface in S02 and keep `/runtime` plus `/api/runtime` read-only visibility surfaces.",
+      "rationale": "The dashboard is currently GET-only and the slice's primary risk is truthful persistence and orchestration, not HTTP mutation handling. CLI controls are lower churn, easier to test, and still let the runtime page, overview, and API read the same persisted truth.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 146,
+      "id": "D025",
+      "when_context": "M002/S02 planning",
+      "scope": "architecture",
+      "decision": "How M002/S02 represents current runtime truth",
+      "choice": "Add a separate persisted `runtime_controller_state` snapshot/table for current controller and scheduler truth, while keeping `runtime_cycles` as immutable per-cycle history.",
+      "rationale": "Scheduled, paused, next-resume, elapsed-pause, and heartbeat truth cannot be represented honestly by overloading the last cycle row. A separate controller snapshot fits the brownfield SQLite schema/migration model, lets the dashboard and scraper agree across separate processes, and preserves cycle history semantics.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 147,
+      "id": "D026",
+      "when_context": "M002/S02",
+      "scope": "runtime-architecture",
+      "decision": "How continuous mode orders post-cycle controller transitions versus observer callbacks",
+      "choice": "Persist the next controller state (`scheduled` / `paused`) before observer-facing callbacks after each continuous cycle.",
+      "rationale": "Live S02 smoke proved that calling observer callbacks before writing the next controller state can create a transient truth gap between `/api/runtime`, `/health`, and the overview/runtime UI. Persisting the transition first keeps all read surfaces aligned on the same SQLite truth.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 148,
+      "id": "D027",
+      "when_context": "M002/S03",
+      "scope": "operability",
+      "decision": "How S03 represents mounted VPS serving and route verification",
+      "choice": "Use a shared `base_path` + optional `public_base_url` serving contract across the CLI, SSR route generation, health payloads, systemd installer, and the `verify_vps_serving.py` smoke verifier.",
+      "rationale": "The live product now needs to work behind a reverse-proxy prefix without localhost-era links or route drift. One shared serving contract keeps HTML, JSON diagnostics, CLI output, and operator docs aligned, while the smoke verifier gives future agents one repeatable proof command for the mounted path.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 149,
+      "id": "D028",
+      "when_context": "M002/S04",
+      "scope": "architecture",
+      "decision": "How M002/S04 makes `/explorer` the main browse-and-compare workspace without reintroducing request-time full-corpus reshaping.",
+      "choice": "Build S04 around one repository-owned classified explorer snapshot that feeds filters, paging, comparison modules, and detail-navigation context, while keeping thin-support rows visible with explicit honesty metadata instead of suppressing them.",
+      "rationale": "A single SQL-first explorer contract keeps filtering, paging, support counts, and drill-down links truthful across `/explorer`, `/api/explorer`, overview modules, and listing detail. Preserving the active explorer query in detail links closes the analytical loop, and leaving low-support rows visible avoids fake precision or silent disappearance of weak slices.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 150,
+      "id": "D029",
+      "when_context": "M002/S06 completion",
+      "scope": "acquisition-honesty",
+      "decision": "How M002/S06 represents degraded acquisition truth across product and runtime surfaces",
+      "choice": "Persist state-refresh degradation summaries on each runtime cycle and aggregate them with latest discovery scan failures in `RadarRepository.runtime_status().acquisition`; keep JSON diagnostics literal and translate only the visible product wording in `dashboard.py`.",
+      "rationale": "S06 needs one durable honesty contract for anti-bot hits, degraded probes, and failed scans. Keeping that truth in repository/runtime payloads prevents overview, explorer, detail, runtime, `/api/runtime`, and `/health` from drifting into page-local heuristics, while the product layer can still translate the same signals into broader-audience French copy.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 151,
+      "id": "D030",
+      "when_context": "M002/S05 architecture restored during M002/S06 closeout",
+      "scope": "detail-product-architecture",
+      "decision": "Restore the S05 detail-route architecture decision in the append-only register after the S06 decision was appended",
+      "choice": "Keep `/api/listings/<id>` as the raw proof contract but add a narrative/provenance layer in `dashboard.py`, and render the HTML detail route as narrative-first with progressive proof disclosures.",
+      "rationale": "The S05 architectural choice is still active project knowledge and should remain explicitly recorded alongside the new S06 degraded-acquisition decision. Keeping both decisions visible prevents future agents from inferring that S06 replaced the narrative/progressive-proof detail architecture.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 152,
+      "id": "D031",
+      "when_context": "M002/S08",
+      "scope": "acquisition",
+      "decision": "How discovery should apply price filters to Vinted catalog scans",
+      "choice": "Thread configured min/max price bounds into Vinted's catalog API request and retain a local post-download price guard before persistence.",
+      "rationale": "Applying price bounds at the API boundary reduces wasted HTTP traffic and ban pressure, while the local guard preserves correctness if Vinted still returns a few out-of-range cards.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 153,
+      "id": "D032",
+      "when_context": "M002/S09",
+      "scope": "architecture",
+      "decision": "How M002/S09 should turn a large Webshare proxy pool into real acquisition throughput without leaking credentials",
+      "choice": "Adopt a gitignored local proxy-file contract (`data/proxies.txt`), normalize raw `host:port:user:pass` entries centrally, drive discovery through route-local sync/async sessions with per-route warm-up/throttling/cooldowns, and expose only safe pool metadata plus a `proxy-preflight` operator check",
+      "rationale": "The existing retry-only proxy rotation barely used a large pool and forced operators to rewrite Webshare exports by hand. Route-local transport state lets concurrent discovery actually spread across the pool, while the local file contract keeps credentials out of the repo and the runtime/CLI surfaces stay honest by persisting only pool size and transport mode. A preflight command closes the operator loop by proving exit-route diversity and Vinted reachability before longer runs.",
+      "revisable": "Yes",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 154,
+      "id": "D033",
+      "when_context": "M002 roadmap extension after S09 / VPS storage-growth incident",
+      "scope": "architecture",
+      "decision": "Long-term storage and analytics architecture after the SQLite growth failure",
+      "choice": "Adopt a polyglot data platform: PostgreSQL for mutable control-plane and current-state truth, ClickHouse for analytical/serving facts and rollups, and S3-compatible object storage with Parquet for immutable raw evidence; keep SQLite only as a migration/backfill source, not the live durable boundary.",
+      "rationale": "The live VPS incident showed that one successful continuous cycle can grow the cleaned SQLite database by roughly 1.5 GB while the current schema duplicates heavyweight card payload JSON across listings, listing_discoveries, and listing_observations. SQLite is no longer a credible long-term boundary for mutable runtime state, append-heavy analytical history, and raw evidence retention at the same time. Splitting those concerns gives bounded OLTP state in PostgreSQL, low-latency analytical serving and rollups in ClickHouse, and cheap durable cold retention in Parquet on object storage. This also creates AI-ready feature surfaces without forcing future models to scan raw event history directly.",
+      "revisable": "Yes — vendor and table-format details can evolve, but the separation between mutable state, serving analytics, and immutable raw evidence should remain.",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 155,
+      "id": "D034",
+      "when_context": "M002/S10/T01",
+      "scope": "architecture",
+      "decision": "How the polyglot platform connection/config contract is represented in code",
+      "choice": "Use one dataclass-based `vinted_radar.platform.config` loader for PostgreSQL, ClickHouse, and S3-compatible settings, including normalized object prefixes, explicit schema versions, redacted observability output, and cutover flags that all default to false.",
+      "rationale": "Future bootstrap, migration, doctor, and outbox slices need one validated source of truth for platform endpoints and versions, but the current product must not silently switch live reads or writes. A single loader keeps the contract consistent and testable while preserving a safe staged-cutover posture.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    }
+  ],
+  "verification_evidence": [
+    {
+      "id": 1,
+      "task_id": "T01",
+      "slice_id": "S10",
+      "milestone_id": "M002",
+      "command": "python -m pytest tests/test_platform_config.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1819,
+      "created_at": "2026-03-28T18:55:06.230Z"
+    }
+  ]
+}

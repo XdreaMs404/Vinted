@@ -12,9 +12,9 @@ Turn imperfect public Vinted listing signals into an evidence-backed market read
 
 M001 implementation is complete and integrated across S01 through S06, and its closeout summary now exists at `.gsd/milestones/M001/M001-SUMMARY.md`. That milestone still carries a **needs-attention** closeout result because the historical proof databases are not yet trustworthy enough for final multi-day acceptance.
 
-M002 is complete, and its closeout summary now exists at `.gsd/milestones/M002/M002-SUMMARY.md`. S01 through S08 are complete: the home path is SQL-backed and French-first, runtime truth lives in a separate controller snapshot with pause/resume/scheduling surfaced through the CLI, `/runtime`, `/api/runtime`, and `/health`, the product ships with a shared responsive shell plus a mounted VPS-serving contract across overview, explorer, runtime, and HTML listing detail, `/explorer` is the main browse-and-compare workspace with SQL-backed filters and context-preserving detail drill-down, `/listings/<id>` is narrative-first with progressive proof, degraded acquisition truth is explicit across overview, explorer, detail, runtime, `/api/runtime`, and `/health`, large-corpus mounted acceptance has been re-proven on `data/m001-closeout.db`, the real public VPS entrypoint is now back online at `http://46.225.113.129:8765/` after recovering from a corrupted live DB, and discovery/runtime now pass native Vinted `price_from` / `price_to` bounds while keeping the local price guard in place.
+M002 product slices S01 through S09 are complete, and the original product closeout has been archived at `.gsd/milestones/M002/M002-CLOSEOUT-S01-S09.md` because the milestone was reopened for platform work. Those slices delivered the SQL-backed French overview home, controller-backed runtime truth, shared mounted/public product shell, SQL-first explorer workspace, narrative/progressive-proof listing detail, explicit degraded acquisition truth, realistic large-corpus VPS proof, native API-side price bounds, and the high-throughput Webshare proxy-pool operator path.
 
-M002/S09 extends that baseline with a real high-throughput proxy-pool operator contract: the CLI now accepts raw Webshare `host:port:user:pass` entries, auto-loads a gitignored local `data/proxies.txt` pool when present, discovery/state refresh can use route-local proxy sessions instead of one-hot failure rotation, `proxy-preflight` can verify exit-route diversity plus Vinted API reachability before a run starts, runtime persistence exposes only safe `transport_mode` / `proxy_pool_size` metadata rather than credentials, and the post-slice live concurrency assessment now sets the proxy-pooled auto-cap at 24.
+The post-S09 VPS storage incident materially changed the project state: the cleaned live SQLite database remained healthy yet still grew by roughly 1.5 GB during a single successful cycle, and the schema still duplicates heavyweight card payload JSON across mutable and historical tables. M002 has therefore been reopened with S10 through S15 planned to replace the monolithic SQLite boundary with PostgreSQL for mutable control-plane/current-state truth, ClickHouse for analytical serving and rollups, and S3-compatible Parquet object storage for immutable raw evidence. SQLite now remains the legacy live path only until that cutover lands, plus a migration/backfill source for historical continuity.
 
 What is verified today:
 - `python -m pytest -q` passes
@@ -31,6 +31,7 @@ What is verified today:
 
 What is still pending on the roadmap:
 - M001 still needs trustworthy multi-day closeout evidence from healthy historical databases
+- M002/S10 through S15 now need implementation to cut the live platform over from the legacy SQLite boundary to PostgreSQL + ClickHouse + S3-compatible Parquet storage
 
 ## Architecture / Key Patterns
 
@@ -44,7 +45,9 @@ Mixed market surface: market summaries and rankings must always be backed by lis
 
 Discovery currently uses the Vinted web catalog API for throughput, while public item pages remain a separate direct-evidence path for cautious state resolution.
 
-SQLite is the durable runtime boundary. Discovery runs, catalog scans, listings, discoveries, observations, item-page probes, and runtime cycles are all persisted so coverage, failures, and operator state remain inspectable after each run.
+SQLite is the legacy runtime boundary that powered the current S01-S09 product and still serves as the pre-cutover live path today.
+
+The target platform decision recorded after the VPS growth incident is to move mutable control-plane/current-state truth to PostgreSQL, analytical serving and rollups to ClickHouse, and immutable raw evidence to Parquet on S3-compatible object storage; SQLite is retained only as a migration/backfill input and offline artifact during the cutover.
 
 The dashboard is server-rendered and shares one repository-backed payload with its JSON diagnostics so the browser surface and debug surface stay truthful.
 
@@ -61,6 +64,6 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 ## Milestone Sequence
 
 - [x] M001: Listing-Level Market Radar — implementation complete; closeout summary written, verification result `needs-attention` pending healthy multi-day runtime proof.
-- [x] M002: Enriched Market Intelligence Experience — complete; S01 through S09 now ship the SQL-backed overview home, controller-backed runtime truth, shared French product shell, mounted/public serving contract, SQL-first explorer workspace, narrative/progressive-proof listing detail, explicit degraded acquisition truth, realistic large-corpus acceptance, recovered public VPS proof at `http://46.225.113.129:8765/`, native API-side price bounds for discovery/runtime, and a high-throughput Webshare proxy-pool operator path with preflight-backed transport verification.
+- [ ] M002: Enriched Market Intelligence Experience — original product slices S01 through S09 are complete, but the milestone has been reopened with S10 through S15 to replace the monolithic SQLite boundary with PostgreSQL + ClickHouse + S3-compatible Parquet storage before grounded AI and SaaS hardening proceed.
 - [ ] M003: Product-Level Intelligence + Grounded AI Layer — group listings into product-level signals and add grounded AI insights, summaries, and analytical exploration.
 - [ ] M004: SaaS Hardening and Commercialization — industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.

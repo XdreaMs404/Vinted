@@ -6,6 +6,56 @@ Local-first batch collector and analysis stack for Vinted Homme/Femme market sig
 
 Acquisition now defaults to the bounded API posture: `--min-price 30` and `--max-price 0` on the real acquisition entrypoints (`discover`, `batch`, `continuous`). Use `--min-price 0` only when you explicitly want an unbounded debug or benchmark run.
 
+## Polyglot data-platform foundation (M002/S10)
+
+The repo now carries the shared configuration contract for the long-term PostgreSQL + ClickHouse + S3-compatible storage platform in `vinted_radar.platform.config`.
+
+Current posture:
+
+- SQLite still remains the live product read path for the existing dashboard and CLI surfaces.
+- The new platform settings define the future durable boundary for bootstrap, migrations, outbox/event delivery, and object-storage manifests.
+- All cutover flags default to `false`, so simply adding these variables does not switch reads or writes automatically.
+
+Install/base dependency additions in `pyproject.toml`:
+
+- PostgreSQL: `psycopg`
+- ClickHouse: `clickhouse-connect`
+- Parquet: `pyarrow`
+- S3-compatible storage: `boto3`
+
+Shared environment contract loaded by `load_platform_config()`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VINTED_RADAR_PLATFORM_POSTGRES_DSN` | `postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar` | PostgreSQL control-plane DSN. |
+| `VINTED_RADAR_PLATFORM_CLICKHOUSE_URL` | `http://127.0.0.1:8123` | ClickHouse HTTP endpoint. |
+| `VINTED_RADAR_PLATFORM_CLICKHOUSE_DATABASE` | `vinted_radar` | ClickHouse database name. |
+| `VINTED_RADAR_PLATFORM_CLICKHOUSE_USERNAME` | `default` | ClickHouse username. |
+| `VINTED_RADAR_PLATFORM_CLICKHOUSE_PASSWORD` | empty | ClickHouse password. |
+| `VINTED_RADAR_PLATFORM_OBJECT_STORE_ENDPOINT` | `http://127.0.0.1:9000` | S3-compatible endpoint (MinIO locally by default). |
+| `VINTED_RADAR_PLATFORM_OBJECT_STORE_BUCKET` | `vinted-radar` | Bucket for manifests, Parquet, and raw evidence objects. |
+| `VINTED_RADAR_PLATFORM_OBJECT_STORE_REGION` | `us-east-1` | Region value for the S3 client. |
+| `VINTED_RADAR_PLATFORM_OBJECT_STORE_ACCESS_KEY` | `minioadmin` | Object-store access key. |
+| `VINTED_RADAR_PLATFORM_OBJECT_STORE_SECRET_KEY` | `minioadmin` | Object-store secret key. |
+| `VINTED_RADAR_PLATFORM_OBJECT_STORE_PREFIX` | `vinted-radar` | Root object prefix. |
+| `VINTED_RADAR_PLATFORM_RAW_EVENTS_PREFIX` | `<root>/events/raw` | Raw event-envelope/object prefix. |
+| `VINTED_RADAR_PLATFORM_MANIFESTS_PREFIX` | `<root>/manifests` | Evidence/outbox manifest prefix. |
+| `VINTED_RADAR_PLATFORM_PARQUET_PREFIX` | `<root>/parquet` | Parquet/warehouse object prefix. |
+| `VINTED_RADAR_PLATFORM_POSTGRES_SCHEMA_VERSION` | `1` | Expected PostgreSQL migration baseline. |
+| `VINTED_RADAR_PLATFORM_CLICKHOUSE_SCHEMA_VERSION` | `1` | Expected ClickHouse migration baseline. |
+| `VINTED_RADAR_PLATFORM_EVENT_SCHEMA_VERSION` | `1` | Event-envelope schema version. |
+| `VINTED_RADAR_PLATFORM_MANIFEST_SCHEMA_VERSION` | `1` | Manifest schema version. |
+| `VINTED_RADAR_PLATFORM_ENABLE_POSTGRES_WRITES` | `false` | Future cutover flag for PostgreSQL writes. |
+| `VINTED_RADAR_PLATFORM_ENABLE_CLICKHOUSE_WRITES` | `false` | Future cutover flag for ClickHouse writes. |
+| `VINTED_RADAR_PLATFORM_ENABLE_OBJECT_STORAGE_WRITES` | `false` | Future cutover flag for object-storage writes. |
+| `VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS` | `false` | Future cutover flag for platform-backed reads. |
+
+Notes:
+
+- Storage prefixes are normalized to forward-slash form and reject `.` / `..` segments.
+- `PlatformConfig.as_redacted_dict()` produces a safe observability snapshot that keeps endpoints, versions, and flags visible while masking credentials.
+- Targeted verification for this layer: `python -m pytest tests/test_platform_config.py -q`
+
 ### One batch cycle
 
 ```bash

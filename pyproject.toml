@@ -10,7 +10,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "beautifulsoup4>=4.12",
+  "boto3>=1.37",
+  "clickhouse-connect>=0.8",
   "curl_cffi>=0.7",
+  "psycopg>=3.2",
+  "pyarrow>=19.0",
   "typer>=0.12",
 ]
 
