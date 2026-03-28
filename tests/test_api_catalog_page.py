@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from vinted_radar.card_payload import (
+    CARD_EVIDENCE_SOURCE_API,
+    CARD_EVIDENCE_SCHEMA_VERSION,
+)
 from vinted_radar.parsers.api_catalog_page import (
     ApiCatalogParseError,
     parse_api_catalog_page,
@@ -113,11 +117,33 @@ class TestParseApiCatalogPageFull:
         assert page.listings[0].source_catalog_id == 555
         assert page.listings[0].source_root_catalog_id == 100
 
-    def test_raw_card_is_a_copy_of_original_dict(self) -> None:
-        item = _make_item(id=7)
+    def test_raw_card_keeps_only_minimal_api_evidence_fragments(self) -> None:
+        item = _make_item(
+            id=7,
+            user={"id": 41, "login": "alice"},
+            photo={
+                "url": "https://img.vinted.fr/7.jpg",
+                "high_resolution": {"timestamp": 1711092000},
+            },
+            analytics={"score": 0.99},
+        )
         page = parse_api_catalog_page(_make_payload(items=[item]))
-        assert page.listings[0].raw_card == item
-        assert page.listings[0].raw_card is not item  # defensive copy
+
+        assert page.listings[0].raw_card == {
+            "schema_version": CARD_EVIDENCE_SCHEMA_VERSION,
+            "evidence_source": CARD_EVIDENCE_SOURCE_API,
+            "fragments": {
+                "title": "T-shirt Nike",
+                "brand_title": "Nike",
+                "size_title": "L",
+                "status_id": 3,
+                "price": {"amount": "12.50", "currency_code": "EUR"},
+                "total_item_price": {"amount": "14.13", "currency_code": "EUR"},
+            },
+        }
+        assert "user" not in page.listings[0].raw_card["fragments"]
+        assert "photo" not in page.listings[0].raw_card["fragments"]
+        assert "analytics" not in page.listings[0].raw_card["fragments"]
 
     def test_extended_metadata_fields_are_mapped(self) -> None:
         item = _make_item(

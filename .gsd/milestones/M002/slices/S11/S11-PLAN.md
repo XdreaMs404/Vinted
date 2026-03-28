@@ -4,7 +4,7 @@
 **Demo:** After this: After this: discovery and state-refresh emit minimal evidence fragments into partitioned Parquet on object storage with manifests, so raw proof leaves the hot mutable path instead of bloating operational tables.
 
 ## Tasks
-- [ ] **T01: Minimal evidence schema** — Redefine the listing-card evidence contract around minimal fragments. Replace the API parser's `raw_card=dict(item)` posture with the same targeted proof philosophy already used by the HTML parser, update `card_payload.py` and tests, and make the evidence contract explicit about what is preserved for explainability versus what is dropped from the hot path.
+- [x] **T01: Replaced full API raw-card persistence with a shared minimal evidence envelope and normalization tests.** — Redefine the listing-card evidence contract around minimal fragments. Replace the API parser's `raw_card=dict(item)` posture with the same targeted proof philosophy already used by the HTML parser, update `card_payload.py` and tests, and make the evidence contract explicit about what is preserved for explainability versus what is dropped from the hot path.
   - Estimate: 2 sessions
   - Files: vinted_radar/parsers/api_catalog_page.py, vinted_radar/parsers/catalog_page.py, vinted_radar/card_payload.py, vinted_radar/models.py, tests/test_api_catalog_page.py, tests/test_card_payload.py
   - Verify: python -m pytest tests/test_api_catalog_page.py tests/test_card_payload.py -q

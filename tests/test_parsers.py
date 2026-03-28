@@ -39,4 +39,4 @@ def test_parse_catalog_page_normalizes_listing_fields_and_pagination() -> None:
     assert first.price_amount_cents == 1250
     assert first.total_price_amount_cents == 1413
     assert first.canonical_url == "https://www.vinted.fr/items/9001-robe-noire"
-    assert first.raw_card["description_subtitle"] == "M · Très bon état"
+    assert first.raw_card["fragments"]["description_subtitle"] == "M · Très bon état"

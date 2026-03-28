@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T04",
+  "unitId": "M002/S10/T04",
+  "timestamp": 1774727313897,
+  "passed": true,
+  "discoverySource": "task-plan",
+  "checks": [
+    {
+      "command": "python -m pytest tests/test_data_platform_smoke.py -q",
+      "exitCode": 0,
+      "durationMs": 49628,
+      "verdict": "pass"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 
+from vinted_radar.card_payload import build_html_card_evidence
 from vinted_radar.models import CatalogPage, ListingCard
 
 BASE_URL = "https://www.vinted.fr"
@@ -89,15 +90,15 @@ def _parse_listing_card(
         image_url=image.get("src") if image else None,
         source_catalog_id=source_catalog_id,
         source_root_catalog_id=source_root_catalog_id,
-        raw_card={
-            "data_testid": data_testid,
-            "overlay_title": overlay_title,
-            "image_alt": image_alt,
-            "description_title": description_title,
-            "description_subtitle": subtitle,
-            "price_text": price_text,
-            "total_price_text": total_price_text,
-        },
+        raw_card=build_html_card_evidence(
+            data_testid=data_testid,
+            overlay_title=overlay_title,
+            image_alt=image_alt,
+            description_title=description_title,
+            description_subtitle=subtitle,
+            price_text=price_text,
+            total_price_text=total_price_text,
+        ),
     )
 
 

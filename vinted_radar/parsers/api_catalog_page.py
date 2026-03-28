@@ -13,6 +13,7 @@ import logging
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
+from vinted_radar.card_payload import STATUS_ID_TO_CONDITION, build_api_card_evidence
 from vinted_radar.models import CatalogPage, ListingCard
 
 logger = logging.getLogger(__name__)
@@ -21,17 +22,6 @@ logger = logging.getLogger(__name__)
 # Constants
 # ------------------------------------------------------------------
 BASE_URL = "https://www.vinted.fr"
-
-# Vinted status_id → French condition label (mirrors the public UI).
-# Source: observed API responses; IDs are stable across locales.
-STATUS_ID_TO_CONDITION: dict[int, str] = {
-    1: "Neuf avec étiquette",
-    2: "Neuf sans étiquette",
-    3: "Très bon état",
-    4: "Bon état",
-    5: "Satisfaisant",
-    6: "Mauvais état",
-}
 
 # ISO-4217 codes that Vinted uses in its price objects.
 _CURRENCY_SYMBOL_MAP: dict[str, str] = {
@@ -209,7 +199,7 @@ def _parse_api_item(
         created_at_ts=created_at_ts,
         source_catalog_id=source_catalog_id,
         source_root_catalog_id=source_root_catalog_id,
-        raw_card=dict(item),
+        raw_card=build_api_card_evidence(item),
     )
 
 
