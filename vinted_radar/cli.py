@@ -12,6 +12,7 @@ from vinted_radar.dashboard import serve_dashboard, start_dashboard_server
 from vinted_radar.db_health import inspect_sqlite_database
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.long_run_audit import build_long_run_audit_report, render_long_run_audit_markdown
+from vinted_radar.platform import bootstrap_data_platform, doctor_data_platform, load_platform_config
 from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
@@ -274,6 +275,40 @@ def proxy_preflight(
             _echo(f"  error: {route['error']}")
         if route.get("challenge_suspected"):
             _echo("  note: Vinted challenge suspected on this route")
+
+
+@app.command("platform-bootstrap")
+def platform_bootstrap(
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+    check_writes: bool = typer.Option(True, "--check-writes/--skip-writes", help="Write and delete probe objects under each configured object-store prefix after bootstrap."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    report = bootstrap_data_platform(config=config, check_writes=check_writes)
+    _emit_platform_report(report=report, output_format=output_format)
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
+@app.command("platform-doctor")
+def platform_doctor(
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+    check_writes: bool = typer.Option(True, "--check-writes/--skip-writes", help="Write and delete probe objects under each configured object-store prefix during diagnostics."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    report = doctor_data_platform(config=config, check_writes=check_writes)
+    _emit_platform_report(report=report, output_format=output_format)
+    if not report.ok:
+        raise typer.Exit(code=1)
 
 
 @app.command("runtime-pause")
@@ -1375,6 +1410,103 @@ def _render_db_health_report(report: dict[str, object]) -> None:
     typer.echo(f"Healthy: {'yes' if report['healthy'] else 'no'}")
 
 
+def _emit_platform_report(*, report: object, output_format: str) -> None:
+    if output_format == "json":
+        as_dict = getattr(report, "as_dict", None)
+        if not callable(as_dict):
+            raise typer.BadParameter("Platform report object does not expose as_dict().")
+        typer.echo(json.dumps(as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+    _render_platform_report(report)
+
+
+def _render_platform_report(report: object) -> None:
+    config = dict(getattr(report, "config") or {})
+    postgres = getattr(report, "postgres")
+    clickhouse = getattr(report, "clickhouse")
+    object_storage = getattr(report, "object_storage")
+
+    typer.echo(f"Mode: {getattr(report, 'mode', 'unknown')}")
+    typer.echo("Config snapshot:")
+    typer.echo(f"- Postgres: {dict(config.get('postgres') or {}).get('dsn') or 'n/a'}")
+    typer.echo(
+        "- ClickHouse: {url} / {database}".format(
+            url=dict(config.get('clickhouse') or {}).get('url') or 'n/a',
+            database=dict(config.get('clickhouse') or {}).get('database') or 'n/a',
+        )
+    )
+    typer.echo(
+        "- Object storage: {endpoint} / bucket {bucket}".format(
+            endpoint=dict(config.get('object_storage') or {}).get('endpoint_url') or 'n/a',
+            bucket=dict(config.get('object_storage') or {}).get('bucket') or 'n/a',
+        )
+    )
+    typer.echo(f"- Check writes: {'yes' if getattr(report, 'check_writes', False) else 'no'}")
+    _render_platform_system_status("PostgreSQL", postgres)
+    _render_platform_system_status("ClickHouse", clickhouse)
+    _render_platform_object_storage_status(object_storage)
+    typer.echo(f"Healthy: {'yes' if getattr(report, 'ok', False) else 'no'}")
+
+
+def _render_platform_system_status(label: str, status: object) -> None:
+    typer.echo(f"{label}: {'ok' if getattr(status, 'ok', False) else 'fail'}")
+    typer.echo(f"- endpoint: {getattr(status, 'endpoint', 'n/a')}")
+    typer.echo(f"- migrations: {getattr(status, 'migration_dir', 'n/a')}")
+    expected = getattr(status, 'expected_version', None)
+    current = getattr(status, 'current_version', None)
+    available = getattr(status, 'available_version', None)
+    typer.echo(
+        f"- schema: current {current if current is not None else 'n/a'} / expected {expected if expected is not None else 'n/a'} / available {available if available is not None else 'n/a'}"
+    )
+    applied_this_run = tuple(getattr(status, 'applied_this_run', ()) or ())
+    if applied_this_run:
+        typer.echo("- applied this run: " + ", ".join(f"V{int(version):03d}" for version in applied_this_run))
+    pending = tuple(getattr(status, 'pending_versions', ()) or ())
+    if pending:
+        typer.echo("- pending: " + ", ".join(f"V{int(version):03d}" for version in pending))
+    unexpected = tuple(getattr(status, 'unexpected_versions', ()) or ())
+    if unexpected:
+        typer.echo("- unexpected applied: " + ", ".join(f"V{int(version):03d}" for version in unexpected))
+    mismatched = tuple(getattr(status, 'mismatched_checksums', ()) or ())
+    if mismatched:
+        typer.echo("- checksum mismatch: " + ", ".join(f"V{int(version):03d}" for version in mismatched))
+    typer.echo(f"- detail: {getattr(status, 'detail', 'n/a')}")
+    if getattr(status, 'error', None):
+        typer.echo(f"- error: {getattr(status, 'error')}")
+
+
+def _render_platform_object_storage_status(status: object) -> None:
+    typer.echo(f"Object storage: {'ok' if getattr(status, 'ok', False) else 'fail'}")
+    typer.echo(f"- endpoint: {getattr(status, 'endpoint_url', 'n/a')}")
+    typer.echo(f"- bucket: {getattr(status, 'bucket', 'n/a')} ({getattr(status, 'region', 'n/a')})")
+    typer.echo(
+        "- bucket state: exists {exists} | created {created}".format(
+            exists='yes' if getattr(status, 'bucket_exists', False) else 'no',
+            created='yes' if getattr(status, 'bucket_created', False) else 'no',
+        )
+    )
+    prefixes = dict(getattr(status, 'prefixes', {}) or {})
+    if prefixes:
+        typer.echo(
+            "- prefixes: raw_events={raw_events} | manifests={manifests} | parquet={parquet}".format(
+                raw_events=prefixes.get('raw_events') or 'n/a',
+                manifests=prefixes.get('manifests') or 'n/a',
+                parquet=prefixes.get('parquet') or 'n/a',
+            )
+        )
+    marker_keys = tuple(getattr(status, 'ensured_marker_keys', ()) or ())
+    if marker_keys:
+        typer.echo("- ensured marker keys: " + ", ".join(marker_keys))
+    probed = tuple(getattr(status, 'write_checked_prefixes', ()) or ())
+    if probed:
+        typer.echo("- write probes: " + ", ".join(probed))
+    typer.echo(f"- detail: {getattr(status, 'detail', 'n/a')}")
+    if getattr(status, 'error', None):
+        typer.echo(f"- error: {getattr(status, 'error')}")
+
+
 def _format_money(amount_cents: object, currency: object) -> str:
     if amount_cents is None:
         return "price n/a"
@@ -1409,6 +1541,7 @@ def _echo(message: str) -> None:
 
 def main() -> None:
     import logging
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"

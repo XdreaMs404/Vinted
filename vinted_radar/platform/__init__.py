@@ -1,3 +1,10 @@
+from vinted_radar.platform.bootstrap import (
+    ObjectStorageStatus,
+    PlatformBootstrapReport,
+    SchemaSystemStatus,
+    bootstrap_data_platform,
+    doctor_data_platform,
+)
 from vinted_radar.platform.config import (
     CLICKHOUSE_DATABASE_ENV,
     CLICKHOUSE_PASSWORD_ENV,
@@ -44,10 +51,15 @@ __all__ = [
     "OBJECT_STORE_PREFIX_ENV",
     "OBJECT_STORE_REGION_ENV",
     "OBJECT_STORE_SECRET_KEY_ENV",
+    "ObjectStorageStatus",
     "PARQUET_PREFIX_ENV",
     "POSTGRES_DSN_ENV",
     "POSTGRES_SCHEMA_VERSION_ENV",
+    "PlatformBootstrapReport",
     "PlatformConfig",
     "RAW_EVENTS_PREFIX_ENV",
+    "SchemaSystemStatus",
+    "bootstrap_data_platform",
+    "doctor_data_platform",
     "load_platform_config",
 ]

@@ -8,7 +8,7 @@
   - Estimate: 1-2 sessions
   - Files: pyproject.toml, vinted_radar/platform/config.py, vinted_radar/cli.py, README.md, tests/test_platform_config.py
   - Verify: python -m pytest tests/test_platform_config.py -q
-- [ ] **T02: Bootstrap stack + migration runners** — Introduce provider bootstrap and migration runners. Add versioned SQL migration directories for PostgreSQL and ClickHouse, local compose/bootstrap helpers for PostgreSQL + ClickHouse + MinIO, and CLI doctor/bootstrap commands that validate connectivity, schema version, and writable object-store prefixes.
+- [x] **T02: Added platform bootstrap/doctor commands with versioned PostgreSQL and ClickHouse migrations plus MinIO bucket/prefix checks.** — Introduce provider bootstrap and migration runners. Add versioned SQL migration directories for PostgreSQL and ClickHouse, local compose/bootstrap helpers for PostgreSQL + ClickHouse + MinIO, and CLI doctor/bootstrap commands that validate connectivity, schema version, and writable object-store prefixes.
   - Estimate: 2 sessions
   - Files: infra/docker-compose.data-platform.yml, infra/postgres/, infra/clickhouse/, vinted_radar/platform/migrations.py, vinted_radar/platform/bootstrap.py, vinted_radar/cli.py, tests/test_data_platform_bootstrap.py
   - Verify: python -m pytest tests/test_data_platform_bootstrap.py -q

@@ -56,6 +56,40 @@ Notes:
 - `PlatformConfig.as_redacted_dict()` produces a safe observability snapshot that keeps endpoints, versions, and flags visible while masking credentials.
 - Targeted verification for this layer: `python -m pytest tests/test_platform_config.py -q`
 
+### Local stack bootstrap + doctor
+
+Bring up the local services first:
+
+```bash
+docker compose -f infra/docker-compose.data-platform.yml up -d
+```
+
+Then bootstrap schema state, create the object-store bucket if needed, ensure prefix marker objects exist, and verify write access across PostgreSQL, ClickHouse, and MinIO:
+
+```bash
+python -m vinted_radar.cli platform-bootstrap
+```
+
+Use the read-mostly doctor afterwards whenever you want a redacted health snapshot without reapplying migrations:
+
+```bash
+python -m vinted_radar.cli platform-doctor
+```
+
+What `platform-bootstrap` wires up:
+
+- PostgreSQL migrations from `infra/postgres/migrations/`
+- ClickHouse migrations from `infra/clickhouse/migrations/`
+- S3-compatible bucket/prefix bootstrap for `events/raw`, `manifests`, and `parquet`
+- write/delete probes under each configured object-store prefix so failures surface before ingestion work starts
+
+Local service defaults exposed by `infra/docker-compose.data-platform.yml`:
+
+- PostgreSQL: `127.0.0.1:5432`
+- ClickHouse HTTP: `127.0.0.1:8123`
+- MinIO API: `127.0.0.1:9000`
+- MinIO console: `http://127.0.0.1:9001`
+
 ### One batch cycle
 
 ```bash

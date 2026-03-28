@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T18:55:06.274Z",
+  "exported_at": "2026-03-28T19:16:32.483Z",
   "milestones": [
     {
       "id": "M001",
@@ -607,19 +607,33 @@
       "milestone_id": "M002",
       "slice_id": "S10",
       "id": "T02",
-      "title": "Bootstrap stack + migration runners",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added platform bootstrap/doctor commands with versioned PostgreSQL and ClickHouse migrations plus MinIO bucket/prefix checks.",
+      "status": "complete",
+      "one_liner": "Added platform bootstrap/doctor commands with versioned PostgreSQL and ClickHouse migrations plus MinIO bucket/prefix checks.",
+      "narrative": "Implemented the polyglot platform bootstrap foundation for the slice. Added `vinted_radar/platform/migrations.py` to load contiguous `V###__name.sql` migrations, fingerprint SQL with checksums, and compute pending/current schema state through a shared runner. Added `vinted_radar/platform/bootstrap.py` to connect to PostgreSQL, ClickHouse, and S3-compatible storage, manage per-provider `platform_schema_migrations` ledgers, apply pending migrations during bootstrap, validate schema state during doctor runs, create the configured object-store bucket when needed, ensure persistent `.prefix` marker objects, and run write/delete probes across the raw-events/manifests/parquet prefixes. Wired `platform-bootstrap` and `platform-doctor` into `vinted_radar.cli`, exported the new helpers through `vinted_radar.platform.__init__`, added a local `infra/docker-compose.data-platform.yml` stack plus initial PostgreSQL/ClickHouse V001 audit-table migrations, documented the operator flow in `README.md`, recorded D035 for the idempotent bootstrap contract, and added focused pytest coverage using fakes for PostgreSQL, ClickHouse, S3, migration parsing, and CLI output/exit behavior.",
+      "verification_result": "`python -m pytest tests/test_data_platform_bootstrap.py -q` passed (5 tests), covering migration parsing, PostgreSQL/ClickHouse bootstrap behavior, MinIO bucket/prefix bootstrap, doctor failure reporting, and CLI rendering/exit codes. `python -m pytest tests/test_platform_config.py -q` also passed (5 tests) as a regression check because this task expanded the same `vinted_radar.platform` package boundary and CLI imports.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-28T19:16:32.424Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Exported the new bootstrap helpers from `vinted_radar.platform.__init__` and added a `.gsd/KNOWLEDGE.md` entry for the ClickHouse database-agnostic migration rule so downstream slices can reuse the package seam safely. No slice replan was needed.",
+      "known_issues": "None.",
+      "key_files": [
+        "infra/docker-compose.data-platform.yml",
+        "infra/postgres/migrations/V001__platform_bootstrap_audit.sql",
+        "infra/clickhouse/migrations/V001__platform_bootstrap_audit.sql",
+        "vinted_radar/platform/migrations.py",
+        "vinted_radar/platform/bootstrap.py",
+        "vinted_radar/platform/__init__.py",
+        "vinted_radar/cli.py",
+        "tests/test_data_platform_bootstrap.py",
+        "README.md",
+        ".gsd/DECISIONS.md",
+        ".gsd/KNOWLEDGE.md"
+      ],
+      "key_decisions": [
+        "D035: use versioned `V###__name.sql` directories with per-provider `platform_schema_migrations` ledgers and persistent object-store prefix markers/write probes so bootstrap and doctor stay idempotent and observable across PostgreSQL, ClickHouse, and S3-compatible storage."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S10\nmilestone: M002\nkey_files:\n  - infra/docker-compose.data-platform.yml\n  - infra/postgres/migrations/V001__platform_bootstrap_audit.sql\n  - infra/clickhouse/migrations/V001__platform_bootstrap_audit.sql\n  - vinted_radar/platform/migrations.py\n  - vinted_radar/platform/bootstrap.py\n  - vinted_radar/platform/__init__.py\n  - vinted_radar/cli.py\n  - tests/test_data_platform_bootstrap.py\n  - README.md\n  - .gsd/DECISIONS.md\n  - .gsd/KNOWLEDGE.md\nkey_decisions:\n  - D035: use versioned `V###__name.sql` directories with per-provider `platform_schema_migrations` ledgers and persistent object-store prefix markers/write probes so bootstrap and doctor stay idempotent and observable across PostgreSQL, ClickHouse, and S3-compatible storage.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T19:16:32.425Z\nblocker_discovered: false\n---\n\n# T02: Added platform bootstrap/doctor commands with versioned PostgreSQL and ClickHouse migrations plus MinIO bucket/prefix checks.\n\n**Added platform bootstrap/doctor commands with versioned PostgreSQL and ClickHouse migrations plus MinIO bucket/prefix checks.**\n\n## What Happened\n\nImplemented the polyglot platform bootstrap foundation for the slice. Added `vinted_radar/platform/migrations.py` to load contiguous `V###__name.sql` migrations, fingerprint SQL with checksums, and compute pending/current schema state through a shared runner. Added `vinted_radar/platform/bootstrap.py` to connect to PostgreSQL, ClickHouse, and S3-compatible storage, manage per-provider `platform_schema_migrations` ledgers, apply pending migrations during bootstrap, validate schema state during doctor runs, create the configured object-store bucket when needed, ensure persistent `.prefix` marker objects, and run write/delete probes across the raw-events/manifests/parquet prefixes. Wired `platform-bootstrap` and `platform-doctor` into `vinted_radar.cli`, exported the new helpers through `vinted_radar.platform.__init__`, added a local `infra/docker-compose.data-platform.yml` stack plus initial PostgreSQL/ClickHouse V001 audit-table migrations, documented the operator flow in `README.md`, recorded D035 for the idempotent bootstrap contract, and added focused pytest coverage using fakes for PostgreSQL, ClickHouse, S3, migration parsing, and CLI output/exit behavior.\n\n## Verification\n\n`python -m pytest tests/test_data_platform_bootstrap.py -q` passed (5 tests), covering migration parsing, PostgreSQL/ClickHouse bootstrap behavior, MinIO bucket/prefix bootstrap, doctor failure reporting, and CLI rendering/exit codes. `python -m pytest tests/test_platform_config.py -q` also passed (5 tests) as a regression check because this task expanded the same `vinted_radar.platform` package boundary and CLI imports.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python -m pytest tests/test_data_platform_bootstrap.py -q` | 0 | ✅ pass | 1274ms |\n| 2 | `python -m pytest tests/test_platform_config.py -q` | 0 | ✅ pass | 1007ms |\n\n\n## Deviations\n\nExported the new bootstrap helpers from `vinted_radar.platform.__init__` and added a `.gsd/KNOWLEDGE.md` entry for the ClickHouse database-agnostic migration rule so downstream slices can reuse the package seam safely. No slice replan was needed.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `infra/docker-compose.data-platform.yml`\n- `infra/postgres/migrations/V001__platform_bootstrap_audit.sql`\n- `infra/clickhouse/migrations/V001__platform_bootstrap_audit.sql`\n- `vinted_radar/platform/migrations.py`\n- `vinted_radar/platform/bootstrap.py`\n- `vinted_radar/platform/__init__.py`\n- `vinted_radar/cli.py`\n- `tests/test_data_platform_bootstrap.py`\n- `README.md`\n- `.gsd/DECISIONS.md`\n- `.gsd/KNOWLEDGE.md`\n",
       "description": "Introduce provider bootstrap and migration runners. Add versioned SQL migration directories for PostgreSQL and ClickHouse, local compose/bootstrap helpers for PostgreSQL + ClickHouse + MinIO, and CLI doctor/bootstrap commands that validate connectivity, schema version, and writable object-store prefixes.",
       "estimate": "2 sessions",
       "files": [
@@ -1943,6 +1957,18 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 156,
+      "id": "D035",
+      "when_context": "M002 S10 T02",
+      "scope": "architecture",
+      "decision": "How bootstrap and doctor track schema/object-store readiness for the polyglot platform foundation",
+      "choice": "Use versioned `V###__name.sql` directories with per-provider `platform_schema_migrations` ledgers, plus persistent `.prefix` marker objects and write/delete probes for the configured S3-compatible prefixes.",
+      "rationale": "This keeps bootstrap idempotent across PostgreSQL, ClickHouse, and object storage, makes expected schema versions observable from config, and exposes drift or missing write access before later outbox/manifest slices depend on the platform.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -1956,6 +1982,28 @@
       "verdict": "✅ pass",
       "duration_ms": 1819,
       "created_at": "2026-03-28T18:55:06.230Z"
+    },
+    {
+      "id": 2,
+      "task_id": "T02",
+      "slice_id": "S10",
+      "milestone_id": "M002",
+      "command": "python -m pytest tests/test_data_platform_bootstrap.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1274,
+      "created_at": "2026-03-28T19:16:32.424Z"
+    },
+    {
+      "id": 3,
+      "task_id": "T02",
+      "slice_id": "S10",
+      "milestone_id": "M002",
+      "command": "python -m pytest tests/test_platform_config.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1007,
+      "created_at": "2026-03-28T19:16:32.425Z"
     }
   ]
 }
