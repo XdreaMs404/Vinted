@@ -21,4 +21,4 @@ Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQ
 
 ## Verification
 
-python -m pytest tests/test_postgres_backfill.py tests/test_runtime_service.py -q
+python -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py

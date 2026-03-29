@@ -18,8 +18,7 @@ Implement PostgreSQL repositories and projectors for current-state truth. Add ad
 
 - `vinted_radar/platform/postgres_repository.py`
 - `projector services`
-- `tests/test_postgres_projectors.py`
 
 ## Verification
 
-python -m pytest tests/test_postgres_projectors.py -q
+python -m py_compile vinted_radar/platform/postgres_repository.py

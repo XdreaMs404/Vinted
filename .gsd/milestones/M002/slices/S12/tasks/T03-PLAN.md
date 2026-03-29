@@ -17,8 +17,8 @@ Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Ma
 ## Expected Output
 
 - `PostgreSQL-backed runtime CLI path`
-- `tests/test_runtime_cli_postgres.py`
+- `tests/test_runtime_cli.py`
 
 ## Verification
 
-python -m pytest tests/test_runtime_cli_postgres.py -q
+python -m pytest tests/test_runtime_cli.py -q

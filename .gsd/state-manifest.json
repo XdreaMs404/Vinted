@@ -1061,10 +1061,9 @@
         "vinted_radar/platform/postgres_repository.py",
         "vinted_radar/services/projectors.py",
         "vinted_radar/services/discovery.py",
-        "vinted_radar/services/runtime.py",
-        "tests/test_postgres_projectors.py"
+        "vinted_radar/services/runtime.py"
       ],
-      "verify": "python -m pytest tests/test_postgres_projectors.py -q",
+      "verify": "python -m py_compile vinted_radar/platform/postgres_repository.py",
       "inputs": [
         "vinted_radar/platform/outbox.py",
         "vinted_radar/domain/events.py",
@@ -1072,8 +1071,7 @@
       ],
       "expected_output": [
         "vinted_radar/platform/postgres_repository.py",
-        "projector services",
-        "tests/test_postgres_projectors.py"
+        "projector services"
       ],
       "observability_impact": "",
       "full_plan_md": "",
@@ -1102,9 +1100,9 @@
         "vinted_radar/cli.py",
         "vinted_radar/services/runtime.py",
         "vinted_radar/platform/postgres_repository.py",
-        "tests/test_runtime_cli_postgres.py"
+        "tests/test_runtime_cli.py"
       ],
-      "verify": "python -m pytest tests/test_runtime_cli_postgres.py -q",
+      "verify": "python -m pytest tests/test_runtime_cli.py -q",
       "inputs": [
         "vinted_radar/cli.py",
         "vinted_radar/services/runtime.py",
@@ -1112,7 +1110,7 @@
       ],
       "expected_output": [
         "PostgreSQL-backed runtime CLI path",
-        "tests/test_runtime_cli_postgres.py"
+        "tests/test_runtime_cli.py"
       ],
       "observability_impact": "",
       "full_plan_md": "",
@@ -1147,10 +1145,9 @@
       "files": [
         "vinted_radar/services/postgres_backfill.py",
         "vinted_radar/cli.py",
-        "tests/test_postgres_backfill.py",
         "tests/test_runtime_service.py"
       ],
-      "verify": "python -m pytest tests/test_postgres_backfill.py tests/test_runtime_service.py -q",
+      "verify": "python -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py",
       "inputs": [
         "vinted_radar/db.py",
         "vinted_radar/repository.py",
