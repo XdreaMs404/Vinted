@@ -13,6 +13,8 @@
 .gsd/gsd.db-shm
 .gsd/gsd.db-wal
 .gsd/DISCUSSION-MANIFEST.json
+.gsd/doctor-history.jsonl
+.gsd/journal/
 .gsd/milestones/**/*-CONTINUE.md
 .gsd/milestones/**/continue.md
 .DS_Store
