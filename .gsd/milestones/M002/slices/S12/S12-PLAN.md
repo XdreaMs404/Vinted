@@ -4,7 +4,7 @@
 **Demo:** After this: After this: runtime control, discovery runs, catalogs, and current listing truth live in PostgreSQL through projector-backed writes instead of SQLite mutation tables.
 
 ## Tasks
-- [ ] **T01: PostgreSQL mutable schema** — Design and migrate the PostgreSQL control-plane/current-state schema. Create versioned PostgreSQL tables for runtime controller state, runtime cycles, discovery runs, catalogs, listing identity/current state, recent presence summaries, manifests, and outbox checkpoints, with explicit keys and indexes for idempotent projectors and operational queries.
+- [x] **T01: Added PostgreSQL V003 mutable-truth schema for runtime, discovery, catalogs, listing state, manifests, and projector checkpoints.** — Design and migrate the PostgreSQL control-plane/current-state schema. Create versioned PostgreSQL tables for runtime controller state, runtime cycles, discovery runs, catalogs, listing identity/current state, recent presence summaries, manifests, and outbox checkpoints, with explicit keys and indexes for idempotent projectors and operational queries.
   - Estimate: 2 sessions
   - Files: infra/postgres/, vinted_radar/platform/migrations.py, vinted_radar/platform/postgres_schema/, tests/test_postgres_schema.py
   - Verify: python -m pytest tests/test_postgres_schema.py -q

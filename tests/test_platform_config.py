@@ -26,7 +26,7 @@ def test_load_platform_config_uses_local_platform_defaults() -> None:
     config = load_platform_config(env={})
 
     assert config.postgres.dsn == "postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"
-    assert config.postgres.schema_version == 2
+    assert config.postgres.schema_version == 3
     assert config.clickhouse.url == "http://127.0.0.1:8123"
     assert config.clickhouse.database == "vinted_radar"
     assert config.object_storage.endpoint_url == "http://127.0.0.1:9000"
@@ -37,7 +37,7 @@ def test_load_platform_config_uses_local_platform_defaults() -> None:
     assert config.storage.manifests == "vinted-radar/manifests"
     assert config.storage.parquet == "vinted-radar/parquet"
     assert config.schema_versions.as_dict() == {
-        "postgres": 2,
+        "postgres": 3,
         "clickhouse": 1,
         "events": 1,
         "manifests": 1,
@@ -60,7 +60,7 @@ def test_load_platform_config_normalizes_prefixes_and_redacts_sensitive_fields()
         RAW_EVENTS_PREFIX_ENV: "/tenant-a/events/raw/",
         MANIFESTS_PREFIX_ENV: "tenant-a//manifests/",
         PARQUET_PREFIX_ENV: "tenant-a\\warehouse\\",
-        POSTGRES_SCHEMA_VERSION_ENV: "3",
+        POSTGRES_SCHEMA_VERSION_ENV: "4",
         CLICKHOUSE_SCHEMA_VERSION_ENV: "7",
         EVENT_SCHEMA_VERSION_ENV: "5",
         ENABLE_POSTGRES_WRITES_ENV: "true",
@@ -77,7 +77,7 @@ def test_load_platform_config_normalizes_prefixes_and_redacts_sensitive_fields()
     assert config.storage.manifests == "tenant-a/manifests"
     assert config.storage.parquet == "tenant-a/warehouse"
     assert config.schema_versions.as_dict() == {
-        "postgres": 3,
+        "postgres": 4,
         "clickhouse": 7,
         "events": 5,
         "manifests": 1,
@@ -90,7 +90,7 @@ def test_load_platform_config_normalizes_prefixes_and_redacts_sensitive_fields()
     }
     assert redacted["postgres"] == {
         "dsn": "postgresql://***@db.example:5432/radar",
-        "schema_version": 3,
+        "schema_version": 4,
     }
     assert redacted["clickhouse"]["password"] == "***"
     assert redacted["object_storage"]["access_key_id"] == "***"

@@ -52,6 +52,14 @@ from vinted_radar.platform.object_store import (
     S3ObjectStore,
     create_s3_client,
 )
+from vinted_radar.platform.postgres_schema import (
+    POSTGRES_MUTABLE_INDEXES,
+    POSTGRES_MUTABLE_SCHEMA_VERSION,
+    POSTGRES_MUTABLE_TABLE_CONTRACTS,
+    POSTGRES_MUTABLE_TABLE_CONTRACTS_BY_NAME,
+    POSTGRES_MUTABLE_TABLES,
+    PostgresTableContract,
+)
 from vinted_radar.platform.outbox import ClaimedOutboxRecord, OutboxPublishResult, PostgresOutbox
 
 __all__ = [
@@ -82,11 +90,17 @@ __all__ = [
     "PARQUET_LAKE_SCHEMA_VERSION",
     "PARQUET_PREFIX_ENV",
     "POSTGRES_DSN_ENV",
+    "POSTGRES_MUTABLE_INDEXES",
+    "POSTGRES_MUTABLE_SCHEMA_VERSION",
+    "POSTGRES_MUTABLE_TABLE_CONTRACTS",
+    "POSTGRES_MUTABLE_TABLE_CONTRACTS_BY_NAME",
+    "POSTGRES_MUTABLE_TABLES",
     "POSTGRES_SCHEMA_VERSION_ENV",
     "PlatformBootstrapReport",
     "PlatformConfig",
     "PlatformHealthSnapshot",
     "PostgresOutbox",
+    "PostgresTableContract",
     "RAW_EVENTS_PREFIX_ENV",
     "S3ObjectStore",
     "SchemaSystemStatus",

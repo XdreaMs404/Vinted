@@ -34,7 +34,7 @@ def test_data_platform_smoke(
     assert "Object storage: ok" in bootstrap.stdout
     assert "Healthy: yes" in bootstrap.stdout
     assert "- bucket state: exists yes | created yes" in bootstrap.stdout
-    assert "- applied this run: V001, V002" in bootstrap.stdout
+    assert "- applied this run: V001, V002, V003" in bootstrap.stdout
 
     with closing(postgres_connect()) as postgres_connection:
         applied_versions = [
@@ -43,7 +43,7 @@ def test_data_platform_smoke(
                 "SELECT version FROM platform_schema_migrations ORDER BY version"
             ).fetchall()
         ]
-        assert applied_versions == [1, 2]
+        assert applied_versions == [1, 2, 3]
 
         event, manifest = _sample_event_and_manifest(config.storage.raw_events, config.object_storage.bucket)
         publish_result = PostgresOutbox(postgres_connection).publish(
@@ -141,7 +141,7 @@ def test_data_platform_smoke(
     assert health_snapshot.postgres_ok is True
     assert health_snapshot.clickhouse_ok is True
     assert health_snapshot.object_storage_ok is True
-    assert doctor_report.postgres.current_version == 2
+    assert doctor_report.postgres.current_version == 3
     assert doctor_report.clickhouse.current_version == 1
     assert sorted(doctor_report.object_storage.write_checked_prefixes) == [
         "manifests",
