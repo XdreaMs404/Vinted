@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 import json
 from typing import Any
+import uuid
 
 from vinted_radar.domain.events import canonical_json
 from vinted_radar.repository import FULL_SIGNAL_COMPLETENESS, HIGH_SIGNAL_COMPLETENESS
@@ -12,11 +13,498 @@ from vinted_radar.state_machine import evaluate_listing_state
 POSTGRES_CURRENT_STATE_SINK = "postgres-current-state"
 POSTGRES_CURRENT_STATE_CONSUMER = "postgres-current-state-projector"
 _RUNTIME_CONTROLLER_SINGLETON_ID = 1
+_UNSET = object()
 
 
 class PostgresMutableTruthRepository:
     def __init__(self, connection: object) -> None:
         self.connection = connection
+
+    def close(self) -> None:
+        close = getattr(self.connection, "close", None)
+        if callable(close):
+            close()
+
+    # ------------------------------------------------------------------
+    # Runtime/control-plane write surfaces
+    # ------------------------------------------------------------------
+    def start_runtime_cycle(
+        self,
+        *,
+        mode: str,
+        phase: str,
+        interval_seconds: float | None,
+        state_probe_limit: int,
+        config: Mapping[str, object],
+    ) -> str:
+        cycle_id = datetime.now(UTC).strftime("cycle-%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        started_at = _utc_now()
+        self.project_runtime_cycle_snapshot(
+            cycle={
+                "cycle_id": cycle_id,
+                "started_at": started_at,
+                "finished_at": None,
+                "mode": mode,
+                "status": "running",
+                "phase": phase,
+                "interval_seconds": interval_seconds,
+                "state_probe_limit": state_probe_limit,
+                "discovery_run_id": None,
+                "state_probed_count": 0,
+                "tracked_listings": 0,
+                "freshness_counts": {
+                    "first-pass-only": 0,
+                    "fresh-followup": 0,
+                    "aging-followup": 0,
+                    "stale-followup": 0,
+                },
+                "last_error": None,
+                "state_refresh_summary": {},
+                "config": dict(config),
+            },
+            event_id=_projection_event_id("runtime-cycle-start", cycle_id, started_at),
+        )
+        self.set_runtime_controller_state(
+            status="running",
+            phase=phase,
+            mode=mode,
+            active_cycle_id=cycle_id,
+            latest_cycle_id=cycle_id,
+            interval_seconds=interval_seconds,
+            updated_at=started_at,
+            paused_at=None,
+            next_resume_at=None,
+            last_error=None,
+            last_error_at=None,
+            requested_action="none",
+            requested_at=None,
+            config=dict(config),
+        )
+        return cycle_id
+
+    def update_runtime_cycle_phase(self, cycle_id: str, *, phase: str) -> None:
+        cycle = self.runtime_cycle(cycle_id)
+        if cycle is None:
+            return
+        cycle["phase"] = phase
+        cycle["finished_at"] = cycle.get("finished_at")
+        self.project_runtime_cycle_snapshot(
+            cycle=cycle,
+            event_id=_projection_event_id("runtime-cycle-phase", cycle_id, phase, _utc_now()),
+        )
+        controller = self._runtime_controller_row()
+        if controller is not None and _optional_str(controller.get("active_cycle_id")) == cycle_id:
+            self.set_runtime_controller_state(
+                phase=phase,
+                updated_at=_utc_now(),
+            )
+
+    def complete_runtime_cycle(
+        self,
+        cycle_id: str,
+        *,
+        status: str,
+        phase: str,
+        discovery_run_id: str | None = None,
+        state_probed_count: int = 0,
+        tracked_listings: int = 0,
+        freshness_counts: Mapping[str, object] | None = None,
+        last_error: str | None = None,
+        state_refresh_summary: Mapping[str, object] | None = None,
+    ) -> None:
+        cycle = self.runtime_cycle(cycle_id)
+        if cycle is None:
+            raise RuntimeError(f"Runtime cycle {cycle_id} was not found in PostgreSQL mutable truth.")
+
+        finished_at = _utc_now()
+        updated_cycle = dict(cycle)
+        updated_cycle.update(
+            {
+                "finished_at": finished_at,
+                "status": status,
+                "phase": phase,
+                "discovery_run_id": discovery_run_id,
+                "state_probed_count": int(state_probed_count),
+                "tracked_listings": int(tracked_listings),
+                "freshness_counts": dict(freshness_counts or {}),
+                "last_error": last_error,
+                "state_refresh_summary": dict(state_refresh_summary or {}),
+            }
+        )
+        self.project_runtime_cycle_snapshot(
+            cycle=updated_cycle,
+            event_id=_projection_event_id("runtime-cycle-complete", cycle_id, status, finished_at),
+        )
+
+        controller_status = _controller_status_from_runtime_cycle_status(status)
+        controller_phase = _controller_phase_from_runtime_state(controller_status, phase)
+        self.set_runtime_controller_state(
+            status=controller_status,
+            phase=controller_phase,
+            mode=_optional_str(cycle.get("mode")),
+            active_cycle_id=None,
+            latest_cycle_id=cycle_id,
+            interval_seconds=_optional_float(cycle.get("interval_seconds")),
+            updated_at=finished_at,
+            paused_at=None if controller_status != "paused" else _UNSET,
+            next_resume_at=None if controller_status != "scheduled" else _UNSET,
+            last_error=last_error,
+            last_error_at=None if last_error is None else finished_at,
+            config=dict(cycle.get("config") or {}),
+        )
+
+    def set_runtime_controller_state(
+        self,
+        *,
+        status: str | object = _UNSET,
+        phase: str | object = _UNSET,
+        mode: str | None | object = _UNSET,
+        active_cycle_id: str | None | object = _UNSET,
+        latest_cycle_id: str | None | object = _UNSET,
+        interval_seconds: float | None | object = _UNSET,
+        updated_at: str | None | object = _UNSET,
+        paused_at: str | None | object = _UNSET,
+        next_resume_at: str | None | object = _UNSET,
+        last_error: str | None | object = _UNSET,
+        last_error_at: str | None | object = _UNSET,
+        requested_action: str | object = _UNSET,
+        requested_at: str | None | object = _UNSET,
+        config: Mapping[str, object] | object = _UNSET,
+    ) -> dict[str, object]:
+        existing_row = self._runtime_controller_row()
+        if existing_row is None:
+            payload: dict[str, object | None] = {
+                "controller_id": _RUNTIME_CONTROLLER_SINGLETON_ID,
+                "status": "idle",
+                "phase": "idle",
+                "mode": None,
+                "active_cycle_id": None,
+                "latest_cycle_id": None,
+                "interval_seconds": None,
+                "updated_at": None,
+                "paused_at": None,
+                "next_resume_at": None,
+                "last_error": None,
+                "last_error_at": None,
+                "requested_action": "none",
+                "requested_at": None,
+                "heartbeat_at": None,
+                "config": {},
+            }
+        else:
+            payload = dict(existing_row)
+            payload["config"] = _decode_json_object(payload.pop("config_json", "{}"))
+
+        if status is not _UNSET:
+            payload["status"] = None if status is None else str(status)
+        if phase is not _UNSET:
+            payload["phase"] = None if phase is None else str(phase)
+        if mode is not _UNSET:
+            payload["mode"] = None if mode is None else str(mode)
+        if active_cycle_id is not _UNSET:
+            payload["active_cycle_id"] = None if active_cycle_id is None else str(active_cycle_id)
+        if latest_cycle_id is not _UNSET:
+            payload["latest_cycle_id"] = None if latest_cycle_id is None else str(latest_cycle_id)
+        if interval_seconds is not _UNSET:
+            payload["interval_seconds"] = None if interval_seconds is None else float(interval_seconds)
+        if updated_at is _UNSET:
+            payload["updated_at"] = _utc_now()
+        else:
+            payload["updated_at"] = None if updated_at is None else str(updated_at)
+        if paused_at is not _UNSET:
+            payload["paused_at"] = None if paused_at is None else str(paused_at)
+        if next_resume_at is not _UNSET:
+            payload["next_resume_at"] = None if next_resume_at is None else str(next_resume_at)
+        if last_error is not _UNSET:
+            payload["last_error"] = None if last_error is None else str(last_error)
+        if last_error_at is not _UNSET:
+            payload["last_error_at"] = None if last_error_at is None else str(last_error_at)
+        if requested_action is not _UNSET:
+            normalized_action = "none" if requested_action in {None, "", "none"} else str(requested_action)
+            payload["requested_action"] = normalized_action
+            if normalized_action == "none" and requested_at is _UNSET:
+                payload["requested_at"] = None
+        if requested_at is not _UNSET:
+            payload["requested_at"] = None if requested_at is None else str(requested_at)
+        if config is not _UNSET:
+            payload["config"] = dict(config)
+        elif "config" not in payload:
+            payload["config"] = {}
+
+        if payload.get("status") is None:
+            payload["status"] = "idle"
+        if payload.get("phase") is None:
+            payload["phase"] = "idle"
+        if payload.get("requested_action") is None:
+            payload["requested_action"] = "none"
+
+        heartbeat_at = _optional_str(payload.get("updated_at"))
+        event_id = _projection_event_id(
+            "runtime-controller",
+            payload.get("status") or "idle",
+            payload.get("phase") or "idle",
+            payload.get("updated_at") or _utc_now(),
+            payload.get("latest_cycle_id") or "none",
+            payload.get("requested_action") or "none",
+        )
+        self._upsert_runtime_controller(
+            {
+                "controller_id": _RUNTIME_CONTROLLER_SINGLETON_ID,
+                "status": payload["status"],
+                "phase": payload["phase"],
+                "mode": payload.get("mode"),
+                "active_cycle_id": payload.get("active_cycle_id"),
+                "latest_cycle_id": payload.get("latest_cycle_id"),
+                "interval_seconds": payload.get("interval_seconds"),
+                "updated_at": payload.get("updated_at"),
+                "paused_at": payload.get("paused_at"),
+                "next_resume_at": payload.get("next_resume_at"),
+                "last_error": payload.get("last_error"),
+                "last_error_at": payload.get("last_error_at"),
+                "requested_action": payload.get("requested_action") or "none",
+                "requested_at": payload.get("requested_at"),
+                "heartbeat_at": heartbeat_at,
+                "config_json": canonical_json(payload.get("config") or {}),
+                "last_event_id": event_id,
+                "last_manifest_id": None,
+                "projected_at": payload.get("updated_at") or _utc_now(),
+            }
+        )
+        reference_now = updated_at if isinstance(updated_at, str) else None
+        controller = self.runtime_controller_state(now=reference_now)
+        if controller is None:
+            raise RuntimeError("Runtime controller state was not persisted in PostgreSQL mutable truth.")
+        return controller
+
+    def request_runtime_pause(self, *, requested_at: str | None = None) -> dict[str, object]:
+        request_time = requested_at or _utc_now()
+        controller = self.runtime_controller_state(now=request_time)
+        if controller is not None and controller.get("status") in {"scheduled", "paused"} and controller.get("mode") == "continuous":
+            paused_at = controller.get("paused_at") or request_time
+            return self.set_runtime_controller_state(
+                status="paused",
+                phase="paused",
+                updated_at=request_time,
+                paused_at=None if paused_at is None else str(paused_at),
+                next_resume_at=None,
+                requested_action="none",
+                requested_at=None,
+            )
+        return self.set_runtime_controller_state(
+            requested_action="pause",
+            requested_at=request_time,
+            updated_at=request_time,
+        )
+
+    def request_runtime_resume(self, *, requested_at: str | None = None) -> dict[str, object]:
+        request_time = requested_at or _utc_now()
+        controller = self.runtime_controller_state(now=request_time)
+        if controller is not None and controller.get("status") == "paused" and controller.get("mode") == "continuous":
+            return self.set_runtime_controller_state(
+                status="scheduled",
+                phase="waiting",
+                updated_at=request_time,
+                paused_at=None,
+                next_resume_at=request_time,
+                requested_action="none",
+                requested_at=None,
+            )
+        if controller is not None and controller.get("requested_action") == "pause":
+            return self.clear_runtime_controller_action(updated_at=request_time)
+        return self.set_runtime_controller_state(
+            requested_action="resume",
+            requested_at=request_time,
+            updated_at=request_time,
+        )
+
+    def clear_runtime_controller_action(self, *, updated_at: str | None = None) -> dict[str, object]:
+        return self.set_runtime_controller_state(
+            requested_action="none",
+            requested_at=None,
+            updated_at=updated_at if updated_at is not None else _utc_now(),
+        )
+
+    def runtime_status(self, *, limit: int = 10, now: str | None = None) -> dict[str, object]:
+        now_dt = _parse_timestamp(now or _utc_now())
+        generated_at = now_dt.replace(microsecond=0).isoformat()
+        bounded_limit = max(int(limit), 1)
+        recent_cycles = [
+            self._hydrate_runtime_cycle_row(row)
+            for row in _fetchall(
+                self.connection.execute(
+                    "SELECT * FROM platform_runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT %s",
+                    (bounded_limit,),
+                )
+            )
+        ]
+        recent_failures = [
+            self._hydrate_runtime_cycle_row(row)
+            for row in _fetchall(
+                self.connection.execute(
+                    "SELECT * FROM platform_runtime_cycles WHERE status = 'failed' ORDER BY started_at DESC, cycle_id DESC LIMIT %s",
+                    (bounded_limit,),
+                )
+            )
+        ]
+        totals_row = _fetchone(
+            self.connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_cycles,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_cycles,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_cycles,
+                    SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_cycles,
+                    SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END) AS interrupted_cycles
+                FROM platform_runtime_cycles
+                """
+            )
+        )
+        totals = {} if totals_row is None else dict(totals_row)
+        latest_cycle = None if not recent_cycles else recent_cycles[0]
+        latest_probe_cycle = next(
+            (
+                cycle
+                for cycle in recent_cycles
+                if isinstance(cycle.get("state_refresh_summary"), dict) and cycle.get("state_refresh_summary")
+            ),
+            latest_cycle,
+        )
+        controller = self.runtime_controller_state(now=generated_at)
+        effective_status = None
+        effective_phase = None
+        effective_mode = None
+        effective_updated_at = None
+        effective_paused_at = None
+        effective_next_resume_at = None
+        effective_elapsed_pause_seconds = None
+        effective_next_resume_in_seconds = None
+        effective_last_error = None
+        effective_last_error_at = None
+        effective_requested_action = None
+        effective_requested_at = None
+        effective_active_cycle_id = None
+        effective_latest_cycle_id = None
+        heartbeat = None
+        if controller is not None:
+            effective_status = controller.get("status")
+            effective_phase = controller.get("phase")
+            effective_mode = controller.get("mode") or (None if latest_cycle is None else latest_cycle.get("mode"))
+            effective_updated_at = controller.get("updated_at")
+            effective_paused_at = controller.get("paused_at")
+            effective_next_resume_at = controller.get("next_resume_at")
+            effective_elapsed_pause_seconds = controller.get("elapsed_pause_seconds")
+            effective_next_resume_in_seconds = controller.get("next_resume_in_seconds")
+            effective_last_error = controller.get("last_error")
+            effective_last_error_at = controller.get("last_error_at")
+            effective_requested_action = controller.get("requested_action")
+            effective_requested_at = controller.get("requested_at")
+            effective_active_cycle_id = controller.get("active_cycle_id")
+            effective_latest_cycle_id = controller.get("latest_cycle_id")
+            heartbeat = controller.get("heartbeat")
+        elif latest_cycle is not None:
+            effective_status = _controller_status_from_runtime_cycle_status(str(latest_cycle.get("status") or ""))
+            effective_phase = latest_cycle.get("phase")
+            effective_mode = latest_cycle.get("mode")
+
+        acquisition = self.acquisition_health(latest_cycle=latest_probe_cycle, limit=bounded_limit)
+
+        return {
+            "generated_at": generated_at,
+            "db_path": "postgres",
+            "controller": controller,
+            "status": effective_status,
+            "phase": effective_phase,
+            "mode": effective_mode,
+            "updated_at": effective_updated_at,
+            "paused_at": effective_paused_at,
+            "next_resume_at": effective_next_resume_at,
+            "elapsed_pause_seconds": effective_elapsed_pause_seconds,
+            "next_resume_in_seconds": effective_next_resume_in_seconds,
+            "last_error": effective_last_error if effective_last_error is not None else (None if not recent_failures else recent_failures[0].get("last_error")),
+            "last_error_at": effective_last_error_at,
+            "requested_action": effective_requested_action,
+            "requested_at": effective_requested_at,
+            "active_cycle_id": effective_active_cycle_id,
+            "latest_cycle_id": effective_latest_cycle_id,
+            "heartbeat": heartbeat,
+            "latest_cycle": latest_cycle,
+            "recent_cycles": recent_cycles,
+            "latest_failure": None if not recent_failures else recent_failures[0],
+            "recent_failures": recent_failures,
+            "acquisition": acquisition,
+            "totals": {
+                "total_cycles": int(totals.get("total_cycles") or 0),
+                "completed_cycles": int(totals.get("completed_cycles") or 0),
+                "failed_cycles": int(totals.get("failed_cycles") or 0),
+                "running_cycles": int(totals.get("running_cycles") or 0),
+                "interrupted_cycles": int(totals.get("interrupted_cycles") or 0),
+            },
+        }
+
+    def acquisition_health(
+        self,
+        *,
+        latest_cycle: dict[str, object] | None = None,
+        limit: int = 5,
+    ) -> dict[str, object]:
+        bounded_limit = max(int(limit), 1)
+        cycle = latest_cycle
+        if cycle is None:
+            row = _fetchone(
+                self.connection.execute(
+                    "SELECT * FROM platform_runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT 1"
+                )
+            )
+            cycle = None if row is None else self._hydrate_runtime_cycle_row(row)
+
+        discovery_run = None
+        if isinstance(cycle, dict) and cycle.get("discovery_run_id"):
+            discovery_run = self.discovery_run(str(cycle["discovery_run_id"]))
+        if discovery_run is None:
+            discovery_run = self.latest_discovery_run()
+
+        state_refresh_summary = dict(cycle.get("state_refresh_summary") or {}) if isinstance(cycle, dict) else {}
+        anti_bot_count = int(state_refresh_summary.get("anti_bot_challenge_count") or 0)
+        http_error_count = int(state_refresh_summary.get("http_error_count") or 0)
+        transport_error_count = int(state_refresh_summary.get("transport_error_count") or 0)
+        inconclusive_probe_count = int(state_refresh_summary.get("inconclusive_probe_count") or 0)
+        degraded_probe_count = int(state_refresh_summary.get("degraded_probe_count") or 0)
+        failed_scans = 0 if discovery_run is None else int(discovery_run.get("failed_scans") or 0)
+
+        reasons: list[str] = []
+        status = "healthy"
+        if discovery_run is None and cycle is None:
+            status = "unknown"
+            reasons.append("No discovery run or runtime cycle is recorded yet.")
+        elif failed_scans or degraded_probe_count or (discovery_run is not None and discovery_run.get("status") == "failed"):
+            status = "degraded"
+            if failed_scans:
+                reasons.append(f"{failed_scans} failed catalog scans remain visible on the latest discovery run.")
+            if discovery_run is not None and discovery_run.get("status") == "failed" and discovery_run.get("last_error"):
+                reasons.append(str(discovery_run.get("last_error")))
+            if anti_bot_count:
+                reasons.append(f"{anti_bot_count} state-refresh probes hit anti-bot or challenge-shaped pages.")
+            if transport_error_count:
+                reasons.append(f"{transport_error_count} state-refresh probes failed on transport exceptions.")
+            if http_error_count:
+                reasons.append(f"{http_error_count} state-refresh probes ended on unexpected HTTP responses.")
+        elif inconclusive_probe_count:
+            status = "partial"
+            reasons.append(f"{inconclusive_probe_count} latest state-refresh probes stayed inconclusive, so history remains the safer signal.")
+        else:
+            reasons.append("Latest discovery and state-refresh signals look operationally healthy.")
+
+        return {
+            "status": status,
+            "latest_cycle_id": None if not isinstance(cycle, dict) else cycle.get("cycle_id"),
+            "latest_discovery_run_id": None if discovery_run is None else discovery_run.get("run_id"),
+            "latest_discovery_run_finished_at": None if discovery_run is None else discovery_run.get("finished_at"),
+            "recent_scan_failure_count": failed_scans,
+            "recent_scan_failures": [],
+            "latest_state_refresh_summary": state_refresh_summary,
+            "probe_issue_examples": [],
+            "reasons": reasons[:bounded_limit],
+        }
 
     # ------------------------------------------------------------------
     # Discovery control-plane projection
@@ -514,6 +1002,9 @@ class PostgresMutableTruthRepository:
         )
         if row is None:
             return None
+        return self._hydrate_runtime_cycle_row(row)
+
+    def _hydrate_runtime_cycle_row(self, row: Mapping[str, object]) -> dict[str, object]:
         hydrated = dict(row)
         hydrated["config"] = _decode_json_object(hydrated.pop("config_json", "{}"))
         hydrated["state_refresh_summary"] = _decode_json_object(hydrated.pop("state_refresh_summary_json", "{}"))
@@ -525,13 +1016,17 @@ class PostgresMutableTruthRepository:
         }
         return hydrated
 
-    def runtime_controller_state(self, *, now: str | None = None) -> dict[str, object] | None:
+    def _runtime_controller_row(self) -> dict[str, object] | None:
         row = _fetchone(
             self.connection.execute(
                 "SELECT * FROM platform_runtime_controller_state WHERE controller_id = %s",
                 (_RUNTIME_CONTROLLER_SINGLETON_ID,),
             )
         )
+        return None if row is None else dict(row)
+
+    def runtime_controller_state(self, *, now: str | None = None) -> dict[str, object] | None:
+        row = self._runtime_controller_row()
         if row is None:
             return None
         hydrated = dict(row)
@@ -1532,6 +2027,26 @@ def _runtime_heartbeat_stale_after_seconds(*, status: str | None, interval_secon
     if interval is not None:
         return max(min(interval, 300.0), 60.0)
     return 300.0
+
+
+def _controller_status_from_runtime_cycle_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized == "running":
+        return "running"
+    if normalized == "failed":
+        return "failed"
+    return "idle"
+
+
+def _controller_phase_from_runtime_state(status: str, phase: str) -> str:
+    if status == "idle":
+        return "idle"
+    return phase
+
+
+def _projection_event_id(*parts: object) -> str:
+    normalized = ":".join(str(part) for part in parts if part is not None)
+    return f"sqlite-backfill:{uuid.uuid5(uuid.NAMESPACE_URL, normalized)}"
 
 
 __all__ = [

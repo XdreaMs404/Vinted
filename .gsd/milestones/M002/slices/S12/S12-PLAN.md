@@ -12,11 +12,11 @@
   - Estimate: 2-3 sessions
   - Files: vinted_radar/platform/postgres_repository.py, vinted_radar/services/projectors.py, vinted_radar/services/discovery.py, vinted_radar/services/runtime.py, tests/test_postgres_projectors.py
   - Verify: python -m pytest tests/test_postgres_projectors.py -q
-- [ ] **T03: CLI/runtime cutover to PostgreSQL** — Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.
+- [x] **T03: CLI/runtime cutover to PostgreSQL** — Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.
   - Estimate: 2 sessions
   - Files: vinted_radar/cli.py, vinted_radar/services/runtime.py, vinted_radar/platform/postgres_repository.py, tests/test_runtime_cli_postgres.py
   - Verify: python -m pytest tests/test_runtime_cli_postgres.py -q
-- [ ] **T04: Backfill + PostgreSQL control-plane smoke** — Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQLite-to-PostgreSQL backfill for runtime/discovery/catalog/current-state data, then run a narrow batch/continuous smoke against PostgreSQL-backed mutable truth and assert that runtime-status and bookkeeping stay correct without SQLite mutation writes.
+- [x] **T04: Started a PostgreSQL mutable-truth backfill service and runtime control-plane repository APIs, but CLI wiring, tests, and the PostgreSQL smoke proof remain unfinished.** — Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQLite-to-PostgreSQL backfill for runtime/discovery/catalog/current-state data, then run a narrow batch/continuous smoke against PostgreSQL-backed mutable truth and assert that runtime-status and bookkeeping stay correct without SQLite mutation writes.
   - Estimate: 1-2 sessions
   - Files: vinted_radar/services/postgres_backfill.py, vinted_radar/cli.py, tests/test_postgres_backfill.py, tests/test_runtime_service.py
   - Verify: python -m pytest tests/test_postgres_backfill.py tests/test_runtime_service.py -q

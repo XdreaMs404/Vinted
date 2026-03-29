@@ -72,12 +72,22 @@ class RadarRuntimeService:
         state_refresh_service_factory: Callable[..., object] = build_default_state_refresh_service,
         sleep_fn: Callable[[float], None] = time.sleep,
         now_fn: Callable[[], datetime] | None = None,
+        control_plane_repository: object | None = None,
+        mutable_truth_sync: Callable[[], None] | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.discovery_service_factory = discovery_service_factory
         self.state_refresh_service_factory = state_refresh_service_factory
         self.sleep_fn = sleep_fn
         self.now_fn = now_fn or (lambda: datetime.now(UTC))
+        self.control_plane_repository = control_plane_repository
+        self.mutable_truth_sync = mutable_truth_sync
+
+    def _with_control_plane_repository(self, callback: Callable[[object], object]):
+        if self.control_plane_repository is not None:
+            return callback(self.control_plane_repository)
+        with RadarRepository(self.db_path) as repository:
+            return callback(repository)
 
     def run_cycle(
         self,
