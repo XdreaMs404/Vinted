@@ -8,7 +8,7 @@
   - Estimate: 2 sessions
   - Files: infra/postgres/, vinted_radar/platform/migrations.py, vinted_radar/platform/postgres_schema/, tests/test_postgres_schema.py
   - Verify: python -m pytest tests/test_postgres_schema.py -q
-- [ ] **T02: Projectors for current-state truth** — Implement PostgreSQL repositories and projectors for current-state truth. Add adapters that consume outbox events and update runtime/controller rows, discovery bookkeeping, catalog rows, listing current-state rows, and presence rollups in PostgreSQL without duplicating raw evidence blobs.
+- [x] **T02: Started PostgreSQL mutable-truth repository scaffolding, but projector wiring, tests, and verification remain unfinished.** — Implement PostgreSQL repositories and projectors for current-state truth. Add adapters that consume outbox events and update runtime/controller rows, discovery bookkeeping, catalog rows, listing current-state rows, and presence rollups in PostgreSQL without duplicating raw evidence blobs.
   - Estimate: 2-3 sessions
   - Files: vinted_radar/platform/postgres_repository.py, vinted_radar/services/projectors.py, vinted_radar/services/discovery.py, vinted_radar/services/runtime.py, tests/test_postgres_projectors.py
   - Verify: python -m pytest tests/test_postgres_projectors.py -q

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T01",
+  "unitId": "M002/S12/T01",
+  "timestamp": 1774779073462,
+  "passed": true,
+  "discoverySource": "task-plan",
+  "checks": [
+    {
+      "command": "python -m pytest tests/test_postgres_schema.py -q",
+      "exitCode": 0,
+      "durationMs": 1173,
+      "verdict": "pass"
+    }
+  ]
+}
