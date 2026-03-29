@@ -5,10 +5,11 @@ git:
   push_branches: true
   remote: origin
   main_branch: main
-  isolation: none
+  isolation: branch
   merge_strategy: squash
   snapshots: true
-  auto_pr: false
+  auto_pr: true
+  pr_target_branch: main
 auto_supervisor:
   soft_timeout_minutes: 12
   idle_timeout_minutes: 6
