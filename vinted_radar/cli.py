@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import sqlite3
@@ -18,6 +19,7 @@ from vinted_radar.platform import (
     load_platform_config,
     render_platform_report_lines,
 )
+from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
@@ -66,6 +68,26 @@ def _close_service(service: object) -> None:
     repository_close = getattr(repository, "close", None)
     if callable(repository_close):
         repository_close()
+
+
+def _build_polyglot_control_plane_repository() -> object | None:
+    config = load_platform_config()
+    if not config.cutover.enable_polyglot_reads:
+        return None
+    return PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
+
+
+@contextmanager
+def _open_runtime_control_plane_repository(db: Path):
+    repository = _build_polyglot_control_plane_repository()
+    if repository is None:
+        with RadarRepository(db) as sqlite_repository:
+            yield sqlite_repository
+        return
+    try:
+        yield repository
+    finally:
+        _close_service(repository)
 
 
 @app.command()
@@ -133,7 +155,12 @@ def batch_run(
 ) -> None:
     proxies = _resolve_cli_proxies(proxy=proxy, proxy_file=proxy_file)
     resolved_concurrency = _resolve_cli_concurrency(concurrency, proxies=proxies)
-    runtime_service = RadarRuntimeService(db)
+    control_plane_repository = _build_polyglot_control_plane_repository()
+    runtime_service = (
+        RadarRuntimeService(db, control_plane_repository=control_plane_repository)
+        if control_plane_repository is not None
+        else RadarRuntimeService(db)
+    )
     options = _build_runtime_options(
         page_limit=page_limit,
         max_leaf_categories=max_leaf_categories,
@@ -154,6 +181,8 @@ def batch_run(
         typer.echo(f"Batch cycle failed: {type(exc).__name__}: {exc}", err=True)
         typer.echo(f"Inspect runtime status with: python -m vinted_radar.cli runtime-status --db {db}", err=True)
         raise typer.Exit(code=1) from exc
+    finally:
+        _close_service(runtime_service)
 
     _render_runtime_cycle_report(report, db=db)
     if not dashboard:
@@ -192,7 +221,12 @@ def continuous_run(
 ) -> None:
     proxies = _resolve_cli_proxies(proxy=proxy, proxy_file=proxy_file)
     resolved_concurrency = _resolve_cli_concurrency(concurrency, proxies=proxies)
-    runtime_service = RadarRuntimeService(db)
+    control_plane_repository = _build_polyglot_control_plane_repository()
+    runtime_service = (
+        RadarRuntimeService(db, control_plane_repository=control_plane_repository)
+        if control_plane_repository is not None
+        else RadarRuntimeService(db)
+    )
     options = _build_runtime_options(
         page_limit=page_limit,
         max_leaf_categories=max_leaf_categories,
@@ -234,6 +268,7 @@ def continuous_run(
     except KeyboardInterrupt:
         typer.echo("Continuous radar stopped.")
     finally:
+        _close_service(runtime_service)
         if dashboard_server is not None:
             dashboard_server.stop()
 
@@ -411,7 +446,7 @@ def evidence_inspect(
 def runtime_pause(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
 ) -> None:
-    with RadarRepository(db) as repository:
+    with _open_runtime_control_plane_repository(db) as repository:
         controller = repository.request_runtime_pause()
 
     typer.echo(f"Database: {db}")
@@ -426,7 +461,7 @@ def runtime_pause(
 def runtime_resume(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
 ) -> None:
-    with RadarRepository(db) as repository:
+    with _open_runtime_control_plane_repository(db) as repository:
         controller = repository.request_runtime_resume()
 
     typer.echo(f"Database: {db}")
@@ -446,7 +481,7 @@ def runtime_status(
     output_format: str = typer.Option("table", "--format", help="table or json."),
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic runtime timing output."),
 ) -> None:
-    with RadarRepository(db) as repository:
+    with _open_runtime_control_plane_repository(db) as repository:
         status = repository.runtime_status(limit=limit, now=now)
 
     if status["latest_cycle"] is None and status.get("controller") is None:

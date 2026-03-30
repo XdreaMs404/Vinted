@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-30T21:07:41.993Z",
+  "exported_at": "2026-03-30T21:24:57.214Z",
   "milestones": [
     {
       "id": "M001",
@@ -1083,19 +1083,28 @@
       "milestone_id": "M002",
       "slice_id": "S12",
       "id": "T03",
-      "title": "CLI/runtime cutover to PostgreSQL",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Routed runtime CLI control-plane commands and runtime cycle/controller persistence through PostgreSQL mutable truth when polyglot reads are enabled.",
+      "status": "complete",
+      "one_liner": "Routed runtime CLI control-plane commands and runtime cycle/controller persistence through PostgreSQL mutable truth when polyglot reads are enabled.",
+      "narrative": "Wired the runtime CLI control-plane path to select PostgreSQL mutable truth under the polyglot-read cutover, so runtime-status, runtime-pause, runtime-resume, and runtime batch/continuous control-plane persistence now resolve through one mutable-truth source instead of SQLite when the cutover is enabled. Activated the previously injected control-plane repository path inside RadarRuntimeService for cycle/controller writes and continuous-controller heartbeats, added a PostgreSQL repository factory helper, and updated the default discovery service to mirror discovery bookkeeping into PostgreSQL mutable truth. Also preserved replay idempotence by tagging direct catalog-projection rows with emitted batch event/manifest identities when evidence batches exist, then added runtime CLI regression tests covering the new Postgres-backed cutover behavior.",
+      "verification_result": "`python3 -m py_compile vinted_radar/cli.py vinted_radar/services/runtime.py vinted_radar/services/discovery.py vinted_radar/platform/postgres_repository.py tests/test_runtime_cli.py` passed. `python3 -m pytest tests/test_runtime_cli.py -q` passed with 13 tests green, including the new polyglot-read runtime CLI coverage.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-30T21:24:57.193Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Updated `vinted_radar/services/discovery.py` in addition to the task-plan input files because the PostgreSQL runtime-status/control-plane path needs discovery bookkeeping projected into mutable truth to keep the cutover coherent.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/cli.py",
+        "vinted_radar/services/runtime.py",
+        "vinted_radar/services/discovery.py",
+        "vinted_radar/platform/postgres_repository.py",
+        "tests/test_runtime_cli.py",
+        ".gsd/milestones/M002/slices/S12/tasks/T03-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Use the existing enable_polyglot_reads cutover flag to switch runtime-status, pause/resume, and runtime cycle/controller persistence to PostgreSQL mutable truth, while mirroring discovery bookkeeping into PostgreSQL on the same path."
+      ],
+      "full_summary_md": "---\nid: T03\nparent: S12\nmilestone: M002\nkey_files:\n  - vinted_radar/cli.py\n  - vinted_radar/services/runtime.py\n  - vinted_radar/services/discovery.py\n  - vinted_radar/platform/postgres_repository.py\n  - tests/test_runtime_cli.py\n  - .gsd/milestones/M002/slices/S12/tasks/T03-SUMMARY.md\nkey_decisions:\n  - Use the existing enable_polyglot_reads cutover flag to switch runtime-status, pause/resume, and runtime cycle/controller persistence to PostgreSQL mutable truth, while mirroring discovery bookkeeping into PostgreSQL on the same path.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-30T21:24:57.194Z\nblocker_discovered: false\n---\n\n# T03: Routed runtime CLI control-plane commands and runtime cycle/controller persistence through PostgreSQL mutable truth when polyglot reads are enabled.\n\n**Routed runtime CLI control-plane commands and runtime cycle/controller persistence through PostgreSQL mutable truth when polyglot reads are enabled.**\n\n## What Happened\n\nWired the runtime CLI control-plane path to select PostgreSQL mutable truth under the polyglot-read cutover, so runtime-status, runtime-pause, runtime-resume, and runtime batch/continuous control-plane persistence now resolve through one mutable-truth source instead of SQLite when the cutover is enabled. Activated the previously injected control-plane repository path inside RadarRuntimeService for cycle/controller writes and continuous-controller heartbeats, added a PostgreSQL repository factory helper, and updated the default discovery service to mirror discovery bookkeeping into PostgreSQL mutable truth. Also preserved replay idempotence by tagging direct catalog-projection rows with emitted batch event/manifest identities when evidence batches exist, then added runtime CLI regression tests covering the new Postgres-backed cutover behavior.\n\n## Verification\n\n`python3 -m py_compile vinted_radar/cli.py vinted_radar/services/runtime.py vinted_radar/services/discovery.py vinted_radar/platform/postgres_repository.py tests/test_runtime_cli.py` passed. `python3 -m pytest tests/test_runtime_cli.py -q` passed with 13 tests green, including the new polyglot-read runtime CLI coverage.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m py_compile vinted_radar/cli.py vinted_radar/services/runtime.py vinted_radar/services/discovery.py vinted_radar/platform/postgres_repository.py tests/test_runtime_cli.py` | 0 | ✅ pass | 100ms |\n| 2 | `python3 -m pytest tests/test_runtime_cli.py -q` | 0 | ✅ pass | 550ms |\n\n\n## Deviations\n\nUpdated `vinted_radar/services/discovery.py` in addition to the task-plan input files because the PostgreSQL runtime-status/control-plane path needs discovery bookkeeping projected into mutable truth to keep the cutover coherent.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/cli.py`\n- `vinted_radar/services/runtime.py`\n- `vinted_radar/services/discovery.py`\n- `vinted_radar/platform/postgres_repository.py`\n- `tests/test_runtime_cli.py`\n- `.gsd/milestones/M002/slices/S12/tasks/T03-SUMMARY.md`\n",
       "description": "Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.",
       "estimate": "2 sessions",
       "files": [
@@ -2407,6 +2416,28 @@
       "verdict": "✅ pass",
       "duration_ms": 16,
       "created_at": "2026-03-30T21:07:41.967Z"
+    },
+    {
+      "id": 42,
+      "task_id": "T03",
+      "slice_id": "S12",
+      "milestone_id": "M002",
+      "command": "python3 -m py_compile vinted_radar/cli.py vinted_radar/services/runtime.py vinted_radar/services/discovery.py vinted_radar/platform/postgres_repository.py tests/test_runtime_cli.py",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 100,
+      "created_at": "2026-03-30T21:24:57.193Z"
+    },
+    {
+      "id": 43,
+      "task_id": "T03",
+      "slice_id": "S12",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_runtime_cli.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 550,
+      "created_at": "2026-03-30T21:24:57.193Z"
     }
   ]
 }

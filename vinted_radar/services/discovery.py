@@ -68,6 +68,8 @@ class _CatalogScanResult:
     raw_listing_hits: int = 0
     unique_listing_ids: set[int] = field(default_factory=set)
     evidence_batches: list[dict[str, object]] = field(default_factory=list)
+    mutable_truth_rows: list[dict[str, object]] = field(default_factory=list)
+    completed_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +156,15 @@ class DiscoveryService:
             max_leaf_categories=options.max_leaf_categories,
             request_delay_seconds=options.request_delay,
         )
+        started_at = self.now_provider()
+        self._project_discovery_run_started(
+            run_id=run_id,
+            started_at=started_at,
+            root_scope=options.root_scope,
+            page_limit=options.page_limit,
+            max_leaf_categories=options.max_leaf_categories,
+            request_delay_seconds=options.request_delay,
+        )
 
         scanned_leaf_catalogs = 0
         successful_scans = 0
@@ -192,6 +203,13 @@ class DiscoveryService:
                 total_leaf_catalogs=len(
                     [c for c in catalogs if c.is_leaf]
                 ),
+            )
+            self._project_discovery_catalogs_synced(
+                run_id=run_id,
+                synced_at=synced_at,
+                total_seed_catalogs=len(catalogs),
+                total_leaf_catalogs=len([c for c in catalogs if c.is_leaf]),
+                catalogs=catalogs,
             )
 
             # 2. Scan all leaf catalogs concurrently, bounded by semaphore.
@@ -234,9 +252,32 @@ class DiscoveryService:
                 raw_listing_hits=raw_listing_hits,
                 unique_listing_hits=len(unique_listing_ids),
             )
+            self._project_discovery_run_completed(
+                run_id=run_id,
+                finished_at=self.now_provider(),
+                status="completed",
+                scanned_leaf_catalogs=scanned_leaf_catalogs,
+                successful_scans=successful_scans,
+                failed_scans=failed_scans,
+                raw_listing_hits=raw_listing_hits,
+                unique_listing_hits=len(unique_listing_ids),
+                last_error=None,
+            )
         except Exception as exc:  # noqa: BLE001
+            finished_at = self.now_provider()
             self.repository.complete_run(
                 run_id,
+                status="failed",
+                scanned_leaf_catalogs=scanned_leaf_catalogs,
+                successful_scans=successful_scans,
+                failed_scans=failed_scans,
+                raw_listing_hits=raw_listing_hits,
+                unique_listing_hits=len(unique_listing_ids),
+                last_error=str(exc),
+            )
+            self._project_discovery_run_completed(
+                run_id=run_id,
+                finished_at=finished_at,
                 status="failed",
                 scanned_leaf_catalogs=scanned_leaf_catalogs,
                 successful_scans=successful_scans,
@@ -299,6 +340,7 @@ class DiscoveryService:
                 options.page_limit,
             )
             observed_at = self.now_provider()
+            result.completed_at = observed_at
             try:
                 async with semaphore:
                     page = await self.http_client.get_text_async(api_url)
@@ -356,6 +398,13 @@ class DiscoveryService:
                     maximum_price_cents=maximum_price_cents,
                     target_brands=target_brands,
                 )
+                accepted_rows = _build_listing_seen_batch_rows(
+                    run_id=run_id,
+                    catalog=catalog,
+                    observed_at=observed_at,
+                    page_number=page_number,
+                    accepted_listings=page_telemetry.accepted_listings,
+                )
                 evidence_batch = self._emit_listing_seen_batch(
                     run_id=run_id,
                     catalog=catalog,
@@ -366,7 +415,11 @@ class DiscoveryService:
                     requested_url=api_url,
                 )
                 if evidence_batch is not None:
+                    for row in accepted_rows:
+                        row["source_event_id"] = evidence_batch.get("event_id")
+                        row["source_manifest_id"] = evidence_batch.get("manifest_id")
                     result.evidence_batches.append(evidence_batch)
+                result.mutable_truth_rows.extend(accepted_rows)
 
                 result.successful_scans += 1
                 result.raw_listing_hits += page_telemetry.api_listing_count
@@ -461,6 +514,16 @@ class DiscoveryService:
                 )
                 break
 
+        self._project_discovery_catalog_scan_completed(
+            run_id=run_id,
+            catalog=catalog,
+            completed_at=result.completed_at or self.now_provider(),
+            successful_pages=result.successful_scans,
+            failed_pages=result.failed_scans,
+            raw_listing_hits=result.raw_listing_hits,
+            unique_listing_hits=len(result.unique_listing_ids),
+            listing_rows=result.mutable_truth_rows,
+        )
         return result
 
     def _emit_listing_seen_batch(
@@ -512,6 +575,147 @@ class DiscoveryService:
         )
         return None if emission is None else emission.as_dict()
 
+    def _project_discovery_run_started(
+        self,
+        *,
+        run_id: str,
+        started_at: str,
+        root_scope: str,
+        page_limit: int,
+        max_leaf_categories: int | None,
+        request_delay_seconds: float,
+    ) -> None:
+        projector = self._mutable_truth_projector("project_discovery_run_started")
+        if projector is None:
+            return
+        projector(
+            run_id=run_id,
+            started_at=started_at,
+            root_scope=root_scope,
+            page_limit=page_limit,
+            max_leaf_categories=max_leaf_categories,
+            request_delay_seconds=request_delay_seconds,
+            event_id=deterministic_uuid(
+                "mutable-truth.discovery-run.started",
+                {
+                    "run_id": run_id,
+                    "started_at": started_at,
+                },
+            ),
+        )
+
+    def _project_discovery_catalogs_synced(
+        self,
+        *,
+        run_id: str,
+        synced_at: str,
+        total_seed_catalogs: int,
+        total_leaf_catalogs: int,
+        catalogs: list[CatalogNode],
+    ) -> None:
+        projector = self._mutable_truth_projector("project_discovery_catalogs_synced")
+        if projector is None:
+            return
+        projector(
+            run_id=run_id,
+            synced_at=synced_at,
+            total_seed_catalogs=total_seed_catalogs,
+            total_leaf_catalogs=total_leaf_catalogs,
+            catalogs=[_catalog_projection_row(catalog) for catalog in catalogs],
+            event_id=deterministic_uuid(
+                "mutable-truth.discovery-run.catalogs-synced",
+                {
+                    "run_id": run_id,
+                    "synced_at": synced_at,
+                    "catalog_ids": [catalog.catalog_id for catalog in catalogs],
+                },
+            ),
+        )
+
+    def _project_discovery_catalog_scan_completed(
+        self,
+        *,
+        run_id: str,
+        catalog: CatalogNode,
+        completed_at: str,
+        successful_pages: int,
+        failed_pages: int,
+        raw_listing_hits: int,
+        unique_listing_hits: int,
+        listing_rows: list[dict[str, object]],
+    ) -> None:
+        projector = self._mutable_truth_projector("project_discovery_catalog_scan_completed")
+        if projector is None:
+            return
+        projector(
+            run_id=run_id,
+            catalog=_catalog_projection_row(catalog),
+            completed_at=completed_at,
+            successful_pages=successful_pages,
+            failed_pages=failed_pages,
+            raw_listing_hits=raw_listing_hits,
+            unique_listing_hits=unique_listing_hits,
+            listing_rows=listing_rows,
+            event_id=deterministic_uuid(
+                "mutable-truth.discovery.catalog-scan-completed",
+                {
+                    "run_id": run_id,
+                    "catalog_id": catalog.catalog_id,
+                    "completed_at": completed_at,
+                    "successful_pages": successful_pages,
+                    "failed_pages": failed_pages,
+                    "listing_ids": [int(row["listing_id"]) for row in listing_rows],
+                },
+            ),
+        )
+
+    def _project_discovery_run_completed(
+        self,
+        *,
+        run_id: str,
+        finished_at: str,
+        status: str,
+        scanned_leaf_catalogs: int,
+        successful_scans: int,
+        failed_scans: int,
+        raw_listing_hits: int,
+        unique_listing_hits: int,
+        last_error: str | None,
+    ) -> None:
+        projector = self._mutable_truth_projector("project_discovery_run_completed")
+        if projector is None:
+            return
+        projector(
+            run_id=run_id,
+            finished_at=finished_at,
+            status=status,
+            scanned_leaf_catalogs=scanned_leaf_catalogs,
+            successful_scans=successful_scans,
+            failed_scans=failed_scans,
+            raw_listing_hits=raw_listing_hits,
+            unique_listing_hits=unique_listing_hits,
+            last_error=last_error,
+            event_id=deterministic_uuid(
+                "mutable-truth.discovery-run.completed",
+                {
+                    "run_id": run_id,
+                    "finished_at": finished_at,
+                    "status": status,
+                    "successful_scans": successful_scans,
+                    "failed_scans": failed_scans,
+                    "unique_listing_hits": unique_listing_hits,
+                },
+            ),
+        )
+
+    def _mutable_truth_projector(self, method_name: str):
+        if self.mutable_truth_repository is None:
+            return None
+        projector = getattr(self.mutable_truth_repository, method_name, None)
+        if not callable(projector):
+            return None
+        return projector
+
 
 def build_default_service(
     *,
@@ -521,6 +725,7 @@ def build_default_service(
     proxies: list[str] | None = None,
     max_retries: int = 3,
 ) -> DiscoveryService:
+    config = load_platform_config()
     repository = RadarRepository(db_path)
     http_client = VintedHttpClient(
         timeout_seconds=timeout_seconds,
@@ -528,12 +733,33 @@ def build_default_service(
         proxies=proxies,
         max_retries=max_retries,
     )
-    evidence_publisher = CollectorEvidencePublisher.from_environment()
+    evidence_publisher = CollectorEvidencePublisher.from_environment(config=config)
+    mutable_truth_repository = None
+    if config.cutover.enable_polyglot_reads:
+        mutable_truth_repository = PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
     return DiscoveryService(
         repository=repository,
         http_client=http_client,
         evidence_publisher=evidence_publisher,
+        mutable_truth_repository=mutable_truth_repository,
     )
+
+
+def _catalog_projection_row(catalog: CatalogNode) -> dict[str, object]:
+    return {
+        "catalog_id": catalog.catalog_id,
+        "root_catalog_id": catalog.root_catalog_id,
+        "root_title": catalog.root_title,
+        "parent_catalog_id": catalog.parent_catalog_id,
+        "title": catalog.title,
+        "code": catalog.code,
+        "url": catalog.url,
+        "path": catalog.path_text,
+        "depth": catalog.depth,
+        "is_leaf": catalog.is_leaf,
+        "allow_browsing_subcategories": catalog.allow_browsing_subcategories,
+        "order_index": catalog.order_index,
+    }
 
 
 def _select_leaf_catalogs(

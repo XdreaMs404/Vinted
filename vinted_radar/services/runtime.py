@@ -89,6 +89,17 @@ class RadarRuntimeService:
         with RadarRepository(self.db_path) as repository:
             return callback(repository)
 
+    def close(self) -> None:
+        if self.control_plane_repository is None:
+            return
+        close = getattr(self.control_plane_repository, "close", None)
+        if callable(close):
+            close()
+
+    def _sync_mutable_truth(self) -> None:
+        if self.mutable_truth_sync is not None:
+            self.mutable_truth_sync()
+
     def run_cycle(
         self,
         options: RadarRuntimeOptions,
@@ -97,15 +108,16 @@ class RadarRuntimeService:
         interval_seconds: float | None = None,
         raise_on_error: bool = True,
     ) -> RadarRuntimeCycleReport:
-        with RadarRepository(self.db_path) as repository:
-            cycle_id = repository.start_runtime_cycle(
+        cycle_id = self._with_control_plane_repository(
+            lambda repository: repository.start_runtime_cycle(
                 mode=mode,
                 phase="starting",
                 interval_seconds=interval_seconds,
                 state_probe_limit=options.state_refresh_limit,
                 config=options.as_config(),
             )
-            cycle_row = repository.runtime_cycle(cycle_id)
+        )
+        cycle_row = self._with_control_plane_repository(lambda repository: repository.runtime_cycle(cycle_id))
         if cycle_row is None:
             raise RuntimeError(f"Runtime cycle {cycle_id} was not persisted.")
 
@@ -138,6 +150,7 @@ class RadarRuntimeService:
                 )
             finally:
                 _close_service(discovery_service)
+            self._sync_mutable_truth()
 
             current_phase = "state_refresh"
             self._update_phase(cycle_id, current_phase)
@@ -151,6 +164,7 @@ class RadarRuntimeService:
                 state_report = state_refresh_service.refresh(limit=options.state_refresh_limit, include_state_summary=False)
             finally:
                 _close_service(state_refresh_service)
+            self._sync_mutable_truth()
 
             current_phase = "summarizing"
             self._update_phase(cycle_id, current_phase)
@@ -234,8 +248,9 @@ class RadarRuntimeService:
                 reports.append(report)
                 cycle_count += 1
                 if max_cycles is None or cycle_count < max_cycles:
-                    with RadarRepository(self.db_path) as repository:
-                        controller = repository.runtime_controller_state(now=self._now_iso()) or {}
+                    controller = self._with_control_plane_repository(
+                        lambda repository: repository.runtime_controller_state(now=self._now_iso()) or {}
+                    )
                     if controller.get("requested_action") == "pause":
                         self._pause_controller(
                             options,
@@ -276,8 +291,8 @@ class RadarRuntimeService:
         last_error: str | None,
         last_error_at: str | None,
     ) -> None:
-        with RadarRepository(self.db_path) as repository:
-            repository.set_runtime_controller_state(
+        self._with_control_plane_repository(
+            lambda repository: repository.set_runtime_controller_state(
                 status="scheduled",
                 phase="waiting",
                 mode="continuous",
@@ -293,6 +308,7 @@ class RadarRuntimeService:
                 requested_at=None,
                 config=options.as_config(),
             )
+        )
 
     def _pause_controller(
         self,
@@ -304,8 +320,8 @@ class RadarRuntimeService:
         last_error: str | None,
         last_error_at: str | None,
     ) -> None:
-        with RadarRepository(self.db_path) as repository:
-            repository.set_runtime_controller_state(
+        self._with_control_plane_repository(
+            lambda repository: repository.set_runtime_controller_state(
                 status="paused",
                 phase="paused",
                 mode="continuous",
@@ -321,10 +337,11 @@ class RadarRuntimeService:
                 requested_at=None,
                 config=options.as_config(),
             )
+        )
 
     def _idle_controller(self, options: RadarRuntimeOptions, *, interval_seconds: float) -> None:
-        with RadarRepository(self.db_path) as repository:
-            repository.set_runtime_controller_state(
+        self._with_control_plane_repository(
+            lambda repository: repository.set_runtime_controller_state(
                 status="idle",
                 phase="idle",
                 mode="continuous",
@@ -337,13 +354,15 @@ class RadarRuntimeService:
                 requested_at=None,
                 config=options.as_config(),
             )
+        )
 
     def _wait_for_next_cycle_window(self, options: RadarRuntimeOptions, *, interval_seconds: float) -> None:
         poll_seconds = self._poll_interval_seconds(interval_seconds)
         while True:
             current_iso = self._now_iso()
-            with RadarRepository(self.db_path) as repository:
-                controller = repository.runtime_controller_state(now=current_iso)
+            controller = self._with_control_plane_repository(
+                lambda repository: repository.runtime_controller_state(now=current_iso)
+            )
             if controller is None:
                 self._schedule_controller(
                     options,
@@ -411,8 +430,7 @@ class RadarRuntimeService:
         return value.astimezone(UTC).replace(microsecond=0).isoformat()
 
     def _update_phase(self, cycle_id: str, phase: str) -> None:
-        with RadarRepository(self.db_path) as repository:
-            repository.update_runtime_cycle_phase(cycle_id, phase=phase)
+        self._with_control_plane_repository(lambda repository: repository.update_runtime_cycle_phase(cycle_id, phase=phase))
 
     def _complete_cycle(
         self,
@@ -427,8 +445,8 @@ class RadarRuntimeService:
         last_error: str | None,
         state_refresh_summary: dict[str, object] | None,
     ) -> None:
-        with RadarRepository(self.db_path) as repository:
-            repository.complete_runtime_cycle(
+        self._with_control_plane_repository(
+            lambda repository: repository.complete_runtime_cycle(
                 cycle_id,
                 status=status,
                 phase=phase,
@@ -439,6 +457,7 @@ class RadarRuntimeService:
                 last_error=last_error,
                 state_refresh_summary=state_refresh_summary,
             )
+        )
 
     def _complete_and_build_failure_report(
         self,
@@ -493,8 +512,7 @@ class RadarRuntimeService:
         discovery_report: DiscoveryRunReport | None,
         state_report: StateRefreshReport | None,
     ) -> RadarRuntimeCycleReport:
-        with RadarRepository(self.db_path) as repository:
-            cycle = repository.runtime_cycle(cycle_id)
+        cycle = self._with_control_plane_repository(lambda repository: repository.runtime_cycle(cycle_id))
         if cycle is None:
             raise RuntimeError(f"Runtime cycle {cycle_id} disappeared before it could be reported.")
         return RadarRuntimeCycleReport(

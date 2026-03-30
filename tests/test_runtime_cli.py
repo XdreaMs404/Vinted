@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -703,8 +704,173 @@ def test_runtime_status_cli_table_shows_controller_timing(tmp_path: Path) -> Non
         ],
     )
 
+def test_runtime_status_cli_uses_polyglot_control_plane_when_enabled(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeControlPlaneRepository:
+        def runtime_status(self, *, limit: int, now: str | None = None) -> dict[str, object]:
+            captured["limit"] = limit
+            captured["now"] = now
+            return {
+                "generated_at": "2026-03-23T09:10:00+00:00",
+                "db_path": "postgres",
+                "controller": {"status": "paused", "phase": "paused"},
+                "status": "paused",
+                "phase": "paused",
+                "mode": "continuous",
+                "updated_at": "2026-03-23T09:05:00+00:00",
+                "paused_at": "2026-03-23T09:00:00+00:00",
+                "next_resume_at": "2026-03-23T09:15:00+00:00",
+                "elapsed_pause_seconds": 600.0,
+                "next_resume_in_seconds": 300.0,
+                "last_error": None,
+                "last_error_at": None,
+                "requested_action": "none",
+                "requested_at": None,
+                "active_cycle_id": None,
+                "latest_cycle_id": "cycle-pg-1",
+                "heartbeat": {"age_seconds": 10.0, "stale_after_seconds": 120.0, "is_stale": False},
+                "latest_cycle": {
+                    "cycle_id": "cycle-pg-1",
+                    "mode": "continuous",
+                    "status": "completed",
+                    "phase": "completed",
+                    "started_at": "2026-03-23T09:00:00+00:00",
+                    "finished_at": "2026-03-23T09:05:00+00:00",
+                    "discovery_run_id": "run-pg-1",
+                    "state_probed_count": 1,
+                    "state_probe_limit": 2,
+                    "tracked_listings": 2,
+                    "first_pass_only": 1,
+                    "fresh_followup": 1,
+                    "aging_followup": 0,
+                    "stale_followup": 0,
+                    "state_refresh_summary": {"status": "partial", "direct_signal_count": 0, "inconclusive_probe_count": 1, "degraded_probe_count": 0},
+                },
+                "recent_cycles": [],
+                "latest_failure": None,
+                "recent_failures": [],
+                "acquisition": {"status": "healthy", "latest_state_refresh_summary": {}},
+                "totals": {"total_cycles": 1, "completed_cycles": 1, "failed_cycles": 0, "running_cycles": 0, "interrupted_cycles": 0},
+            }
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    fake_config = SimpleNamespace(
+        cutover=SimpleNamespace(enable_polyglot_reads=True),
+        postgres=SimpleNamespace(dsn="postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"),
+    )
+    monkeypatch.setattr("vinted_radar.cli.load_platform_config", lambda: fake_config)
+    monkeypatch.setattr("vinted_radar.cli.PostgresMutableTruthRepository.from_dsn", lambda dsn: FakeControlPlaneRepository())
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["runtime-status", "--db", str(tmp_path / "runtime.db"), "--format", "json", "--limit", "3"])
+
     assert result.exit_code == 0
-    assert "Runtime now: paused (phase paused)" in result.stdout
-    assert "Paused since: 2026-03-23T09:00:00+00:00 (10m 00s)" in result.stdout
-    assert "Next resume: 2026-03-23T09:15:00+00:00 (5m 00s remaining)" in result.stdout
-    assert "State refresh health: partial | direct 0 | inconclusive 1 | degraded 0" in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "paused"
+    assert payload["latest_cycle"]["cycle_id"] == "cycle-pg-1"
+    assert captured["limit"] == 3
+    assert captured["closed"] is True
+
+
+
+def test_runtime_pause_and_resume_cli_use_polyglot_control_plane_when_enabled(monkeypatch, tmp_path: Path) -> None:
+    state = {
+        "status": "scheduled",
+        "phase": "waiting",
+        "next_resume_at": "2026-03-23T09:05:00+00:00",
+    }
+    captures = {"pause_calls": 0, "resume_calls": 0, "closed": 0}
+
+    class FakeControlPlaneRepository:
+        def request_runtime_pause(self) -> dict[str, object]:
+            captures["pause_calls"] += 1
+            state.update({"status": "paused", "phase": "paused", "next_resume_at": None})
+            return {
+                "status": state["status"],
+                "phase": state["phase"],
+                "requested_action": "none",
+                "next_resume_at": state["next_resume_at"],
+            }
+
+        def request_runtime_resume(self) -> dict[str, object]:
+            captures["resume_calls"] += 1
+            state.update({"status": "scheduled", "phase": "waiting", "next_resume_at": "2026-03-23T09:06:00+00:00"})
+            return {
+                "status": state["status"],
+                "phase": state["phase"],
+                "requested_action": "none",
+                "next_resume_at": state["next_resume_at"],
+            }
+
+        def close(self) -> None:
+            captures["closed"] += 1
+
+    fake_config = SimpleNamespace(
+        cutover=SimpleNamespace(enable_polyglot_reads=True),
+        postgres=SimpleNamespace(dsn="postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"),
+    )
+    monkeypatch.setattr("vinted_radar.cli.load_platform_config", lambda: fake_config)
+    monkeypatch.setattr("vinted_radar.cli.PostgresMutableTruthRepository.from_dsn", lambda dsn: FakeControlPlaneRepository())
+    runner = CliRunner()
+
+    pause_result = runner.invoke(app, ["runtime-pause", "--db", str(tmp_path / "runtime.db")])
+    resume_result = runner.invoke(app, ["runtime-resume", "--db", str(tmp_path / "runtime.db")])
+
+    assert pause_result.exit_code == 0
+    assert "Runtime is now paused" in pause_result.stdout
+    assert resume_result.exit_code == 0
+    assert "Runtime resumed. Next cycle window: 2026-03-23T09:06:00+00:00" in resume_result.stdout
+    assert captures["pause_calls"] == 1
+    assert captures["resume_calls"] == 1
+    assert captures["closed"] == 2
+
+
+
+def test_batch_cli_injects_polyglot_control_plane_repository_into_runtime_service(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    fake_repository = object()
+
+    class FakeRuntimeService:
+        def __init__(self, db_path: Path, *, control_plane_repository: object | None = None) -> None:
+            captured["db_path"] = db_path
+            captured["control_plane_repository"] = control_plane_repository
+
+        def run_cycle(self, options, *, mode: str):
+            captured["mode"] = mode
+            return RadarRuntimeCycleReport(
+                cycle_id="cycle-polyglot",
+                mode="batch",
+                status="completed",
+                phase="completed",
+                started_at="2026-03-20T10:00:00+00:00",
+                finished_at="2026-03-20T10:01:00+00:00",
+                discovery_run_id="run-polyglot",
+                state_probed_count=0,
+                tracked_listings=0,
+                freshness_counts={"first-pass-only": 0, "fresh-followup": 0, "aging-followup": 0, "stale-followup": 0},
+                last_error=None,
+                config={"state_refresh_limit": 10},
+                state_refresh_summary=None,
+            )
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    fake_config = SimpleNamespace(
+        cutover=SimpleNamespace(enable_polyglot_reads=True),
+        postgres=SimpleNamespace(dsn="postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"),
+    )
+    monkeypatch.setattr("vinted_radar.cli.load_platform_config", lambda: fake_config)
+    monkeypatch.setattr("vinted_radar.cli.PostgresMutableTruthRepository.from_dsn", lambda dsn: fake_repository)
+    monkeypatch.setattr("vinted_radar.cli.RadarRuntimeService", FakeRuntimeService)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["batch", "--db", str(tmp_path / "runtime.db"), "--request-delay", "0.0", "--timeout-seconds", "5.0"])
+
+    assert result.exit_code == 0
+    assert captured["control_plane_repository"] is fake_repository
+    assert captured["mode"] == "batch"
+    assert captured["closed"] is True

@@ -12,7 +12,7 @@
   - Estimate: 2-3 sessions
   - Files: vinted_radar/platform/postgres_repository.py, vinted_radar/services/projectors.py, vinted_radar/services/discovery.py, vinted_radar/services/runtime.py
   - Verify: python3 -m py_compile vinted_radar/platform/postgres_repository.py
-- [ ] **T03: CLI/runtime cutover to PostgreSQL** — Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.
+- [x] **T03: Routed runtime CLI control-plane commands and runtime cycle/controller persistence through PostgreSQL mutable truth when polyglot reads are enabled.** — Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.
   - Estimate: 2 sessions
   - Files: vinted_radar/cli.py, vinted_radar/services/runtime.py, vinted_radar/platform/postgres_repository.py, tests/test_runtime_cli.py
   - Verify: python3 -m pytest tests/test_runtime_cli.py -q
