@@ -8,15 +8,15 @@
   - Estimate: 2 sessions
   - Files: infra/postgres/, vinted_radar/platform/migrations.py, vinted_radar/platform/postgres_schema/, tests/test_postgres_schema.py
   - Verify: python -m pytest tests/test_postgres_schema.py -q
-- [x] **T02: Started PostgreSQL mutable-truth repository scaffolding, but projector wiring, tests, and verification remain unfinished.** — Implement PostgreSQL repositories and projectors for current-state truth. Add adapters that consume outbox events and update runtime/controller rows, discovery bookkeeping, catalog rows, listing current-state rows, and presence rollups in PostgreSQL without duplicating raw evidence blobs.
+- [x] **T02: Scaffolded the PostgreSQL mutable-truth projector service and replay-safe listing batch projection, but discovery/runtime wiring and tests remain unfinished.** — Implement PostgreSQL repositories and projectors for current-state truth. Add adapters that consume outbox events and update runtime/controller rows, discovery bookkeeping, catalog rows, listing current-state rows, and presence rollups in PostgreSQL without duplicating raw evidence blobs.
   - Estimate: 2-3 sessions
   - Files: vinted_radar/platform/postgres_repository.py, vinted_radar/services/projectors.py, vinted_radar/services/discovery.py, vinted_radar/services/runtime.py
-  - Verify: python -m py_compile vinted_radar/platform/postgres_repository.py
-- [x] **T03: CLI/runtime cutover to PostgreSQL** — Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.
+  - Verify: python3 -m py_compile vinted_radar/platform/postgres_repository.py
+- [ ] **T03: CLI/runtime cutover to PostgreSQL** — Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Make runtime-status, pause/resume, controller heartbeats, and discovery bookkeeping resolve through the new PostgreSQL repositories/config while preserving existing JSON/product contracts for later UI slices.
   - Estimate: 2 sessions
   - Files: vinted_radar/cli.py, vinted_radar/services/runtime.py, vinted_radar/platform/postgres_repository.py, tests/test_runtime_cli.py
-  - Verify: python -m pytest tests/test_runtime_cli.py -q
-- [x] **T04: Started a PostgreSQL mutable-truth backfill service and runtime control-plane repository APIs, but CLI wiring, tests, and the PostgreSQL smoke proof remain unfinished.** — Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQLite-to-PostgreSQL backfill for runtime/discovery/catalog/current-state data, then run a narrow batch/continuous smoke against PostgreSQL-backed mutable truth and assert that runtime-status and bookkeeping stay correct without SQLite mutation writes.
+  - Verify: python3 -m pytest tests/test_runtime_cli.py -q
+- [ ] **T04: Started a PostgreSQL mutable-truth backfill service and runtime control-plane repository APIs, but CLI wiring, tests, and the PostgreSQL smoke proof remain unfinished.** — Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQLite-to-PostgreSQL backfill for runtime/discovery/catalog/current-state data, then run a narrow batch/continuous smoke against PostgreSQL-backed mutable truth and assert that runtime-status and bookkeeping stay correct without SQLite mutation writes.
   - Estimate: 1-2 sessions
   - Files: vinted_radar/services/postgres_backfill.py, vinted_radar/cli.py, tests/test_runtime_service.py
-  - Verify: python -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py
+  - Verify: python3 -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py

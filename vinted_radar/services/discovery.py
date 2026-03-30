@@ -10,12 +10,14 @@ from datetime import UTC, datetime
 from itertools import zip_longest
 from urllib.parse import urlencode
 
-from vinted_radar.domain.events import EventEnvelope
+from vinted_radar.domain.events import EventEnvelope, deterministic_uuid
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.models import CatalogNode, ListingCard
 from vinted_radar.parsers.api_catalog_page import parse_api_catalog_page
 from vinted_radar.parsers.catalog_tree import parse_catalog_tree_from_html
+from vinted_radar.platform.config import load_platform_config
 from vinted_radar.platform.lake_writer import CollectorEvidencePublisher
+from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.repository import RadarRepository
 
 logger = logging.getLogger(__name__)
@@ -87,11 +89,13 @@ class DiscoveryService:
         *,
         now_provider: Callable[[], str] | None = None,
         evidence_publisher: CollectorEvidencePublisher | None = None,
+        mutable_truth_repository: object | None = None,
     ) -> None:
         self.repository = repository
         self.http_client = http_client
         self.now_provider = now_provider or _utc_now
         self.evidence_publisher = evidence_publisher
+        self.mutable_truth_repository = mutable_truth_repository
 
     def close(self) -> None:
         self.repository.close()
@@ -103,6 +107,13 @@ class DiscoveryService:
                 pass
         if self.evidence_publisher is not None:
             self.evidence_publisher.close()
+        if self.mutable_truth_repository is not None:
+            mutable_truth_close = getattr(self.mutable_truth_repository, "close", None)
+            if callable(mutable_truth_close):
+                try:
+                    mutable_truth_close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     # ------------------------------------------------------------------
     # Public: sync wrapper  (keeps CLI / runtime / tests backward-compat)

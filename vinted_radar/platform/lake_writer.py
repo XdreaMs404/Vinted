@@ -22,6 +22,7 @@ from vinted_radar.domain.manifests import EvidenceManifest
 from vinted_radar.platform.config import PlatformConfig, load_platform_config
 from vinted_radar.platform.object_store import ObjectStoreObject, S3ObjectStore
 from vinted_radar.platform.outbox import OutboxPublishResult, PostgresOutbox
+from vinted_radar.platform.postgres_repository import POSTGRES_CURRENT_STATE_SINK
 
 PARQUET_LAKE_SCHEMA_VERSION = 1
 PARQUET_LAKE_COMPRESSION = "zstd"
@@ -314,6 +315,7 @@ class CollectorEvidencePublisher:
                 sinks.append("clickhouse")
             if resolved_config.cutover.enable_object_storage_writes:
                 sinks.append("parquet")
+                sinks.append(POSTGRES_CURRENT_STATE_SINK)
             if created_postgres_connection:
                 closeables.append(connection)
 

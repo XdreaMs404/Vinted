@@ -21,4 +21,4 @@ Cut the CLI/runtime control surfaces over to PostgreSQL-backed mutable truth. Ma
 
 ## Verification
 
-python -m pytest tests/test_runtime_cli.py -q
+python3 -m pytest tests/test_runtime_cli.py -q

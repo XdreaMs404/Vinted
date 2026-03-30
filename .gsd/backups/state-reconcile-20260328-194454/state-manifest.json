@@ -988,9 +988,9 @@
         "vinted_radar/cli.py",
         "vinted_radar/services/runtime.py",
         "vinted_radar/platform/postgres_repository.py",
-        "tests/test_runtime_cli_postgres.py"
+        "tests/test_runtime_cli.py"
       ],
-      "verify": "python -m pytest tests/test_runtime_cli_postgres.py -q",
+      "verify": "python -m pytest tests/test_runtime_cli.py -q",
       "inputs": [
         "vinted_radar/cli.py",
         "vinted_radar/services/runtime.py",
@@ -998,7 +998,7 @@
       ],
       "expected_output": [
         "PostgreSQL-backed runtime CLI path",
-        "tests/test_runtime_cli_postgres.py"
+        "tests/test_runtime_cli.py"
       ],
       "observability_impact": "",
       "full_plan_md": "",

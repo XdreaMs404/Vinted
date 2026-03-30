@@ -813,18 +813,79 @@ class PostgresMutableTruthRepository:
     # ------------------------------------------------------------------
     # Current-state projection
     # ------------------------------------------------------------------
+    def project_listing_seen_batch(
+        self,
+        *,
+        run_id: str,
+        listing_rows: Sequence[Mapping[str, object]],
+        event_id: str,
+        manifest_id: str | None = None,
+        projected_at: str | None = None,
+    ) -> None:
+        default_projected_at = projected_at or _utc_now()
+        for raw_row in listing_rows:
+            row = dict(raw_row)
+            listing_id = int(row["listing_id"])
+            observed_at = _coalesce_str(row.get("observed_at"), default_projected_at)
+            source_event_id = _optional_str(row.get("source_event_id")) or event_id
+            source_manifest_id = _optional_str(row.get("source_manifest_id")) or manifest_id
+            identity = self._merge_listing_identity(
+                listing_id=listing_id,
+                run_id=run_id,
+                observed_at=observed_at,
+                row=row,
+                source_event_id=source_event_id,
+                source_manifest_id=source_manifest_id,
+            )
+            self._upsert_listing_identity(identity)
+
+            sighting_count = max(int(row.get("sighting_count") or 1), 1)
+            presence = self._merge_listing_presence_summary(
+                listing_id=listing_id,
+                run_id=run_id,
+                observed_at=observed_at,
+                sighting_count=sighting_count,
+                identity=identity,
+                source_event_id=source_event_id,
+                source_manifest_id=source_manifest_id,
+            )
+            self._upsert_listing_presence_summary(presence)
+
+            current = self.listing_current_state(listing_id) or self._default_listing_current_state(listing_id)
+            current.update(
+                {
+                    "listing_id": listing_id,
+                    "seen_in_latest_primary_scan": True,
+                    "latest_primary_scan_run_id": run_id,
+                    "latest_primary_scan_at": observed_at,
+                    "follow_up_miss_count": 0,
+                    "latest_follow_up_miss_at": None,
+                    "last_event_id": source_event_id,
+                    "last_manifest_id": source_manifest_id,
+                    "projected_at": observed_at,
+                }
+            )
+            self._upsert_listing_current_state_row(current)
+            self._refresh_projected_listing(
+                listing_id,
+                now=observed_at,
+                source_event_id=source_event_id,
+                source_manifest_id=source_manifest_id,
+            )
+
     def project_state_refresh_probes(
         self,
         *,
         probe_rows: Sequence[Mapping[str, object]],
         projected_at: str,
         event_id: str,
+        manifest_id: str | None = None,
     ) -> None:
         for raw_row in probe_rows:
             row = dict(raw_row)
             listing_id = int(row["listing_id"])
             source_event_id = _optional_str(row.get("source_event_id")) or event_id
-            source_manifest_id = _optional_str(row.get("source_manifest_id"))
+            source_manifest_id = _optional_str(row.get("source_manifest_id")) or manifest_id
             current = self.listing_current_state(listing_id) or self._default_listing_current_state(listing_id)
             current.update(
                 {
@@ -1065,6 +1126,50 @@ class PostgresMutableTruthRepository:
         hydrated["metadata"] = _decode_json_object(hydrated.pop("metadata_json", "{}"))
         return hydrated
 
+    def mutable_manifest(self, manifest_id: str) -> dict[str, object] | None:
+        row = _fetchone(
+            self.connection.execute(
+                "SELECT * FROM platform_mutable_manifests WHERE manifest_id = %s",
+                (manifest_id,),
+            )
+        )
+        if row is None:
+            return None
+        hydrated = dict(row)
+        hydrated["metadata"] = _decode_json_object(hydrated.pop("metadata_json", "{}"))
+        return hydrated
+
+    def upsert_mutable_manifest(
+        self,
+        *,
+        manifest_id: str,
+        event_id: str,
+        event_type: str,
+        aggregate_type: str,
+        aggregate_id: str,
+        occurred_at: str,
+        manifest_type: str,
+        projection_status: str,
+        projected_at: str | None = None,
+        last_error: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> None:
+        self._upsert_mutable_manifest(
+            {
+                "manifest_id": str(manifest_id),
+                "event_id": str(event_id),
+                "event_type": str(event_type),
+                "aggregate_type": str(aggregate_type),
+                "aggregate_id": str(aggregate_id),
+                "occurred_at": str(occurred_at),
+                "manifest_type": str(manifest_type),
+                "projection_status": str(projection_status),
+                "projected_at": _optional_str(projected_at),
+                "last_error": _optional_str(last_error),
+                "metadata_json": canonical_json(metadata or {}),
+            }
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -1133,6 +1238,8 @@ class PostgresMutableTruthRepository:
         source_manifest_id: str | None,
     ) -> dict[str, object]:
         existing = self.listing_presence_summary(listing_id)
+        if existing is not None and _optional_str(existing.get("last_event_id")) == source_event_id:
+            return dict(existing)
         if existing is None:
             observation_count = 1
             total_sightings = sighting_count
@@ -1317,6 +1424,54 @@ class PostgresMutableTruthRepository:
     # ------------------------------------------------------------------
     # Low-level SQL upserts
     # ------------------------------------------------------------------
+    def _upsert_mutable_manifest(self, payload: Mapping[str, object]) -> None:
+        try:
+            self.connection.execute(
+                """
+                INSERT INTO platform_mutable_manifests (
+                    manifest_id,
+                    event_id,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    occurred_at,
+                    manifest_type,
+                    projection_status,
+                    projected_at,
+                    last_error,
+                    metadata_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (manifest_id) DO UPDATE SET
+                    event_id = excluded.event_id,
+                    event_type = excluded.event_type,
+                    aggregate_type = excluded.aggregate_type,
+                    aggregate_id = excluded.aggregate_id,
+                    occurred_at = excluded.occurred_at,
+                    manifest_type = excluded.manifest_type,
+                    projection_status = excluded.projection_status,
+                    projected_at = excluded.projected_at,
+                    last_error = excluded.last_error,
+                    metadata_json = excluded.metadata_json
+                """,
+                (
+                    payload["manifest_id"],
+                    payload["event_id"],
+                    payload["event_type"],
+                    payload["aggregate_type"],
+                    payload["aggregate_id"],
+                    payload["occurred_at"],
+                    payload["manifest_type"],
+                    payload["projection_status"],
+                    payload["projected_at"],
+                    payload["last_error"],
+                    payload["metadata_json"],
+                ),
+            )
+            _commit_quietly(self.connection)
+        except Exception:  # noqa: BLE001
+            _rollback_quietly(self.connection)
+            raise
+
     def _upsert_discovery_run(self, payload: Mapping[str, object]) -> None:
         try:
             self.connection.execute(

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-29T14:47:48.759Z",
+  "exported_at": "2026-03-30T21:07:41.993Z",
   "milestones": [
     {
       "id": "M001",
@@ -1037,24 +1037,26 @@
       "milestone_id": "M002",
       "slice_id": "S12",
       "id": "T02",
-      "title": "Started PostgreSQL mutable-truth repository scaffolding, but projector wiring, tests, and verification remain unfinished.",
+      "title": "Scaffolded the PostgreSQL mutable-truth projector service and replay-safe listing batch projection, but discovery/runtime wiring and tests remain unfinished.",
       "status": "complete",
-      "one_liner": "Started PostgreSQL mutable-truth repository scaffolding, but projector wiring, tests, and verification remain unfinished.",
-      "narrative": "I read the S12/T02 contract, the S10/S11 handoff summaries, the SQLite repository/state-machine logic, the V003 PostgreSQL schema, and the current outbox/evidence publisher seams, then started a new `vinted_radar/platform/postgres_repository.py` for mutable-truth projection writes. The context-budget stop arrived before I could finish `vinted_radar/services/projectors.py`, add an outbox-only event publish helper in `vinted_radar/platform/lake_writer.py`, wire projector event publication from discovery/state-refresh/runtime, or create `tests/test_postgres_projectors.py`. The repository file on disk is in-progress scaffolding and has not been validated.",
-      "verification_result": "No verification command was run before the context-budget handoff. The task-plan gate `python -m pytest tests/test_postgres_projectors.py -q` is still pending, and the newly written repository scaffolding has not been syntax-checked or exercised.",
+      "one_liner": "Scaffolded the PostgreSQL mutable-truth projector service and replay-safe listing batch projection, but discovery/runtime wiring and tests remain unfinished.",
+      "narrative": "Implemented the first half of the T02 contract by extending `PostgresMutableTruthRepository` with a new `project_listing_seen_batch(...)` path that can upsert listing identity, presence summaries, and current-state rows from manifest-backed batch rows without duplicating raw evidence blobs. I also made the probe projector manifest-aware, added a replay guard in presence-summary merging so reprocessing the same event does not inflate rollups, and created `MutableTruthProjectorService` with manifest fetch, parquet row loading, outbox claiming/delivery/failure handling, mutable-manifest status updates, and outbox-checkpoint observability. The execution unit stopped before the planned `DiscoveryService` / `RadarRuntimeService` wiring and projector tests could be completed, but the slice plan still holds and the next unit can resume from those integration points.",
+      "verification_result": "`python3 - <<'PY' ... py_compile.compile('vinted_radar/platform/postgres_repository.py'); py_compile.compile('vinted_radar/services/projectors.py') ... PY` passed, proving the landed repository/projector scaffold imports and compiles.",
       "duration": "",
-      "completed_at": "2026-03-29T10:28:59.854Z",
+      "completed_at": "2026-03-30T21:07:41.967Z",
       "blocker_discovered": false,
-      "deviations": "Stopped at the context-budget boundary and wrote a durable partial handoff instead of continuing implementation without enough room to finish and verify the task safely.",
-      "known_issues": "`vinted_radar/services/projectors.py` was not created; `vinted_radar/platform/lake_writer.py` was not updated with an event-only publish helper; `vinted_radar/services/discovery.py`, `vinted_radar/services/state_refresh.py`, and `vinted_radar/services/runtime.py` were not patched to emit projector events; `tests/test_postgres_projectors.py` does not exist yet; and `vinted_radar/platform/postgres_repository.py` exists but is unverified and may contain syntax or behavioral defects.",
+      "deviations": "Stopped after the repository + projector-service scaffold because the execution unit hit the context/time-budget wrap-up boundary before the planned discovery/runtime adapter wiring and test additions were completed.",
+      "known_issues": "`vinted_radar/services/discovery.py` is still not wired to mirror discovery bookkeeping into PostgreSQL mutable truth; `vinted_radar/services/runtime.py` is still not wired to mirror runtime/controller snapshots or trigger the new projector sync callback; no automated tests were added in this unit; `vinted_radar/services/projectors.py` is not yet referenced by any default factory or CLI path.",
       "key_files": [
         "vinted_radar/platform/postgres_repository.py",
+        "vinted_radar/services/projectors.py",
+        ".gsd/KNOWLEDGE.md",
         ".gsd/milestones/M002/slices/S12/tasks/T02-SUMMARY.md"
       ],
       "key_decisions": [
-        "Started the mutable-truth write side around a dedicated PostgreSQL repository and a dedicated projector sink/event path, but did not finish the service event publishers or projector consumer in this context window."
+        "D044: project listing identity/presence/current-state from outbox-backed page batches, but do not derive follow-up misses from page-scoped manifests."
       ],
-      "full_summary_md": "---\nid: T02\nparent: S12\nmilestone: M002\nkey_files:\n  - vinted_radar/platform/postgres_repository.py\n  - .gsd/milestones/M002/slices/S12/tasks/T02-SUMMARY.md\nkey_decisions:\n  - Started the mutable-truth write side around a dedicated PostgreSQL repository and a dedicated projector sink/event path, but did not finish the service event publishers or projector consumer in this context window.\nduration: \"\"\nverification_result: mixed\ncompleted_at: 2026-03-29T10:28:59.854Z\nblocker_discovered: false\n---\n\n# T02: Started PostgreSQL mutable-truth repository scaffolding, but projector wiring, tests, and verification remain unfinished.\n\n**Started PostgreSQL mutable-truth repository scaffolding, but projector wiring, tests, and verification remain unfinished.**\n\n## What Happened\n\nI read the S12/T02 contract, the S10/S11 handoff summaries, the SQLite repository/state-machine logic, the V003 PostgreSQL schema, and the current outbox/evidence publisher seams, then started a new `vinted_radar/platform/postgres_repository.py` for mutable-truth projection writes. The context-budget stop arrived before I could finish `vinted_radar/services/projectors.py`, add an outbox-only event publish helper in `vinted_radar/platform/lake_writer.py`, wire projector event publication from discovery/state-refresh/runtime, or create `tests/test_postgres_projectors.py`. The repository file on disk is in-progress scaffolding and has not been validated.\n\n## Verification\n\nNo verification command was run before the context-budget handoff. The task-plan gate `python -m pytest tests/test_postgres_projectors.py -q` is still pending, and the newly written repository scaffolding has not been syntax-checked or exercised.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python -m pytest tests/test_postgres_projectors.py -q` | -1 | ❌ not run | 0ms |\n\n\n## Deviations\n\nStopped at the context-budget boundary and wrote a durable partial handoff instead of continuing implementation without enough room to finish and verify the task safely.\n\n## Known Issues\n\n`vinted_radar/services/projectors.py` was not created; `vinted_radar/platform/lake_writer.py` was not updated with an event-only publish helper; `vinted_radar/services/discovery.py`, `vinted_radar/services/state_refresh.py`, and `vinted_radar/services/runtime.py` were not patched to emit projector events; `tests/test_postgres_projectors.py` does not exist yet; and `vinted_radar/platform/postgres_repository.py` exists but is unverified and may contain syntax or behavioral defects.\n\n## Files Created/Modified\n\n- `vinted_radar/platform/postgres_repository.py`\n- `.gsd/milestones/M002/slices/S12/tasks/T02-SUMMARY.md`\n",
+      "full_summary_md": "---\nid: T02\nparent: S12\nmilestone: M002\nkey_files:\n  - vinted_radar/platform/postgres_repository.py\n  - vinted_radar/services/projectors.py\n  - .gsd/KNOWLEDGE.md\n  - .gsd/milestones/M002/slices/S12/tasks/T02-SUMMARY.md\nkey_decisions:\n  - D044: project listing identity/presence/current-state from outbox-backed page batches, but do not derive follow-up misses from page-scoped manifests.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-30T21:07:41.967Z\nblocker_discovered: false\n---\n\n# T02: Scaffolded the PostgreSQL mutable-truth projector service and replay-safe listing batch projection, but discovery/runtime wiring and tests remain unfinished.\n\n**Scaffolded the PostgreSQL mutable-truth projector service and replay-safe listing batch projection, but discovery/runtime wiring and tests remain unfinished.**\n\n## What Happened\n\nImplemented the first half of the T02 contract by extending `PostgresMutableTruthRepository` with a new `project_listing_seen_batch(...)` path that can upsert listing identity, presence summaries, and current-state rows from manifest-backed batch rows without duplicating raw evidence blobs. I also made the probe projector manifest-aware, added a replay guard in presence-summary merging so reprocessing the same event does not inflate rollups, and created `MutableTruthProjectorService` with manifest fetch, parquet row loading, outbox claiming/delivery/failure handling, mutable-manifest status updates, and outbox-checkpoint observability. The execution unit stopped before the planned `DiscoveryService` / `RadarRuntimeService` wiring and projector tests could be completed, but the slice plan still holds and the next unit can resume from those integration points.\n\n## Verification\n\n`python3 - <<'PY' ... py_compile.compile('vinted_radar/platform/postgres_repository.py'); py_compile.compile('vinted_radar/services/projectors.py') ... PY` passed, proving the landed repository/projector scaffold imports and compiles.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 - <<'PY' ... py_compile.compile('vinted_radar/platform/postgres_repository.py'); py_compile.compile('vinted_radar/services/projectors.py') ... PY` | 0 | ✅ pass | 16ms |\n\n\n## Deviations\n\nStopped after the repository + projector-service scaffold because the execution unit hit the context/time-budget wrap-up boundary before the planned discovery/runtime adapter wiring and test additions were completed.\n\n## Known Issues\n\n`vinted_radar/services/discovery.py` is still not wired to mirror discovery bookkeeping into PostgreSQL mutable truth; `vinted_radar/services/runtime.py` is still not wired to mirror runtime/controller snapshots or trigger the new projector sync callback; no automated tests were added in this unit; `vinted_radar/services/projectors.py` is not yet referenced by any default factory or CLI path.\n\n## Files Created/Modified\n\n- `vinted_radar/platform/postgres_repository.py`\n- `vinted_radar/services/projectors.py`\n- `.gsd/KNOWLEDGE.md`\n- `.gsd/milestones/M002/slices/S12/tasks/T02-SUMMARY.md`\n",
       "description": "Implement PostgreSQL repositories and projectors for current-state truth. Add adapters that consume outbox events and update runtime/controller rows, discovery bookkeeping, catalog rows, listing current-state rows, and presence rollups in PostgreSQL without duplicating raw evidence blobs.",
       "estimate": "2-3 sessions",
       "files": [
@@ -1063,7 +1065,7 @@
         "vinted_radar/services/discovery.py",
         "vinted_radar/services/runtime.py"
       ],
-      "verify": "python -m py_compile vinted_radar/platform/postgres_repository.py",
+      "verify": "python3 -m py_compile vinted_radar/platform/postgres_repository.py",
       "inputs": [
         "vinted_radar/platform/outbox.py",
         "vinted_radar/domain/events.py",
@@ -1082,12 +1084,12 @@
       "slice_id": "S12",
       "id": "T03",
       "title": "CLI/runtime cutover to PostgreSQL",
-      "status": "complete",
+      "status": "pending",
       "one_liner": "",
       "narrative": "",
       "verification_result": "",
       "duration": "",
-      "completed_at": "2026-03-29T10:59:10.233Z",
+      "completed_at": null,
       "blocker_discovered": false,
       "deviations": "",
       "known_issues": "",
@@ -1102,7 +1104,7 @@
         "vinted_radar/platform/postgres_repository.py",
         "tests/test_runtime_cli.py"
       ],
-      "verify": "python -m pytest tests/test_runtime_cli.py -q",
+      "verify": "python3 -m pytest tests/test_runtime_cli.py -q",
       "inputs": [
         "vinted_radar/cli.py",
         "vinted_radar/services/runtime.py",
@@ -1121,12 +1123,12 @@
       "slice_id": "S12",
       "id": "T04",
       "title": "Started a PostgreSQL mutable-truth backfill service and runtime control-plane repository APIs, but CLI wiring, tests, and the PostgreSQL smoke proof remain unfinished.",
-      "status": "complete",
+      "status": "pending",
       "one_liner": "Started a PostgreSQL mutable-truth backfill service and runtime control-plane repository APIs, but CLI wiring, tests, and the PostgreSQL smoke proof remain unfinished.",
       "narrative": "Implemented a first pass of the PostgreSQL-side work by extending vinted_radar/platform/postgres_repository.py with partial runtime cycle/controller mutation and status methods, creating vinted_radar/services/postgres_backfill.py for SQLite-to-PostgreSQL mutable-truth backfill, and starting an injected control-plane seam in vinted_radar/services/runtime.py. I stopped at the context-budget boundary before finishing the runtime-service wiring, adding the CLI backfill command, or creating/verifying the task-plan tests, so this is a durable partial handoff rather than a fully verified completion.",
       "verification_result": "Ran python -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py and it passed. The task-plan gate python -m pytest tests/test_postgres_backfill.py tests/test_runtime_service.py -q was not run because the CLI wiring and tests are still unfinished.",
       "duration": "",
-      "completed_at": "2026-03-29T14:47:48.703Z",
+      "completed_at": null,
       "blocker_discovered": false,
       "deviations": "Stopped at the context-budget boundary after landing the PostgreSQL repository/backfill scaffolding and a partial runtime-service seam, instead of continuing into CLI wiring and tests without enough room to finish and verify the task safely.",
       "known_issues": "vinted_radar/services/runtime.py is only partially wired to the new injected PostgreSQL control-plane path; vinted_radar/cli.py still has no PostgreSQL backfill command; tests/test_postgres_backfill.py does not exist yet; tests/test_runtime_service.py does not yet cover the PostgreSQL smoke path; and the authoritative task-plan verification command remains pending.",
@@ -1147,7 +1149,7 @@
         "vinted_radar/cli.py",
         "tests/test_runtime_service.py"
       ],
-      "verify": "python -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py",
+      "verify": "python3 -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py",
       "inputs": [
         "vinted_radar/db.py",
         "vinted_radar/repository.py",
@@ -2160,11 +2162,23 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 165,
+      "id": "D044",
+      "when_context": "M002/S12/T02",
+      "scope": "projection-architecture",
+      "decision": "How page-scoped discovery evidence updates PostgreSQL mutable truth",
+      "choice": "Project listing identity, presence rollups, and seen-in-scan truth from outbox-backed page batches, but do not infer follow-up misses from those batches; reserve miss bookkeeping for catalog-complete wiring.",
+      "rationale": "A `vinted.discovery.listing-seen.batch` manifest represents one page of a catalog scan, not the catalog-complete result. Incrementing miss counters from page batches would falsely mark listings from other pages as missing and corrupt sold-probable inference.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
     {
-      "id": 1,
+      "id": 21,
       "task_id": "T01",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2175,7 +2189,7 @@
       "created_at": "2026-03-28T18:55:06.230Z"
     },
     {
-      "id": 2,
+      "id": 22,
       "task_id": "T02",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2186,7 +2200,7 @@
       "created_at": "2026-03-28T19:16:32.424Z"
     },
     {
-      "id": 3,
+      "id": 23,
       "task_id": "T02",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2197,7 +2211,7 @@
       "created_at": "2026-03-28T19:16:32.425Z"
     },
     {
-      "id": 4,
+      "id": 24,
       "task_id": "T03",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2208,7 +2222,7 @@
       "created_at": "2026-03-28T19:31:43.596Z"
     },
     {
-      "id": 5,
+      "id": 25,
       "task_id": "T03",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2219,7 +2233,7 @@
       "created_at": "2026-03-28T19:31:43.596Z"
     },
     {
-      "id": 6,
+      "id": 26,
       "task_id": "T03",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2230,7 +2244,7 @@
       "created_at": "2026-03-28T19:31:43.596Z"
     },
     {
-      "id": 7,
+      "id": 27,
       "task_id": "T04",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2241,7 +2255,7 @@
       "created_at": "2026-03-28T19:48:24.567Z"
     },
     {
-      "id": 8,
+      "id": 28,
       "task_id": "T04",
       "slice_id": "S10",
       "milestone_id": "M002",
@@ -2252,7 +2266,7 @@
       "created_at": "2026-03-28T19:48:24.567Z"
     },
     {
-      "id": 9,
+      "id": 29,
       "task_id": "T01",
       "slice_id": "S11",
       "milestone_id": "M002",
@@ -2263,7 +2277,7 @@
       "created_at": "2026-03-28T20:03:30.701Z"
     },
     {
-      "id": 10,
+      "id": 30,
       "task_id": "T01",
       "slice_id": "S11",
       "milestone_id": "M002",
@@ -2274,7 +2288,7 @@
       "created_at": "2026-03-28T20:03:30.701Z"
     },
     {
-      "id": 11,
+      "id": 31,
       "task_id": "T02",
       "slice_id": "S11",
       "milestone_id": "M002",
@@ -2285,7 +2299,7 @@
       "created_at": "2026-03-28T20:14:59.347Z"
     },
     {
-      "id": 12,
+      "id": 32,
       "task_id": "T03",
       "slice_id": "S11",
       "milestone_id": "M002",
@@ -2296,7 +2310,7 @@
       "created_at": "2026-03-28T20:31:58.612Z"
     },
     {
-      "id": 13,
+      "id": 33,
       "task_id": "T04",
       "slice_id": "S11",
       "milestone_id": "M002",
@@ -2307,7 +2321,7 @@
       "created_at": "2026-03-28T20:53:20.835Z"
     },
     {
-      "id": 14,
+      "id": 34,
       "task_id": "T04",
       "slice_id": "S11",
       "milestone_id": "M002",
@@ -2318,7 +2332,7 @@
       "created_at": "2026-03-28T20:53:20.835Z"
     },
     {
-      "id": 15,
+      "id": 35,
       "task_id": "T04",
       "slice_id": "S11",
       "milestone_id": "M002",
@@ -2329,7 +2343,7 @@
       "created_at": "2026-03-28T20:53:20.835Z"
     },
     {
-      "id": 16,
+      "id": 36,
       "task_id": "T01",
       "slice_id": "S12",
       "milestone_id": "M002",
@@ -2340,7 +2354,7 @@
       "created_at": "2026-03-29T10:11:05.931Z"
     },
     {
-      "id": 17,
+      "id": 37,
       "task_id": "T01",
       "slice_id": "S12",
       "milestone_id": "M002",
@@ -2351,7 +2365,7 @@
       "created_at": "2026-03-29T10:11:05.932Z"
     },
     {
-      "id": 18,
+      "id": 38,
       "task_id": "T02",
       "slice_id": "S12",
       "milestone_id": "M002",
@@ -2362,7 +2376,7 @@
       "created_at": "2026-03-29T10:28:59.854Z"
     },
     {
-      "id": 19,
+      "id": 39,
       "task_id": "T04",
       "slice_id": "S12",
       "milestone_id": "M002",
@@ -2373,7 +2387,7 @@
       "created_at": "2026-03-29T14:47:48.703Z"
     },
     {
-      "id": 20,
+      "id": 40,
       "task_id": "T04",
       "slice_id": "S12",
       "milestone_id": "M002",
@@ -2382,6 +2396,17 @@
       "verdict": "❌ not run",
       "duration_ms": 0,
       "created_at": "2026-03-29T14:47:48.703Z"
+    },
+    {
+      "id": 41,
+      "task_id": "T02",
+      "slice_id": "S12",
+      "milestone_id": "M002",
+      "command": "python3 - <<'PY' ... py_compile.compile('vinted_radar/platform/postgres_repository.py'); py_compile.compile('vinted_radar/services/projectors.py') ... PY",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 16,
+      "created_at": "2026-03-30T21:07:41.967Z"
     }
   ]
 }

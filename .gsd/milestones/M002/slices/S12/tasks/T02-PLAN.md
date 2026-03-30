@@ -21,4 +21,4 @@ Implement PostgreSQL repositories and projectors for current-state truth. Add ad
 
 ## Verification
 
-python -m py_compile vinted_radar/platform/postgres_repository.py
+python3 -m py_compile vinted_radar/platform/postgres_repository.py
