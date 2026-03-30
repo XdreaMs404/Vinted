@@ -2,17 +2,15 @@
   "schemaVersion": 1,
   "taskId": "T03",
   "unitId": "M002/S12/T03",
-  "timestamp": 1774814316290,
+  "timestamp": 1774905905164,
   "passed": true,
-  "discoverySource": "task-plan",
+  "discoverySource": "preference",
   "checks": [
     {
-      "command": "python -m pytest tests/test_runtime_cli.py -q",
+      "command": "python3 -m pytest tests/test_runtime_cli.py tests/test_runtime_service.py tests/test_postgres_schema.py -q",
       "exitCode": 0,
-      "durationMs": 1705,
+      "durationMs": 1263,
       "verdict": "pass"
     }
-  ],
-  "retryAttempt": 1,
-  "maxRetries": 1
+  ]
 }
