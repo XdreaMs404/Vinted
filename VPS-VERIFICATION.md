@@ -7,6 +7,12 @@ This repo now has two useful verification levels:
 1. **short checks** — fast smoke checks after deploy, restart, config change, or cutover-flag change
 2. **long proof** — a fuller end-to-end M002 cutover proof when you want strong operational confidence
 
+You can run those sequences manually from this document, or use the repo helper script:
+
+```bash
+scripts/run_vps_verification.sh --help
+```
+
 The remaining M002 validation note came from the fact that the full cutover proof was not rerun in a Docker-capable environment during local closeout. The VPS is the right place to do that.
 
 ---
