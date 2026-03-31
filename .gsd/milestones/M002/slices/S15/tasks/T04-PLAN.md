@@ -1,24 +1,26 @@
 ---
 estimated_steps: 1
-estimated_files: 4
+estimated_files: 7
 skills_used: []
 ---
 
-# T04: Operational closure + final acceptance
+# T04: Truthful change-fact derivation + replay path
 
-Close the migration operationally. Remove heavyweight SQLite history tables from the live runtime path, document the final operating model, and run one last integrated acceptance proving bounded storage, reconciliation health, dashboard/runtime behavior, and evidence drill-down on the new platform.
+Implement the missing change-fact pipeline instead of approximating marts at query time. Extend the live cutover and historical replay paths so listing-seen/state-refresh batches deterministically produce populated change facts for price deltas, state transitions, engagement shifts, and follow-up miss transitions, then land them in the existing ClickHouse change tables with idempotent replay semantics.
 
 ## Inputs
 
-- `README.md`
-- `vinted_radar/platform/health.py`
-- `vinted_radar/query/feature_marts.py`
+- `vinted_radar/platform/clickhouse_ingest.py`
+- `vinted_radar/services/projectors.py`
+- `vinted_radar/platform/postgres_repository.py`
+- `vinted_radar/services/full_backfill.py`
+- `infra/clickhouse/migrations/V002__serving_warehouse.sql`
 
 ## Expected Output
 
-- `Final operating model docs`
-- `integrated platform acceptance proof`
+- `populated live/backfilled change-fact path`
+- `idempotent replay coverage for change facts`
 
 ## Verification
 
-python -m pytest tests/test_integrated_platform_acceptance.py -q
+python -m pytest tests/test_clickhouse_ingest.py tests/test_full_backfill.py -q

@@ -17,7 +17,15 @@
   - Files: vinted_radar/query/feature_marts.py, infra/clickhouse/, vinted_radar/cli.py, tests/test_feature_marts.py
   - Verify: python -m pytest tests/test_feature_marts.py -q
   - Blocker: The current warehouse can support listing/day and segment/day style marts from existing rollups, but it cannot truthfully support warehouse-materialized price-change and state-transition marts until a populated change-event source exists or the task is explicitly re-scoped.
-- [ ] **T04: Operational closure + final acceptance** — Close the migration operationally. Remove heavyweight SQLite history tables from the live runtime path, document the final operating model, and run one last integrated acceptance proving bounded storage, reconciliation health, dashboard/runtime behavior, and evidence drill-down on the new platform.
+- [ ] **T04: Truthful change-fact derivation + replay path** — Implement the missing change-fact pipeline instead of approximating marts at query time. Extend the live cutover and historical replay paths so listing-seen/state-refresh batches deterministically produce populated change facts for price deltas, state transitions, engagement shifts, and follow-up miss transitions, then land them in the existing ClickHouse change tables with idempotent replay semantics.
+  - Estimate: 2-3 sessions
+  - Files: vinted_radar/platform/clickhouse_ingest.py, vinted_radar/services/projectors.py, vinted_radar/platform/postgres_repository.py, vinted_radar/services/full_backfill.py, infra/clickhouse/migrations/V002__serving_warehouse.sql, tests/test_clickhouse_ingest.py, tests/test_full_backfill.py
+  - Verify: python -m pytest tests/test_clickhouse_ingest.py tests/test_full_backfill.py -q
+- [ ] **T05: AI-ready feature marts on trustworthy warehouse change facts** — Build the deferred AI-ready marts only after the change-fact source exists. Materialize/export listing-day, segment-day, price-change, state-transition, and evidence-pack outputs from ClickHouse rollups plus populated change facts, and keep manifest/window traceability explicit so downstream grounded-intelligence work does not need raw-event rescans.
+  - Estimate: 2 sessions
+  - Files: vinted_radar/query/feature_marts.py, vinted_radar/cli.py, vinted_radar/platform/health.py, infra/clickhouse/migrations/V002__serving_warehouse.sql, tests/test_feature_marts.py
+  - Verify: python -m pytest tests/test_feature_marts.py -q
+- [ ] **T06: Operational closure + final acceptance against the corrected warehouse contract** — Close S15 only after the repaired warehouse contract is proven end to end. Update operator docs and verification so lifecycle posture, reconciliation health, change-fact freshness, feature-mart evidence drill-down, and the remaining SQLite hot-path removal are all exercised by the final acceptance proof.
   - Estimate: 1-2 sessions
-  - Files: README.md, vinted_radar/cli.py, scripts/verify_cutover_stack.py, tests/test_integrated_platform_acceptance.py
-  - Verify: python -m pytest tests/test_integrated_platform_acceptance.py -q
+  - Files: README.md, scripts/verify_cutover_stack.py, vinted_radar/services/platform_audit.py, vinted_radar/platform/health.py, tests/test_platform_audit.py, tests/test_cutover_smoke.py
+  - Verify: python -m pytest tests/test_platform_audit.py tests/test_cutover_smoke.py -q
