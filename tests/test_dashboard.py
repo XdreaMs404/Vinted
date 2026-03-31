@@ -484,6 +484,86 @@ def test_runtime_payload_surfaces_controller_truth_separately_from_latest_cycle(
 
 
 
+def test_dashboard_application_uses_control_plane_repository_for_polyglot_runtime_surfaces(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    class FakeControlPlaneRepository:
+        def runtime_status(self, *, limit: int = 10, now: str | None = None) -> dict[str, object]:
+            return {
+                "generated_at": now or "2026-03-19T12:00:00+00:00",
+                "db_path": "postgres",
+                "controller": {"status": "paused", "phase": "paused"},
+                "status": "paused",
+                "phase": "paused",
+                "mode": "continuous",
+                "updated_at": "2026-03-19T11:59:00+00:00",
+                "paused_at": "2026-03-19T11:50:00+00:00",
+                "next_resume_at": None,
+                "elapsed_pause_seconds": 600.0,
+                "next_resume_in_seconds": None,
+                "last_error": None,
+                "last_error_at": None,
+                "requested_action": "none",
+                "requested_at": None,
+                "active_cycle_id": None,
+                "latest_cycle_id": "pg-cycle-1",
+                "heartbeat": {"age_seconds": 5.0, "stale_after_seconds": 120.0, "is_stale": False},
+                "latest_cycle": {
+                    "cycle_id": "pg-cycle-1",
+                    "mode": "continuous",
+                    "status": "completed",
+                    "phase": "completed",
+                    "started_at": "2026-03-19T11:45:00+00:00",
+                    "finished_at": "2026-03-19T11:50:00+00:00",
+                    "discovery_run_id": "run-pg-1",
+                    "state_probed_count": 1,
+                    "state_probe_limit": 2,
+                    "tracked_listings": 4,
+                    "state_refresh_summary": {
+                        "status": "healthy",
+                        "direct_signal_count": 1,
+                        "inconclusive_probe_count": 0,
+                        "degraded_probe_count": 0,
+                    },
+                },
+                "recent_cycles": [],
+                "latest_failure": None,
+                "recent_failures": [],
+                "acquisition": {"status": "healthy", "reasons": [], "latest_state_refresh_summary": {}},
+                "totals": {"total_cycles": 1, "completed_cycles": 1, "failed_cycles": 0, "running_cycles": 0, "interrupted_cycles": 0},
+            }
+
+    app = DashboardApplication(
+        db_path,
+        now="2026-03-19T12:00:00+00:00",
+        clickhouse_client=make_clickhouse_product_client(),
+        clickhouse_database="vinted_radar",
+        enable_polyglot_reads=True,
+        control_plane_repository=FakeControlPlaneRepository(),
+    )
+
+    dashboard_status, dashboard_body, _ = _call_app(app, "/api/dashboard")
+    runtime_status, runtime_body, _ = _call_app(app, "/api/runtime")
+    health_status, health_body, _ = _call_app(app, "/health")
+
+    assert dashboard_status == "200 OK"
+    dashboard_payload = json.loads(dashboard_body)
+    assert dashboard_payload["summary"]["freshness"]["current_runtime_status"] == "paused"
+    assert dashboard_payload["summary"]["freshness"]["latest_runtime_cycle_status"] == "completed"
+
+    assert runtime_status == "200 OK"
+    runtime_payload = json.loads(runtime_body)
+    assert runtime_payload["status"] == "paused"
+    assert runtime_payload["latest_cycle"]["cycle_id"] == "pg-cycle-1"
+
+    assert health_status == "200 OK"
+    health_payload = json.loads(health_body)
+    assert health_payload["current_runtime_status"] == "paused"
+    assert health_payload["latest_runtime_cycle"]["cycle_id"] == "pg-cycle-1"
+
+
+
 def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard.db"
     _seed_dashboard_db(db_path)

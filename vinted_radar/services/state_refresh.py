@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Callable
 
-from vinted_radar.domain.events import EventEnvelope
+from vinted_radar.domain.events import EventEnvelope, deterministic_uuid
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.parsers.item_page import parse_item_page_probe
+from vinted_radar.platform.config import load_platform_config
 from vinted_radar.platform.lake_writer import CollectorEvidencePublisher
+from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.repository import RadarRepository
 from vinted_radar.state_machine import STATE_ORDER, evaluate_listing_state, summarize_state_evaluations
 
@@ -29,11 +31,13 @@ class StateRefreshService:
         *,
         now_provider: Callable[[], str] | None = None,
         evidence_publisher: CollectorEvidencePublisher | None = None,
+        mutable_truth_repository: object | None = None,
     ) -> None:
         self.repository = repository
         self.http_client = http_client
         self.now_provider = now_provider or _utc_now
         self.evidence_publisher = evidence_publisher
+        self.mutable_truth_repository = mutable_truth_repository
 
     def close(self) -> None:
         self.repository.close()
@@ -45,6 +49,13 @@ class StateRefreshService:
                 pass
         if self.evidence_publisher is not None:
             self.evidence_publisher.close()
+        if self.mutable_truth_repository is not None:
+            mutable_truth_close = getattr(self.mutable_truth_repository, "close", None)
+            if callable(mutable_truth_close):
+                try:
+                    mutable_truth_close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def refresh(
         self,
@@ -136,6 +147,8 @@ class StateRefreshService:
         if probe_batch is not None:
             evidence_batches.append(probe_batch)
 
+        self._project_state_refresh_probes(reference_now=reference_now, probe_records=probe_records)
+
         if include_state_summary:
             refreshed_inputs = self.repository.listing_state_inputs(now=reference_now, listing_id=listing_id)
             evaluations = [evaluate_listing_state(input_row, now=reference_now) for input_row in refreshed_inputs]
@@ -153,6 +166,30 @@ class StateRefreshService:
             probed_listing_ids=probed_listing_ids,
             probe_summary=probe_summary,
             evidence_batches=tuple(evidence_batches),
+        )
+
+    def _project_state_refresh_probes(
+        self,
+        *,
+        reference_now: str,
+        probe_records: list[dict[str, object]],
+    ) -> None:
+        if not probe_records:
+            return
+        projector = self._mutable_truth_projector("project_state_refresh_probes")
+        if projector is None:
+            return
+        projector(
+            probe_rows=[dict(record) for record in probe_records],
+            projected_at=reference_now,
+            event_id=deterministic_uuid(
+                "mutable-truth.state-refresh.probes",
+                {
+                    "reference_now": reference_now,
+                    "probed_listing_ids": [int(record["listing_id"]) for record in probe_records],
+                    "probed_at": [str(record["probed_at"]) for record in probe_records],
+                },
+            ),
         )
 
     def _emit_probe_batch(
@@ -193,6 +230,15 @@ class StateRefreshService:
         )
         return None if emission is None else emission.as_dict()
 
+    def _mutable_truth_projector(self, method_name: str):
+        repository = self.mutable_truth_repository
+        if repository is None:
+            return None
+        projector = getattr(repository, method_name, None)
+        if not callable(projector):
+            return None
+        return projector
+
 
 def _skipped_state_summary(generated_at: str) -> dict[str, object]:
     return {
@@ -220,13 +266,18 @@ def build_default_state_refresh_service(
     request_delay: float,
     proxies: list[str] | None = None,
 ) -> StateRefreshService:
+    config = load_platform_config()
     repository = RadarRepository(db_path)
     http_client = VintedHttpClient(timeout_seconds=timeout_seconds, request_delay=request_delay, proxies=proxies)
-    evidence_publisher = CollectorEvidencePublisher.from_environment()
+    evidence_publisher = CollectorEvidencePublisher.from_environment(config=config)
+    mutable_truth_repository = None
+    if bool(getattr(config.cutover, "enable_postgres_writes", False) or getattr(config.cutover, "enable_polyglot_reads", False)):
+        mutable_truth_repository = PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
     return StateRefreshService(
         repository=repository,
         http_client=http_client,
         evidence_publisher=evidence_publisher,
+        mutable_truth_repository=mutable_truth_repository,
     )
 
 

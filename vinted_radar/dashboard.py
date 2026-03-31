@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 
 from vinted_radar.platform import load_platform_config, summarize_cutover_state
+from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import load_listing_score_detail
@@ -157,6 +158,7 @@ class DashboardApplication:
         clickhouse_client: object | None = None,
         clickhouse_database: str | None = None,
         enable_polyglot_reads: bool | None = None,
+        control_plane_repository: object | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.now = now
@@ -165,6 +167,7 @@ class DashboardApplication:
         self.clickhouse_client = clickhouse_client
         self.clickhouse_database = clickhouse_database
         self.enable_polyglot_reads = enable_polyglot_reads
+        self.control_plane_repository = control_plane_repository
 
     def __call__(self, environ: dict[str, Any], start_response) -> list[bytes]:
         route_context = self._request_route_context(environ)
@@ -291,21 +294,42 @@ class DashboardApplication:
                 yield self.query_backend_factory(repository)
                 return
 
+            created_control_plane_repository = None
+            config = None
+            use_polyglot_reads = False
+            if self.clickhouse_client is None or self.enable_polyglot_reads is not None:
+                config = load_platform_config()
+                use_polyglot_reads = (
+                    self.enable_polyglot_reads
+                    if self.enable_polyglot_reads is not None
+                    else bool(getattr(config.cutover, "enable_polyglot_reads", False))
+                )
+            control_plane_repository = self.control_plane_repository
+            if control_plane_repository is None and use_polyglot_reads and config is not None:
+                control_plane_repository = PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
+                created_control_plane_repository = control_plane_repository
+
             if self.clickhouse_client is not None:
                 database = self.clickhouse_database or load_platform_config().clickhouse.database
-                yield ClickHouseProductQueryAdapter(
-                    repository=repository,
-                    clickhouse_client=self.clickhouse_client,
-                    database=database,
-                )
+                try:
+                    yield ClickHouseProductQueryAdapter(
+                        repository=repository,
+                        clickhouse_client=self.clickhouse_client,
+                        database=database,
+                        control_plane_repository=control_plane_repository,
+                    )
+                finally:
+                    if created_control_plane_repository is not None:
+                        close = getattr(created_control_plane_repository, "close", None)
+                        if callable(close):
+                            close()
                 return
 
-            config = load_platform_config()
-            use_polyglot_reads = config.cutover.enable_polyglot_reads if self.enable_polyglot_reads is None else self.enable_polyglot_reads
             if not use_polyglot_reads:
                 yield repository
                 return
 
+            assert config is not None
             database = self.clickhouse_database or config.clickhouse.database
             client = _get_clickhouse_client(config, database=database)
             try:
@@ -313,11 +337,16 @@ class DashboardApplication:
                     repository=repository,
                     clickhouse_client=client,
                     database=database,
+                    control_plane_repository=control_plane_repository,
                 )
             finally:
                 close = getattr(client, "close", None)
                 if callable(close):
                     close()
+                if created_control_plane_repository is not None:
+                    control_plane_close = getattr(created_control_plane_repository, "close", None)
+                    if callable(control_plane_close):
+                        control_plane_close()
 
     def _request_route_context(self, environ: dict[str, Any]) -> RouteContext:
         if self.route_context.base_path or self.route_context.public_base_url:

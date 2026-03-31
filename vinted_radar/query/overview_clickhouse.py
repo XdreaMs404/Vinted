@@ -38,6 +38,7 @@ class ClickHouseProductQueryAdapter:
     repository: Any
     clickhouse_client: object
     database: str
+    control_plane_repository: Any | None = None
     overview_snapshot_source: str = "clickhouse.overview_snapshot"
     _state_input_cache: dict[tuple[str | None, int | None], list[dict[str, object]]] = field(default_factory=dict)
     _evaluated_cache: dict[str | None, list[dict[str, object]]] = field(default_factory=dict)
@@ -46,10 +47,20 @@ class ClickHouseProductQueryAdapter:
     def db_path(self) -> Path:
         return Path(self.repository.db_path)
 
+    @property
+    def connection(self):
+        return self.repository.connection
+
     def coverage_summary(self, run_id: str | None = None) -> dict[str, object] | None:
+        control_plane_repository = self._control_plane_repository("coverage_summary")
+        if control_plane_repository is not None:
+            return control_plane_repository.coverage_summary(run_id=run_id)
         return self.repository.coverage_summary(run_id=run_id)
 
     def runtime_status(self, *, limit: int = 10, now: str | None = None) -> dict[str, object]:
+        control_plane_repository = self._control_plane_repository("runtime_status")
+        if control_plane_repository is not None:
+            return control_plane_repository.runtime_status(limit=limit, now=now)
         return self.repository.runtime_status(limit=limit, now=now)
 
     def listing_state_inputs(self, *, now: str | None = None, listing_id: int | None = None) -> list[dict[str, object]]:
@@ -175,8 +186,8 @@ class ClickHouseProductQueryAdapter:
         bounded_limit = max(int(comparison_limit), 1)
         bounded_support_threshold = max(int(support_threshold), 1)
 
-        coverage = self.repository.coverage_summary()
-        runtime = self.repository.runtime_status(limit=5, now=generated_at)
+        coverage = self.coverage_summary()
+        runtime = self.runtime_status(limit=5, now=generated_at)
         controller = runtime.get("controller") if isinstance(runtime, dict) else None
         latest_cycle = runtime.get("latest_cycle") if isinstance(runtime, dict) else None
         recent_failures = [] if coverage is None else list(coverage.get("failures") or [])
@@ -293,6 +304,15 @@ class ClickHouseProductQueryAdapter:
         stored = [dict(item) for item in evaluated]
         self._evaluated_cache[cache_key] = stored
         return [dict(item) for item in stored]
+
+    def _control_plane_repository(self, method_name: str):
+        repository = self.control_plane_repository
+        if repository is None:
+            return None
+        method = getattr(repository, method_name, None)
+        if not callable(method):
+            return None
+        return repository
 
 
 def _presentational_fields(item: dict[str, object]) -> dict[str, object]:

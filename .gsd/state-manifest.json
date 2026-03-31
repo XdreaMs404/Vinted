@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T13:08:53.235Z",
+  "exported_at": "2026-03-31T13:32:24.434Z",
   "milestones": [
     {
       "id": "M001",
@@ -1474,19 +1474,32 @@
       "milestone_id": "M002",
       "slice_id": "S14",
       "id": "T03",
-      "title": "End-to-end application cutover",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Cut dashboard, runtime, CLI read paths, and live mutable-truth writes over to the PostgreSQL + ClickHouse platform stack with SQLite kept only as a fallback.",
+      "status": "complete",
+      "one_liner": "Cut dashboard, runtime, CLI read paths, and live mutable-truth writes over to the PostgreSQL + ClickHouse platform stack with SQLite kept only as a fallback.",
+      "narrative": "Finished the real application cutover instead of leaving only resume notes. Discovery now opens PostgreSQL mutable-truth projection whenever the platform path is active, and state refresh now projects probe rows directly into PostgreSQL while still emitting evidence batches. The ClickHouse product adapter now accepts a separate PostgreSQL control-plane repository so dashboard and CLI polyglot reads can keep ClickHouse for analytics/state-history while reading runtime/controller truth from PostgreSQL. Dashboard polyglot routes now thread that control-plane repository through /api/dashboard, /api/runtime, /runtime, and /health. CLI runtime commands now move to PostgreSQL whenever PostgreSQL writes are enabled, and the operator read commands that still bypassed the cutover stack now open the polyglot backend as well. Added focused regressions for dashboard control-plane reads, state-refresh mutable-truth projection, and runtime CLI control-plane injection.",
+      "verification_result": "Ran `python3 -m pytest tests/test_dashboard.py tests/test_runtime_service.py tests/test_state_refresh_service.py tests/test_runtime_cli.py -q` and it passed all 40 tests. The run proved the task’s required dashboard/runtime behavior plus the new dashboard control-plane regression, direct mutable-truth probe projection, and PostgreSQL runtime control-plane injection when platform writes are enabled.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T13:32:24.406Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Expanded verification beyond the task-plan minimum to include tests/test_state_refresh_service.py and tests/test_runtime_cli.py because the cutover changed live probe projection and runtime command wiring in addition to dashboard/runtime payloads. Also used python3 instead of python because the local shell exposes python3.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/query/overview_clickhouse.py",
+        "vinted_radar/dashboard.py",
+        "vinted_radar/cli.py",
+        "vinted_radar/services/discovery.py",
+        "vinted_radar/services/state_refresh.py",
+        "tests/test_dashboard.py",
+        "tests/test_state_refresh_service.py",
+        "tests/test_runtime_cli.py"
+      ],
+      "key_decisions": [
+        "Keep ClickHouse as the analytics backend but inject a separate PostgreSQL control-plane repository into the product query adapter for runtime and controller surfaces.",
+        "Treat PostgreSQL write activation as sufficient to move runtime control-plane commands onto PostgreSQL even before full polyglot reads are enabled.",
+        "Project state-refresh probe rows directly into PostgreSQL mutable truth instead of waiting for outbox replay so live item-state truth stays current during cutover."
+      ],
+      "full_summary_md": "---\nid: T03\nparent: S14\nmilestone: M002\nkey_files:\n  - vinted_radar/query/overview_clickhouse.py\n  - vinted_radar/dashboard.py\n  - vinted_radar/cli.py\n  - vinted_radar/services/discovery.py\n  - vinted_radar/services/state_refresh.py\n  - tests/test_dashboard.py\n  - tests/test_state_refresh_service.py\n  - tests/test_runtime_cli.py\nkey_decisions:\n  - Keep ClickHouse as the analytics backend but inject a separate PostgreSQL control-plane repository into the product query adapter for runtime and controller surfaces.\n  - Treat PostgreSQL write activation as sufficient to move runtime control-plane commands onto PostgreSQL even before full polyglot reads are enabled.\n  - Project state-refresh probe rows directly into PostgreSQL mutable truth instead of waiting for outbox replay so live item-state truth stays current during cutover.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T13:32:24.406Z\nblocker_discovered: false\n---\n\n# T03: Cut dashboard, runtime, CLI read paths, and live mutable-truth writes over to the PostgreSQL + ClickHouse platform stack with SQLite kept only as a fallback.\n\n**Cut dashboard, runtime, CLI read paths, and live mutable-truth writes over to the PostgreSQL + ClickHouse platform stack with SQLite kept only as a fallback.**\n\n## What Happened\n\nFinished the real application cutover instead of leaving only resume notes. Discovery now opens PostgreSQL mutable-truth projection whenever the platform path is active, and state refresh now projects probe rows directly into PostgreSQL while still emitting evidence batches. The ClickHouse product adapter now accepts a separate PostgreSQL control-plane repository so dashboard and CLI polyglot reads can keep ClickHouse for analytics/state-history while reading runtime/controller truth from PostgreSQL. Dashboard polyglot routes now thread that control-plane repository through /api/dashboard, /api/runtime, /runtime, and /health. CLI runtime commands now move to PostgreSQL whenever PostgreSQL writes are enabled, and the operator read commands that still bypassed the cutover stack now open the polyglot backend as well. Added focused regressions for dashboard control-plane reads, state-refresh mutable-truth projection, and runtime CLI control-plane injection.\n\n## Verification\n\nRan `python3 -m pytest tests/test_dashboard.py tests/test_runtime_service.py tests/test_state_refresh_service.py tests/test_runtime_cli.py -q` and it passed all 40 tests. The run proved the task’s required dashboard/runtime behavior plus the new dashboard control-plane regression, direct mutable-truth probe projection, and PostgreSQL runtime control-plane injection when platform writes are enabled.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m pytest tests/test_dashboard.py tests/test_runtime_service.py tests/test_state_refresh_service.py tests/test_runtime_cli.py -q` | 0 | ✅ pass | 1780ms |\n\n\n## Deviations\n\nExpanded verification beyond the task-plan minimum to include tests/test_state_refresh_service.py and tests/test_runtime_cli.py because the cutover changed live probe projection and runtime command wiring in addition to dashboard/runtime payloads. Also used python3 instead of python because the local shell exposes python3.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/query/overview_clickhouse.py`\n- `vinted_radar/dashboard.py`\n- `vinted_radar/cli.py`\n- `vinted_radar/services/discovery.py`\n- `vinted_radar/services/state_refresh.py`\n- `tests/test_dashboard.py`\n- `tests/test_state_refresh_service.py`\n- `tests/test_runtime_cli.py`\n",
       "description": "Cut product and operator reads/writes over to the new platform. Switch dashboard, CLI, runtime status, health, and collector write paths so the live app resolves mutable truth from PostgreSQL, analytics from ClickHouse, and proof from manifests/object storage, while preserving existing user-visible contracts and adding an emergency fallback path only as a temporary migration safety valve.",
       "estimate": "2-3 sessions",
       "files": [
@@ -2350,6 +2363,18 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 175,
+      "id": "D054",
+      "when_context": "M002 S14 T03",
+      "scope": "architecture",
+      "decision": "How dashboard and CLI polyglot reads should source runtime/control-plane state during the ClickHouse cutover",
+      "choice": "Keep ClickHouse as the analytics backend but inject a separate PostgreSQL control-plane repository into the product query adapter for runtime/status surfaces.",
+      "rationale": "Analytics/state-history reads now come from ClickHouse, while controller/runtime truth lives in PostgreSQL mutable truth; splitting those dependencies prevents the cutover UI and runtime commands from silently inheriting stale SQLite control-plane state.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -2726,6 +2751,17 @@
       "verdict": "✅ pass",
       "duration_ms": 927,
       "created_at": "2026-03-31T13:08:53.205Z"
+    },
+    {
+      "id": 57,
+      "task_id": "T03",
+      "slice_id": "S14",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_dashboard.py tests/test_runtime_service.py tests/test_state_refresh_service.py tests/test_runtime_cli.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1780,
+      "created_at": "2026-03-31T13:32:24.406Z"
     }
   ]
 }

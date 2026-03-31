@@ -874,3 +874,51 @@ def test_batch_cli_injects_polyglot_control_plane_repository_into_runtime_servic
     assert captured["control_plane_repository"] is fake_repository
     assert captured["mode"] == "batch"
     assert captured["closed"] is True
+
+
+
+def test_batch_cli_injects_control_plane_repository_when_postgres_writes_are_enabled(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    fake_repository = object()
+
+    class FakeRuntimeService:
+        def __init__(self, db_path: Path, *, control_plane_repository: object | None = None) -> None:
+            captured["db_path"] = db_path
+            captured["control_plane_repository"] = control_plane_repository
+
+        def run_cycle(self, options, *, mode: str):
+            captured["mode"] = mode
+            return RadarRuntimeCycleReport(
+                cycle_id="cycle-postgres-writes",
+                mode="batch",
+                status="completed",
+                phase="completed",
+                started_at="2026-03-20T10:00:00+00:00",
+                finished_at="2026-03-20T10:01:00+00:00",
+                discovery_run_id="run-postgres-writes",
+                state_probed_count=0,
+                tracked_listings=0,
+                freshness_counts={"first-pass-only": 0, "fresh-followup": 0, "aging-followup": 0, "stale-followup": 0},
+                last_error=None,
+                config={"state_refresh_limit": 10},
+                state_refresh_summary=None,
+            )
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    fake_config = SimpleNamespace(
+        cutover=SimpleNamespace(enable_postgres_writes=True, enable_polyglot_reads=False),
+        postgres=SimpleNamespace(dsn="postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"),
+    )
+    monkeypatch.setattr("vinted_radar.cli.load_platform_config", lambda: fake_config)
+    monkeypatch.setattr("vinted_radar.cli.PostgresMutableTruthRepository.from_dsn", lambda dsn: fake_repository)
+    monkeypatch.setattr("vinted_radar.cli.RadarRuntimeService", FakeRuntimeService)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["batch", "--db", str(tmp_path / "runtime.db"), "--request-delay", "0.0", "--timeout-seconds", "5.0"])
+
+    assert result.exit_code == 0
+    assert captured["control_plane_repository"] is fake_repository
+    assert captured["mode"] == "batch"
+    assert captured["closed"] is True

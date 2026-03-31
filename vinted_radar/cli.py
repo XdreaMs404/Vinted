@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
+from urllib.parse import urlsplit
 
 import typer
 
@@ -25,6 +26,7 @@ from vinted_radar.platform import (
 )
 from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
+from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
@@ -77,9 +79,22 @@ def _close_service(service: object) -> None:
         repository_close()
 
 
+def _platform_control_plane_active(config: object) -> bool:
+    cutover = getattr(config, "cutover", None)
+    return bool(
+        getattr(cutover, "enable_postgres_writes", False)
+        or getattr(cutover, "enable_polyglot_reads", False)
+    )
+
+
+def _platform_query_reads_active(config: object) -> bool:
+    cutover = getattr(config, "cutover", None)
+    return bool(getattr(cutover, "enable_polyglot_reads", False))
+
+
 def _build_polyglot_control_plane_repository() -> object | None:
     config = load_platform_config()
-    if not config.cutover.enable_polyglot_reads:
+    if not _platform_control_plane_active(config):
         return None
     return PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
 
@@ -103,6 +118,44 @@ def _open_runtime_control_plane_repository(db: Path):
         yield repository
     finally:
         _close_service(repository)
+
+
+@contextmanager
+def _open_product_query_backend(db: Path):
+    with RadarRepository(db) as repository:
+        config = load_platform_config()
+        if not _platform_query_reads_active(config):
+            yield repository
+            return
+
+        clickhouse_client = _get_clickhouse_client(config, database=config.clickhouse.database)
+        control_plane_repository = PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
+        try:
+            yield ClickHouseProductQueryAdapter(
+                repository=repository,
+                clickhouse_client=clickhouse_client,
+                database=config.clickhouse.database,
+                control_plane_repository=control_plane_repository,
+            )
+        finally:
+            clickhouse_close = getattr(clickhouse_client, "close", None)
+            if callable(clickhouse_close):
+                clickhouse_close()
+            _close_service(control_plane_repository)
+
+
+def _get_clickhouse_client(config, *, database: str):
+    import clickhouse_connect
+
+    parts = urlsplit(config.clickhouse.url)
+    return clickhouse_connect.get_client(
+        host=parts.hostname or "127.0.0.1",
+        port=parts.port or (8443 if parts.scheme == "https" else 8123),
+        username=config.clickhouse.username,
+        password=config.clickhouse.password,
+        database=database,
+        secure=parts.scheme == "https",
+    )
 
 
 @app.command()
@@ -966,7 +1019,7 @@ def history(
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic inspection."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
 ) -> None:
-    with RadarRepository(db) as repository:
+    with _open_product_query_backend(db) as repository:
         history_payload = repository.listing_history(listing_id, now=now, limit=limit)
 
     if history_payload is None:
@@ -1078,7 +1131,7 @@ def state_summary(
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic evaluation."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
 ) -> None:
-    with RadarRepository(db) as repository:
+    with _open_product_query_backend(db) as repository:
         inputs = repository.listing_state_inputs(now=now)
 
     if not inputs:
@@ -1106,7 +1159,7 @@ def state_detail(
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic evaluation."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
 ) -> None:
-    with RadarRepository(db) as repository:
+    with _open_product_query_backend(db) as repository:
         inputs = repository.listing_state_inputs(now=now, listing_id=listing_id)
 
     if not inputs:
@@ -1230,7 +1283,7 @@ def market_summary(
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic evaluation."),
     output_format: str = typer.Option("table", "--format", help="table or json."),
 ) -> None:
-    with RadarRepository(db) as repository:
+    with _open_product_query_backend(db) as repository:
         listing_scores = load_listing_scores(repository, now=now)
         summary = build_market_summary(listing_scores, repository, now=now, limit=limit)
 

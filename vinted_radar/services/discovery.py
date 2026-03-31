@@ -735,7 +735,7 @@ def build_default_service(
     )
     evidence_publisher = CollectorEvidencePublisher.from_environment(config=config)
     mutable_truth_repository = None
-    if config.cutover.enable_polyglot_reads:
+    if bool(getattr(config.cutover, "enable_postgres_writes", False) or getattr(config.cutover, "enable_polyglot_reads", False)):
         mutable_truth_repository = PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
     return DiscoveryService(
         repository=repository,

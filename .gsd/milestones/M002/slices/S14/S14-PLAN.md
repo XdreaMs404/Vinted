@@ -12,7 +12,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/services/reconciliation.py, vinted_radar/platform/health.py, vinted_radar/cli.py, tests/test_reconciliation.py
   - Verify: python -m pytest tests/test_reconciliation.py -q
-- [ ] **T03: End-to-end application cutover** — Cut product and operator reads/writes over to the new platform. Switch dashboard, CLI, runtime status, health, and collector write paths so the live app resolves mutable truth from PostgreSQL, analytics from ClickHouse, and proof from manifests/object storage, while preserving existing user-visible contracts and adding an emergency fallback path only as a temporary migration safety valve.
+- [x] **T03: Cut dashboard, runtime, CLI read paths, and live mutable-truth writes over to the PostgreSQL + ClickHouse platform stack with SQLite kept only as a fallback.** — Cut product and operator reads/writes over to the new platform. Switch dashboard, CLI, runtime status, health, and collector write paths so the live app resolves mutable truth from PostgreSQL, analytics from ClickHouse, and proof from manifests/object storage, while preserving existing user-visible contracts and adding an emergency fallback path only as a temporary migration safety valve.
   - Estimate: 2-3 sessions
   - Files: vinted_radar/dashboard.py, vinted_radar/cli.py, vinted_radar/services/discovery.py, vinted_radar/services/runtime.py, vinted_radar/platform/health.py, tests/test_dashboard.py, tests/test_runtime_service.py
   - Verify: python -m pytest tests/test_dashboard.py tests/test_runtime_service.py -q
