@@ -12,10 +12,11 @@
   - Estimate: 1-2 sessions
   - Files: vinted_radar/services/platform_audit.py, vinted_radar/platform/health.py, vinted_radar/cli.py, tests/test_platform_audit.py
   - Verify: python -m pytest tests/test_platform_audit.py -q
-- [ ] **T03: AI-ready feature + evidence marts** — Build AI-ready feature and evidence marts on top of the cut-over warehouse. Materialize listing/day, segment/day, price-change, state-transition, and evidence-pack style outputs that future grounded AI and product-level intelligence can consume without scanning raw events, while preserving traceability back to manifests and observed windows.
+- [x] **T03: Documented that S15/T03 is blocked because the current ClickHouse cutover path never populates change facts required for price-change and state-transition marts.** — Build AI-ready feature and evidence marts on top of the cut-over warehouse. Materialize listing/day, segment/day, price-change, state-transition, and evidence-pack style outputs that future grounded AI and product-level intelligence can consume without scanning raw events, while preserving traceability back to manifests and observed windows.
   - Estimate: 2-3 sessions
   - Files: vinted_radar/query/feature_marts.py, infra/clickhouse/, vinted_radar/cli.py, tests/test_feature_marts.py
   - Verify: python -m pytest tests/test_feature_marts.py -q
+  - Blocker: The current warehouse can support listing/day and segment/day style marts from existing rollups, but it cannot truthfully support warehouse-materialized price-change and state-transition marts until a populated change-event source exists or the task is explicitly re-scoped.
 - [ ] **T04: Operational closure + final acceptance** — Close the migration operationally. Remove heavyweight SQLite history tables from the live runtime path, document the final operating model, and run one last integrated acceptance proving bounded storage, reconciliation health, dashboard/runtime behavior, and evidence drill-down on the new platform.
   - Estimate: 1-2 sessions
   - Files: README.md, vinted_radar/cli.py, scripts/verify_cutover_stack.py, tests/test_integrated_platform_acceptance.py

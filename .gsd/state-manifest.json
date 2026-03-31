@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T15:02:27.846Z",
+  "exported_at": "2026-03-31T15:06:50.606Z",
   "milestones": [
     {
       "id": "M001",
@@ -1677,19 +1677,27 @@
       "milestone_id": "M002",
       "slice_id": "S15",
       "id": "T03",
-      "title": "AI-ready feature + evidence marts",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Documented that S15/T03 is blocked because the current ClickHouse cutover path never populates change facts required for price-change and state-transition marts.",
+      "status": "complete",
+      "one_liner": "Documented that S15/T03 is blocked because the current ClickHouse cutover path never populates change facts required for price-change and state-transition marts.",
+      "narrative": "I halted execution after validating a plan-level mismatch in the current warehouse contract. ClickHouse V002 defines `fact_listing_change_events` and `serving_listing_latest_change`, but the active cutover path only ingests listing-seen and probe batches: `vinted_radar/platform/clickhouse_ingest.py` maps `vinted.discovery.listing-seen.batch` to `fact_listing_seen_events` and `vinted.state-refresh.probe.batch` to `fact_listing_probe_events`, and `vinted_radar/services/projectors.py` likewise only projects listing-seen and probe batches into PostgreSQL mutable truth. No live producer, projector, or ingest path currently emits ClickHouse change events. That makes the written task invalid as stated for the price-change and state-transition mart outputs. I recorded the mismatch in `.gsd/KNOWLEDGE.md` and wrote a blocker-oriented task summary with concrete resume guidance instead of shipping an unplanned approximation.",
+      "verification_result": "No task-plan verification command was run. I stopped after proving that the current warehouse contract cannot support the planned price-change and state-transition marts truthfully because the change-fact tables are defined in schema but not populated by the active cutover pipeline.",
       "duration": "",
-      "completed_at": null,
-      "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "completed_at": "2026-03-31T15:06:50.578Z",
+      "blocker_discovered": true,
+      "deviations": "Stopped before implementation because local validation showed the current ClickHouse cutover path does not populate change facts, making the written mart contract invalid for price-change and state-transition outputs.",
+      "known_issues": "The current warehouse can support listing/day and segment/day style marts from existing rollups, but it cannot truthfully support warehouse-materialized price-change and state-transition marts until a populated change-event source exists or the task is explicitly re-scoped.",
+      "key_files": [
+        "infra/clickhouse/migrations/V002__serving_warehouse.sql",
+        "vinted_radar/platform/clickhouse_ingest.py",
+        "vinted_radar/services/projectors.py",
+        ".gsd/KNOWLEDGE.md",
+        ".gsd/milestones/M002/slices/S15/tasks/T03-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Treat the absence of any active change-fact projection/ingest path as a plan-level blocker for S15/T03 rather than shipping query-time approximations that would violate the intended warehouse-materialized contract."
+      ],
+      "full_summary_md": "---\nid: T03\nparent: S15\nmilestone: M002\nkey_files:\n  - infra/clickhouse/migrations/V002__serving_warehouse.sql\n  - vinted_radar/platform/clickhouse_ingest.py\n  - vinted_radar/services/projectors.py\n  - .gsd/KNOWLEDGE.md\n  - .gsd/milestones/M002/slices/S15/tasks/T03-SUMMARY.md\nkey_decisions:\n  - Treat the absence of any active change-fact projection/ingest path as a plan-level blocker for S15/T03 rather than shipping query-time approximations that would violate the intended warehouse-materialized contract.\nduration: \"\"\nverification_result: untested\ncompleted_at: 2026-03-31T15:06:50.578Z\nblocker_discovered: true\n---\n\n# T03: Documented that S15/T03 is blocked because the current ClickHouse cutover path never populates change facts required for price-change and state-transition marts.\n\n**Documented that S15/T03 is blocked because the current ClickHouse cutover path never populates change facts required for price-change and state-transition marts.**\n\n## What Happened\n\nI halted execution after validating a plan-level mismatch in the current warehouse contract. ClickHouse V002 defines `fact_listing_change_events` and `serving_listing_latest_change`, but the active cutover path only ingests listing-seen and probe batches: `vinted_radar/platform/clickhouse_ingest.py` maps `vinted.discovery.listing-seen.batch` to `fact_listing_seen_events` and `vinted.state-refresh.probe.batch` to `fact_listing_probe_events`, and `vinted_radar/services/projectors.py` likewise only projects listing-seen and probe batches into PostgreSQL mutable truth. No live producer, projector, or ingest path currently emits ClickHouse change events. That makes the written task invalid as stated for the price-change and state-transition mart outputs. I recorded the mismatch in `.gsd/KNOWLEDGE.md` and wrote a blocker-oriented task summary with concrete resume guidance instead of shipping an unplanned approximation.\n\n## Verification\n\nNo task-plan verification command was run. I stopped after proving that the current warehouse contract cannot support the planned price-change and state-transition marts truthfully because the change-fact tables are defined in schema but not populated by the active cutover pipeline.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| — | No verification commands discovered | — | — | — |\n\n\n## Deviations\n\nStopped before implementation because local validation showed the current ClickHouse cutover path does not populate change facts, making the written mart contract invalid for price-change and state-transition outputs.\n\n## Known Issues\n\nThe current warehouse can support listing/day and segment/day style marts from existing rollups, but it cannot truthfully support warehouse-materialized price-change and state-transition marts until a populated change-event source exists or the task is explicitly re-scoped.\n\n## Files Created/Modified\n\n- `infra/clickhouse/migrations/V002__serving_warehouse.sql`\n- `vinted_radar/platform/clickhouse_ingest.py`\n- `vinted_radar/services/projectors.py`\n- `.gsd/KNOWLEDGE.md`\n- `.gsd/milestones/M002/slices/S15/tasks/T03-SUMMARY.md`\n",
       "description": "Build AI-ready feature and evidence marts on top of the cut-over warehouse. Materialize listing/day, segment/day, price-change, state-transition, and evidence-pack style outputs that future grounded AI and product-level intelligence can consume without scanning raw events, while preserving traceability back to manifests and observed windows.",
       "estimate": "2-3 sessions",
       "files": [
