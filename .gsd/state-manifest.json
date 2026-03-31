@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T11:27:22.108Z",
+  "exported_at": "2026-03-31T11:40:34.466Z",
   "milestones": [
     {
       "id": "M001",
@@ -1328,19 +1328,27 @@
       "milestone_id": "M002",
       "slice_id": "S13",
       "id": "T04",
-      "title": "Analytical parity + route proof",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added ClickHouse parity tests and a reusable route verifier, and fixed dashboard probe rendering so overview, explorer, and detail stay cutover-consistent.",
+      "status": "complete",
+      "one_liner": "Added ClickHouse parity tests and a reusable route verifier, and fixed dashboard probe rendering so overview, explorer, and detail stay cutover-consistent.",
+      "narrative": "Added ClickHouse parity coverage for representative overview, explorer, and listing-detail payloads against the SQLite-era repository contract, plus a reusable route-proof verifier that starts temporary repository and ClickHouse-backed dashboard servers, checks dashboard/explorer/detail/health parity, and records route latency. Fixed dashboard explorer/overview serialization so nested latest_probe evidence from the ClickHouse adapter renders the same user-visible probe state as the flat repository row shape, then recorded that cutover rule in project knowledge.",
+      "verification_result": "Ran python3 -m py_compile on the touched files, ran the task-level parity suite with python3 -m pytest tests/test_clickhouse_parity.py -q, and then ran the full slice verification sweep across tests/test_clickhouse_schema.py, tests/test_clickhouse_ingest.py, tests/test_clickhouse_queries.py, tests/test_dashboard.py, and tests/test_clickhouse_parity.py. All checks passed, including the end-to-end route-proof coverage inside the new parity suite.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T11:40:34.442Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Used python3 instead of python because this shell does not expose a python alias. No slice-plan invalidation.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/dashboard.py",
+        "scripts/verify_clickhouse_routes.py",
+        "tests/test_clickhouse_parity.py",
+        ".gsd/KNOWLEDGE.md",
+        ".gsd/milestones/M002/slices/S13/tasks/T04-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "D052: normalize probe presentation at the dashboard serialization and route-proof layer instead of forcing every backend to emit the repository’s flat row shape."
+      ],
+      "full_summary_md": "---\nid: T04\nparent: S13\nmilestone: M002\nkey_files:\n  - vinted_radar/dashboard.py\n  - scripts/verify_clickhouse_routes.py\n  - tests/test_clickhouse_parity.py\n  - .gsd/KNOWLEDGE.md\n  - .gsd/milestones/M002/slices/S13/tasks/T04-SUMMARY.md\nkey_decisions:\n  - D052: normalize probe presentation at the dashboard serialization and route-proof layer instead of forcing every backend to emit the repository’s flat row shape.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T11:40:34.443Z\nblocker_discovered: false\n---\n\n# T04: Added ClickHouse parity tests and a reusable route verifier, and fixed dashboard probe rendering so overview, explorer, and detail stay cutover-consistent.\n\n**Added ClickHouse parity tests and a reusable route verifier, and fixed dashboard probe rendering so overview, explorer, and detail stay cutover-consistent.**\n\n## What Happened\n\nAdded ClickHouse parity coverage for representative overview, explorer, and listing-detail payloads against the SQLite-era repository contract, plus a reusable route-proof verifier that starts temporary repository and ClickHouse-backed dashboard servers, checks dashboard/explorer/detail/health parity, and records route latency. Fixed dashboard explorer/overview serialization so nested latest_probe evidence from the ClickHouse adapter renders the same user-visible probe state as the flat repository row shape, then recorded that cutover rule in project knowledge.\n\n## Verification\n\nRan python3 -m py_compile on the touched files, ran the task-level parity suite with python3 -m pytest tests/test_clickhouse_parity.py -q, and then ran the full slice verification sweep across tests/test_clickhouse_schema.py, tests/test_clickhouse_ingest.py, tests/test_clickhouse_queries.py, tests/test_dashboard.py, and tests/test_clickhouse_parity.py. All checks passed, including the end-to-end route-proof coverage inside the new parity suite.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m py_compile vinted_radar/dashboard.py scripts/verify_clickhouse_routes.py tests/test_clickhouse_parity.py` | 0 | ✅ pass | 137ms |\n| 2 | `python3 -m pytest tests/test_clickhouse_parity.py -q` | 0 | ✅ pass | 1632ms |\n| 3 | `python3 -m pytest tests/test_clickhouse_schema.py tests/test_clickhouse_ingest.py tests/test_clickhouse_queries.py tests/test_dashboard.py tests/test_clickhouse_parity.py -q` | 0 | ✅ pass | 2954ms |\n\n\n## Deviations\n\nUsed python3 instead of python because this shell does not expose a python alias. No slice-plan invalidation.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/dashboard.py`\n- `scripts/verify_clickhouse_routes.py`\n- `tests/test_clickhouse_parity.py`\n- `.gsd/KNOWLEDGE.md`\n- `.gsd/milestones/M002/slices/S13/tasks/T04-SUMMARY.md`\n",
       "description": "Prove analytical correctness and performance on the new boundary. Add parity/reconciliation checks between representative SQLite-era outputs and ClickHouse marts during migration, then run focused dashboard/explorer/detail route verification so the cutover path has both correctness and latency evidence.",
       "estimate": "1-2 sessions",
       "files": [
@@ -2298,6 +2306,18 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 173,
+      "id": "D052",
+      "when_context": "M002/S13/T04",
+      "scope": "architecture",
+      "decision": "How dashboard route parity should handle backend-specific row shapes during SQLite→ClickHouse cutover",
+      "choice": "Normalize probe presentation at the dashboard serialization and route-proof layer instead of forcing every backend to emit the repository’s flat row shape.",
+      "rationale": "The SQLite explorer page exposes flat latest_probe_* columns while the ClickHouse adapter naturally preserves nested latest_probe evidence. Normalizing the public payload boundary keeps overview/explorer/detail parity and route proof stable without coupling every analytical backend to one internal row layout.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -2619,6 +2639,39 @@
       "verdict": "✅ pass",
       "duration_ms": 850,
       "created_at": "2026-03-31T11:27:22.081Z"
+    },
+    {
+      "id": 52,
+      "task_id": "T04",
+      "slice_id": "S13",
+      "milestone_id": "M002",
+      "command": "python3 -m py_compile vinted_radar/dashboard.py scripts/verify_clickhouse_routes.py tests/test_clickhouse_parity.py",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 137,
+      "created_at": "2026-03-31T11:40:34.442Z"
+    },
+    {
+      "id": 53,
+      "task_id": "T04",
+      "slice_id": "S13",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_clickhouse_parity.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1632,
+      "created_at": "2026-03-31T11:40:34.442Z"
+    },
+    {
+      "id": 54,
+      "task_id": "T04",
+      "slice_id": "S13",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_clickhouse_schema.py tests/test_clickhouse_ingest.py tests/test_clickhouse_queries.py tests/test_dashboard.py tests/test_clickhouse_parity.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 2954,
+      "created_at": "2026-03-31T11:40:34.442Z"
     }
   ]
 }

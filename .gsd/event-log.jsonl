@@ -30,3 +30,4 @@
 {"cmd":"reopen-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T03","reason":"Reopen incomplete S13 task after recovery-summary drift cleanup"},"ts":"2026-03-31T08:15:00.000Z","actor":"agent","actor_name":"pi","trigger_reason":"state-cleanup"}
 {"cmd":"reopen-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T04","reason":"Reopen incomplete S13 task after recovery-summary drift cleanup"},"ts":"2026-03-31T08:15:01.000Z","actor":"agent","actor_name":"pi","trigger_reason":"state-cleanup"}
 {"cmd":"complete-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T03"},"ts":"2026-03-31T11:27:22.110Z","actor":"agent","hash":"76869d8034762d3d","session_id":"111e0a00-89e2-4ca0-8388-e2553751bb54"}
+{"cmd":"complete-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T04"},"ts":"2026-03-31T11:40:34.469Z","actor":"agent","hash":"b9270db9bd64750a","session_id":"111e0a00-89e2-4ca0-8388-e2553751bb54"}

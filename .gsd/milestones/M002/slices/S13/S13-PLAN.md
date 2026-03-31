@@ -16,7 +16,7 @@
   - Estimate: 2-3 sessions
   - Files: vinted_radar/query/overview_clickhouse.py, vinted_radar/query/explorer_clickhouse.py, vinted_radar/query/detail_clickhouse.py, vinted_radar/dashboard.py, vinted_radar/cli.py, tests/test_clickhouse_queries.py, tests/test_dashboard.py
   - Verify: python -m pytest tests/test_clickhouse_queries.py tests/test_dashboard.py -q
-- [ ] **T04: Analytical parity + route proof** — Prove analytical correctness and performance on the new boundary. Add parity/reconciliation checks between representative SQLite-era outputs and ClickHouse marts during migration, then run focused dashboard/explorer/detail route verification so the cutover path has both correctness and latency evidence.
+- [x] **T04: Added ClickHouse parity tests and a reusable route verifier, and fixed dashboard probe rendering so overview, explorer, and detail stay cutover-consistent.** — Prove analytical correctness and performance on the new boundary. Add parity/reconciliation checks between representative SQLite-era outputs and ClickHouse marts during migration, then run focused dashboard/explorer/detail route verification so the cutover path has both correctness and latency evidence.
   - Estimate: 1-2 sessions
   - Files: tests/test_clickhouse_parity.py, scripts/verify_clickhouse_routes.py, vinted_radar/dashboard.py
   - Verify: python -m pytest tests/test_clickhouse_parity.py -q

@@ -352,8 +352,21 @@ def serve_dashboard(
     now: str | None = None,
     base_path: str | None = None,
     public_base_url: str | None = None,
+    query_backend_factory=None,
+    clickhouse_client: object | None = None,
+    clickhouse_database: str | None = None,
+    enable_polyglot_reads: bool | None = None,
 ) -> None:
-    application = DashboardApplication(db_path, now=now, base_path=base_path, public_base_url=public_base_url)
+    application = DashboardApplication(
+        db_path,
+        now=now,
+        base_path=base_path,
+        public_base_url=public_base_url,
+        query_backend_factory=query_backend_factory,
+        clickhouse_client=clickhouse_client,
+        clickhouse_database=clickhouse_database,
+        enable_polyglot_reads=enable_polyglot_reads,
+    )
     with make_server(host, port, application) as server:
         server.serve_forever()
 
@@ -366,12 +379,26 @@ def start_dashboard_server(
     now: str | None = None,
     base_path: str | None = None,
     public_base_url: str | None = None,
+    query_backend_factory=None,
+    clickhouse_client: object | None = None,
+    clickhouse_database: str | None = None,
+    enable_polyglot_reads: bool | None = None,
 ) -> DashboardServerHandle:
-    application = DashboardApplication(db_path, now=now, base_path=base_path, public_base_url=public_base_url)
+    application = DashboardApplication(
+        db_path,
+        now=now,
+        base_path=base_path,
+        public_base_url=public_base_url,
+        query_backend_factory=query_backend_factory,
+        clickhouse_client=clickhouse_client,
+        clickhouse_database=clickhouse_database,
+        enable_polyglot_reads=enable_polyglot_reads,
+    )
     server = make_server(host, port, application)
-    thread = Thread(target=server.serve_forever, name=f"dashboard-{port}", daemon=True)
+    bound_host, bound_port = server.server_address[:2]
+    thread = Thread(target=server.serve_forever, name=f"dashboard-{bound_port}", daemon=True)
     thread.start()
-    return DashboardServerHandle(host=host, port=port, server=server, thread=thread)
+    return DashboardServerHandle(host=str(bound_host), port=int(bound_port), server=server, thread=thread)
 
 
 def build_dashboard_payload(
@@ -1083,8 +1110,15 @@ def _serialize_explorer_item(
     estimated_publication_at = _format_unix_timestamp(item.get("created_at_ts"))
     seller_login = item.get("user_login")
     seller_profile_url = item.get("user_profile_url")
-    latest_probe_outcome = item.get("latest_probe_outcome")
+    latest_probe = item.get("latest_probe") if isinstance(item.get("latest_probe"), dict) else {}
+    latest_probe_at = item.get("latest_probe_at") or latest_probe.get("probed_at")
+    latest_probe_outcome = item.get("latest_probe_outcome") or latest_probe.get("probe_outcome")
     latest_probe_status = item.get("latest_probe_response_status")
+    if latest_probe_status is None:
+        latest_probe_status = latest_probe.get("response_status")
+    latest_probe_error_message = item.get("latest_probe_error_message")
+    if latest_probe_error_message is None:
+        latest_probe_error_message = latest_probe.get("error_message")
     latest_probe_display = "Aucune probe"
     if latest_probe_outcome:
         latest_probe_display = str(latest_probe_outcome)
@@ -1105,6 +1139,10 @@ def _serialize_explorer_item(
             "radar_last_seen_display": _format_optional_timestamp(item.get("last_seen_at")),
             "seller_display": seller_login or "Vendeur non exposé",
             "seller_profile_url": seller_profile_url,
+            "latest_probe_at": latest_probe_at,
+            "latest_probe_outcome": latest_probe_outcome,
+            "latest_probe_response_status": latest_probe_status,
+            "latest_probe_error_message": latest_probe_error_message,
             "latest_probe_display": latest_probe_display,
             "state_display": _state_label(item.get("state_code")),
             "basis_display": _basis_label(item.get("basis_kind")),
