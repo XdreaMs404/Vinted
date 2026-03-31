@@ -8,7 +8,7 @@
   - Estimate: 2 sessions
   - Files: infra/clickhouse/, vinted_radar/platform/clickhouse_schema/, vinted_radar/platform/migrations.py, tests/test_clickhouse_schema.py
   - Verify: python -m pytest tests/test_clickhouse_schema.py -q
-- [ ] **T02: Outbox/lake ingestion into ClickHouse** — Implement the ingestion worker from outbox/manifests into ClickHouse. Consume listing-seen and probe batches, map them into raw fact tables, maintain replay-safe inserts, and expose ingestion lag/error state so S14 cutover can trust whether analytical data is current.
+- [x] **T02: Added replay-safe ClickHouse batch ingestion with checkpoint status and operator CLI commands.** — Implement the ingestion worker from outbox/manifests into ClickHouse. Consume listing-seen and probe batches, map them into raw fact tables, maintain replay-safe inserts, and expose ingestion lag/error state so S14 cutover can trust whether analytical data is current.
   - Estimate: 2 sessions
   - Files: vinted_radar/platform/clickhouse_ingest.py, vinted_radar/platform/outbox.py, vinted_radar/cli.py, tests/test_clickhouse_ingest.py
   - Verify: python -m pytest tests/test_clickhouse_ingest.py -q

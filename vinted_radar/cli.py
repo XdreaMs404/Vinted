@@ -14,8 +14,11 @@ from vinted_radar.db_health import inspect_sqlite_database
 from vinted_radar.http import VintedHttpClient
 from vinted_radar.long_run_audit import build_long_run_audit_report, render_long_run_audit_markdown
 from vinted_radar.platform import (
+    CLICKHOUSE_INGEST_CONSUMER,
+    ClickHouseIngestService,
     bootstrap_data_platform,
     doctor_data_platform,
+    load_clickhouse_ingest_status,
     load_platform_config,
     render_platform_report_lines,
 )
@@ -398,6 +401,78 @@ def postgres_backfill(
         raise typer.BadParameter("--format must be either 'table' or 'json'.")
 
     _render_postgres_backfill_report(report=report)
+
+
+@app.command("clickhouse-ingest")
+def clickhouse_ingest(
+    limit: int = typer.Option(100, "--limit", min=1, help="Maximum outbox rows to claim in one ingest pass."),
+    lease_seconds: int = typer.Option(60, "--lease-seconds", min=1, help="How long to lease claimed outbox rows before they become retryable."),
+    retry_delay_seconds: float = typer.Option(30.0, "--retry-delay-seconds", min=1.0, help="How long to delay a failed row before retry."),
+    lagging_threshold_seconds: float = typer.Option(300.0, "--lagging-threshold-seconds", min=1.0, help="Lag above this threshold marks the checkpoint as lagging."),
+    consumer_name: str = typer.Option(CLICKHOUSE_INGEST_CONSUMER, "--consumer-name", help="Checkpoint consumer name to use for ClickHouse ingest."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    service = ClickHouseIngestService.from_environment(
+        config=config,
+        consumer_name=consumer_name,
+        retry_delay_seconds=retry_delay_seconds,
+        lagging_threshold_seconds=lagging_threshold_seconds,
+    )
+    try:
+        report = service.ingest_available(
+            limit=limit,
+            lease_seconds=lease_seconds,
+            consumer_name=consumer_name,
+        )
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"ClickHouse ingest failed: {type(exc).__name__}: {exc}", err=True)
+        typer.echo(
+            f"Inspect ingest status with: python -m vinted_radar.cli clickhouse-ingest-status --consumer-name {consumer_name}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    finally:
+        service.close()
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_clickhouse_ingest_report(report)
+
+
+@app.command("clickhouse-ingest-status")
+def clickhouse_ingest_status(
+    consumer_name: str = typer.Option(CLICKHOUSE_INGEST_CONSUMER, "--consumer-name", help="Checkpoint consumer name to inspect."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        snapshot = load_clickhouse_ingest_status(config=config, consumer_name=consumer_name)
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"ClickHouse ingest status failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format == "json":
+        typer.echo(json.dumps(snapshot.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_clickhouse_ingest_status(snapshot)
 
 
 @app.command("evidence-export")
@@ -1663,6 +1738,51 @@ def _render_postgres_backfill_report(*, report: PostgresBackfillReport) -> None:
     typer.echo(f"- listing current states: {payload['listing_current_states']}")
     typer.echo(f"- runtime cycles: {payload['runtime_cycles']}")
     typer.echo(f"- runtime controller rows: {payload['runtime_controller_rows']}")
+
+
+
+def _render_clickhouse_ingest_report(report) -> None:
+    typer.echo(f"ClickHouse ingest consumer: {report.consumer_name}")
+    typer.echo(f"Sink: {report.sink}")
+    typer.echo(f"Claimed rows: {report.claimed_count}")
+    typer.echo(f"Processed rows: {report.processed_count}")
+    typer.echo(f"Skipped batches: {report.skipped_count}")
+    if not report.records:
+        typer.echo("Records: none")
+        return
+    typer.echo("Records:")
+    for record in report.records:
+        typer.echo(
+            "- {event_type} | source {source_event_id} | manifest {manifest_id} | rows {row_count} | inserted {inserted_row_count} | existing {existing_row_count} | table {target_table} | status {projection_status}".format(
+                **record.as_dict()
+            )
+        )
+
+
+
+def _render_clickhouse_ingest_status(snapshot) -> None:
+    typer.echo(f"ClickHouse ingest consumer: {snapshot.consumer_name}")
+    typer.echo(f"Sink: {snapshot.sink}")
+    typer.echo(f"Status: {snapshot.status}")
+    if not snapshot.checkpoint_exists:
+        typer.echo("Checkpoint: none recorded yet")
+        return
+    typer.echo(f"Updated at: {snapshot.updated_at or 'n/a'}")
+    typer.echo(f"Last outbox id: {snapshot.last_outbox_id if snapshot.last_outbox_id is not None else 'n/a'}")
+    typer.echo(f"Last event: {snapshot.last_event_id or 'n/a'}")
+    typer.echo(f"Last manifest: {snapshot.last_manifest_id or 'n/a'}")
+    typer.echo(f"Last claimed at: {snapshot.last_claimed_at or 'n/a'}")
+    typer.echo(f"Last delivered at: {snapshot.last_delivered_at or 'n/a'}")
+    typer.echo(
+        "Lag: {lag}".format(
+            lag="n/a" if snapshot.lag_seconds is None else _format_duration_seconds(snapshot.lag_seconds)
+        )
+    )
+    typer.echo(f"Last error: {snapshot.last_error or 'none'}")
+    if snapshot.metadata:
+        typer.echo("Metadata:")
+        for key in sorted(snapshot.metadata):
+            typer.echo(f"- {key}: {snapshot.metadata[key]}")
 
 
 

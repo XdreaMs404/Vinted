@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T06:41:20.057Z",
+  "exported_at": "2026-03-31T07:04:16.628Z",
   "milestones": [
     {
       "id": "M001",
@@ -1226,19 +1226,28 @@
       "milestone_id": "M002",
       "slice_id": "S13",
       "id": "T02",
-      "title": "Outbox/lake ingestion into ClickHouse",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added replay-safe ClickHouse batch ingestion with checkpoint status and operator CLI commands.",
+      "status": "complete",
+      "one_liner": "Added replay-safe ClickHouse batch ingestion with checkpoint status and operator CLI commands.",
+      "narrative": "Implemented `vinted_radar.platform.clickhouse_ingest.ClickHouseIngestService` to claim ClickHouse outbox rows, load parquet-batch manifests from the lake, map discovery listing-seen batches into `fact_listing_seen_events`, map state-refresh probe batches into `fact_listing_probe_events`, and persist sink lag/error state in PostgreSQL outbox checkpoints. The worker generates deterministic row-level fact ids from source batch identity plus row identity, queries ClickHouse for existing row ids by `source_event_id`, and inserts only missing rows so retries recover partial replays without duplicating facts. I also added `clickhouse-ingest` and `clickhouse-ingest-status` CLI commands plus focused tests for happy path, replay safety, failure-state persistence, and CLI output.",
+      "verification_result": "Verified the touched modules compile with `python3 -m py_compile`, and verified the required task suite passes with `python3 -m pytest tests/test_clickhouse_ingest.py -q` (6 tests passed).",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T07:04:16.603Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Used `python3` instead of `python` because this shell does not expose a `python` alias. No slice-plan invalidation.",
+      "known_issues": "Current probe batches do not yet emit denormalized category/brand/price context, and current listing-seen batches still omit some nullable listing-card fields, so the new ClickHouse fact ingester leaves those schema columns null until upstream emitters enrich the batch rows.",
+      "key_files": [
+        "vinted_radar/platform/clickhouse_ingest.py",
+        "vinted_radar/cli.py",
+        "vinted_radar/platform/__init__.py",
+        "tests/test_clickhouse_ingest.py",
+        ".gsd/KNOWLEDGE.md",
+        ".gsd/milestones/M002/slices/S13/tasks/T02-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "D048: use deterministic row-level fact ids plus source-event lookups so ClickHouse ingest inserts only missing rows on retries and partial replays."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S13\nmilestone: M002\nkey_files:\n  - vinted_radar/platform/clickhouse_ingest.py\n  - vinted_radar/cli.py\n  - vinted_radar/platform/__init__.py\n  - tests/test_clickhouse_ingest.py\n  - .gsd/KNOWLEDGE.md\n  - .gsd/milestones/M002/slices/S13/tasks/T02-SUMMARY.md\nkey_decisions:\n  - D048: use deterministic row-level fact ids plus source-event lookups so ClickHouse ingest inserts only missing rows on retries and partial replays.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T07:04:16.603Z\nblocker_discovered: false\n---\n\n# T02: Added replay-safe ClickHouse batch ingestion with checkpoint status and operator CLI commands.\n\n**Added replay-safe ClickHouse batch ingestion with checkpoint status and operator CLI commands.**\n\n## What Happened\n\nImplemented `vinted_radar.platform.clickhouse_ingest.ClickHouseIngestService` to claim ClickHouse outbox rows, load parquet-batch manifests from the lake, map discovery listing-seen batches into `fact_listing_seen_events`, map state-refresh probe batches into `fact_listing_probe_events`, and persist sink lag/error state in PostgreSQL outbox checkpoints. The worker generates deterministic row-level fact ids from source batch identity plus row identity, queries ClickHouse for existing row ids by `source_event_id`, and inserts only missing rows so retries recover partial replays without duplicating facts. I also added `clickhouse-ingest` and `clickhouse-ingest-status` CLI commands plus focused tests for happy path, replay safety, failure-state persistence, and CLI output.\n\n## Verification\n\nVerified the touched modules compile with `python3 -m py_compile`, and verified the required task suite passes with `python3 -m pytest tests/test_clickhouse_ingest.py -q` (6 tests passed).\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m py_compile vinted_radar/platform/clickhouse_ingest.py vinted_radar/platform/__init__.py vinted_radar/cli.py tests/test_clickhouse_ingest.py` | 0 | ✅ pass | 58ms |\n| 2 | `python3 -m pytest tests/test_clickhouse_ingest.py -q` | 0 | ✅ pass | 540ms |\n\n\n## Deviations\n\nUsed `python3` instead of `python` because this shell does not expose a `python` alias. No slice-plan invalidation.\n\n## Known Issues\n\nCurrent probe batches do not yet emit denormalized category/brand/price context, and current listing-seen batches still omit some nullable listing-card fields, so the new ClickHouse fact ingester leaves those schema columns null until upstream emitters enrich the batch rows.\n\n## Files Created/Modified\n\n- `vinted_radar/platform/clickhouse_ingest.py`\n- `vinted_radar/cli.py`\n- `vinted_radar/platform/__init__.py`\n- `tests/test_clickhouse_ingest.py`\n- `.gsd/KNOWLEDGE.md`\n- `.gsd/milestones/M002/slices/S13/tasks/T02-SUMMARY.md`\n",
       "description": "Implement the ingestion worker from outbox/manifests into ClickHouse. Consume listing-seen and probe batches, map them into raw fact tables, maintain replay-safe inserts, and expose ingestion lag/error state so S14 cutover can trust whether analytical data is current.",
       "estimate": "2 sessions",
       "files": [
@@ -2230,6 +2239,18 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 169,
+      "id": "D048",
+      "when_context": "M002/S13/T02",
+      "scope": "architecture",
+      "decision": "How ClickHouse ingest should remain replay-safe across outbox retries and partial batch reprocessing",
+      "choice": "Generate deterministic row-level fact event_ids from source batch identity + row identity, then query existing rows by source_event_id and insert only missing row ids.",
+      "rationale": "The shared mutable-manifest table is not sink-scoped, so sink-local replay safety cannot rely on overwriting one manifest status row. Row-level deterministic ids plus existing-row checks let ClickHouse recover partial batch writes and avoid duplicate fact inserts while keeping lag/error state in outbox checkpoints.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -2507,6 +2528,28 @@
       "verdict": "✅ pass",
       "duration_ms": 347,
       "created_at": "2026-03-31T06:41:20.031Z"
+    },
+    {
+      "id": 48,
+      "task_id": "T02",
+      "slice_id": "S13",
+      "milestone_id": "M002",
+      "command": "python3 -m py_compile vinted_radar/platform/clickhouse_ingest.py vinted_radar/platform/__init__.py vinted_radar/cli.py tests/test_clickhouse_ingest.py",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 58,
+      "created_at": "2026-03-31T07:04:16.603Z"
+    },
+    {
+      "id": 49,
+      "task_id": "T02",
+      "slice_id": "S13",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_clickhouse_ingest.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 540,
+      "created_at": "2026-03-31T07:04:16.603Z"
     }
   ]
 }
