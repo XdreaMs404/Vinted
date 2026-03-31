@@ -160,10 +160,11 @@ python -m vinted_radar.cli platform-bootstrap
 python -m vinted_radar.cli platform-doctor
 ```
 
-2. Before switching reads, reconcile or backfill the historical corpus so PostgreSQL mutable truth, ClickHouse facts, and object-storage evidence are not empty:
+2. Before switching reads, reconcile or backfill the historical corpus so PostgreSQL mutable truth, ClickHouse facts, and object-storage evidence are not empty, then inspect the platform-audit posture that the final proof will rely on:
 
 ```bash
 python -m vinted_radar.cli platform-reconcile --db data/vinted-radar.db
+python -m vinted_radar.cli platform-audit --db data/vinted-radar.db --format json
 ```
 
 3. Enable the four live cutover flags in the operator environment:
@@ -199,7 +200,10 @@ What `verify_cutover_stack.py` proves:
 - cutover mode is really `polyglot-cutover`
 - `platform-doctor` is healthy across PostgreSQL, ClickHouse, and object storage
 - the ClickHouse ingest consumer can drain pending outbox work without ending in `failed`
+- `platform-audit` reports reconciliation `match`, healthy/active current-state + analytical checkpoints, non-failing lifecycle posture, and a closed historical backfill posture (`healthy` or `complete`)
 - PostgreSQL mutable truth exposes a latest discovery run, listing current state, runtime controller state, and runtime cycle
+- ClickHouse feature marts expose listing-day rows, populated change facts, at least one fresh change fact for the latest discovery run, and evidence-pack drill-down commands (`evidence-inspect`) tied to real manifest/event trace IDs
+- the local ClickHouse-backed `/api/dashboard`, `/api/explorer`, `/api/listings/<id>`, and `/health` payloads still match the SQLite-era contract after normalization, so the remaining SQLite read hot path is no longer required for product parity
 - object storage contains non-marker raw-event, manifest, and parquet objects
 - `/`, `/explorer`, `/runtime`, `/api/runtime`, `/listings/<id>`, `/api/listings/<id>`, and `/health` all work on the cut-over stack
 - `/api/dashboard` is really serving `clickhouse.overview_snapshot`
@@ -578,3 +582,5 @@ Then use:
 - explorer → `http://127.0.0.1:8765/explorer`
 - runtime page → `http://127.0.0.1:8765/runtime`
 - runtime truth JSON → `http://127.0.0.1:8765/api/runtime`
+5/api/runtime`
+765/api/runtime`

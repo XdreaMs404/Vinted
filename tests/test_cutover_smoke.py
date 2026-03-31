@@ -259,6 +259,34 @@ def test_live_cutover_smoke_proof_runs_real_cycle_and_verifier(
     assert any(report_row["claimed_count"] > 0 for report_row in proof["clickhouse_ingest"]["reports"])
     assert proof["dashboard"]["primary_payload_source"] == "clickhouse.overview_snapshot"
 
+    audit_summary = proof["platform_audit"]["summary"]
+    assert audit_summary["reconciliation_status"] == "match"
+    assert audit_summary["current_state_status"] in {"healthy", "active"}
+    assert audit_summary["analytical_status"] in {"healthy", "active"}
+    assert audit_summary["lifecycle_status"] != "failed"
+    assert audit_summary["backfill_status"] in {"healthy", "complete"}
+
+    feature_marts = proof["feature_marts"]
+    assert feature_marts["source"] == "clickhouse.feature_marts"
+    assert feature_marts["listing_day_row_count"] >= 1
+    assert feature_marts["change_fact_row_count"] >= 1
+    assert proof["postgres_truth"]["latest_discovery_run_id"] in feature_marts["fresh_change_fact_run_ids"]
+    assert feature_marts["evidence_pack_row_count"] >= 1
+    assert any(
+        "evidence-inspect --manifest-id" in command
+        for command in feature_marts["evidence_drill_down"]["inspect_examples"]
+    )
+
+    route_parity = proof["clickhouse_route_parity"]
+    assert route_parity["repository"]["dashboard_source"] == "repository.overview_snapshot"
+    assert route_parity["clickhouse"]["dashboard_source"] == "clickhouse.overview_snapshot"
+    assert route_parity["parity"] == {
+        "dashboard_api": "match",
+        "explorer_api": "match",
+        "detail_api": "match",
+        "health": "match",
+    }
+
     serving_labels = {check["label"] for check in proof["serving"]["checks"]}
     assert serving_labels == {
         "overview",

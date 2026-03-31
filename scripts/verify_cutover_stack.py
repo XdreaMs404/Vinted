@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from vinted_radar.dashboard import start_dashboard_server
@@ -21,10 +22,14 @@ from vinted_radar.platform import (
     summarize_platform_health,
 )
 from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
+from vinted_radar.query.feature_marts import load_clickhouse_feature_marts_export
+from vinted_radar.services.platform_audit import run_platform_audit
 
 try:  # pragma: no cover - import style depends on script entrypoint
+    from .verify_clickhouse_routes import verify_clickhouse_routes
     from .verify_vps_serving import VerificationError, verify as verify_vps_serving
 except ImportError:  # pragma: no cover - direct script execution path
+    from verify_clickhouse_routes import verify_clickhouse_routes
     from verify_vps_serving import VerificationError, verify as verify_vps_serving
 
 
@@ -97,6 +102,166 @@ def _drain_clickhouse_ingest(*, max_passes: int = 10, limit: int = 100) -> list[
     )
 
 
+def _validate_platform_audit(*, db_path: str | Path, config) -> dict[str, Any]:
+    report = run_platform_audit(db_path, config=config)
+    payload = report.as_dict()
+    summary = dict(payload.get("summary") or {})
+    paths = dict(payload.get("paths") or {})
+
+    reconciliation_status = str(summary.get("reconciliation_status") or "unknown")
+    if reconciliation_status != "match":
+        raise VerificationError(
+            f"Platform audit reconciliation drifted to {reconciliation_status!r}; expected 'match' before final acceptance."
+        )
+
+    current_state_status = str((paths.get("current_state") or {}).get("status") or "unknown")
+    if current_state_status not in {"healthy", "active"}:
+        raise VerificationError(
+            f"Platform audit current-state path is {current_state_status!r}; expected 'healthy' or 'active'."
+        )
+
+    analytical_status = str((paths.get("analytical") or {}).get("status") or "unknown")
+    if analytical_status not in {"healthy", "active"}:
+        raise VerificationError(
+            f"Platform audit analytical path is {analytical_status!r}; expected 'healthy' or 'active'."
+        )
+
+    backfill_status = str((paths.get("backfill") or {}).get("status") or "unknown")
+    if backfill_status not in {"healthy", "complete"}:
+        raise VerificationError(
+            f"Platform audit backfill path is {backfill_status!r}; expected 'healthy' or 'complete'."
+        )
+
+    lifecycle_status = str((paths.get("lifecycle") or {}).get("status") or "unknown")
+    if lifecycle_status == "failed":
+        raise VerificationError("Platform audit lifecycle posture failed during the final acceptance proof.")
+
+    return payload
+
+
+def _collect_change_fact_run_ids(rows: list[dict[str, Any]]) -> list[str]:
+    run_ids = {
+        str((dict(row.get("trace") or {})).get("run_id"))
+        for row in rows
+        if (dict(row.get("trace") or {})).get("run_id")
+    }
+    return sorted(run_ids)
+
+
+def _choose_evidence_pack(
+    evidence_packs: list[dict[str, Any]],
+    *,
+    representative_listing_id: int,
+    preferred_listing_ids: set[int],
+) -> dict[str, Any]:
+    def _rank(pack: dict[str, Any]) -> tuple[int, int]:
+        listing_id = int(pack.get("listing_id") or 0)
+        window = dict(pack.get("window") or {})
+        change_count = int(window.get("price_change_count") or 0) + int(window.get("state_transition_count") or 0)
+        if listing_id in preferred_listing_ids:
+            return (0, -change_count)
+        if change_count > 0:
+            return (1, -change_count)
+        if listing_id == representative_listing_id:
+            return (2, -change_count)
+        return (3, -change_count)
+
+    return sorted(evidence_packs, key=_rank)[0]
+
+
+def _validate_feature_marts(
+    *,
+    config,
+    latest_discovery_run_id: str | None,
+    representative_listing_id: int,
+) -> dict[str, Any]:
+    clickhouse_client = _get_clickhouse_client(config, database=config.clickhouse.database)
+    try:
+        export = load_clickhouse_feature_marts_export(
+            clickhouse_client,
+            database=config.clickhouse.database,
+            limit=25,
+        )
+    finally:
+        close = getattr(clickhouse_client, "close", None)
+        if callable(close):
+            close()
+
+    if str(export.get("source") or "") != "clickhouse.feature_marts":
+        raise VerificationError(
+            f"Feature-mart export source drifted to {export.get('source')!r} instead of 'clickhouse.feature_marts'."
+        )
+
+    listing_day_rows = list((export.get("listing_day") or {}).get("rows") or [])
+    segment_day_rows = list((export.get("segment_day") or {}).get("rows") or [])
+    price_change_rows = list((export.get("price_change") or {}).get("rows") or [])
+    state_transition_rows = list((export.get("state_transition") or {}).get("rows") or [])
+    evidence_packs = list((export.get("evidence_packs") or {}).get("rows") or [])
+    change_rows = price_change_rows + state_transition_rows
+
+    if not listing_day_rows:
+        raise VerificationError("Feature-mart export returned no listing-day rows.")
+    if not evidence_packs:
+        raise VerificationError("Feature-mart export returned no evidence packs.")
+    if not change_rows:
+        raise VerificationError("Feature-mart export returned no populated change-fact rows.")
+
+    fresh_change_rows = [
+        row
+        for row in change_rows
+        if str((dict(row.get("trace") or {})).get("run_id") or "") == str(latest_discovery_run_id or "")
+    ]
+    if latest_discovery_run_id and not fresh_change_rows:
+        raise VerificationError(
+            "Feature-mart export did not expose a fresh change-fact row for the latest discovery run "
+            f"{latest_discovery_run_id!r}."
+        )
+
+    fresh_change_listing_ids = {
+        int(row.get("listing_id") or 0)
+        for row in fresh_change_rows
+        if row.get("listing_id") is not None
+    }
+    evidence_pack = _choose_evidence_pack(
+        evidence_packs,
+        representative_listing_id=representative_listing_id,
+        preferred_listing_ids=fresh_change_listing_ids,
+    )
+    trace = dict(evidence_pack.get("trace") or {})
+    manifest_ids = [str(item) for item in list(trace.get("manifest_ids") or []) if item]
+    source_event_ids = [str(item) for item in list(trace.get("source_event_ids") or []) if item]
+    run_ids = [str(item) for item in list(trace.get("run_ids") or []) if item]
+    inspect_examples = [str(item) for item in list(trace.get("inspect_examples") or []) if item]
+    if not manifest_ids:
+        raise VerificationError("Feature-mart evidence-pack drill-down is missing manifest trace IDs.")
+    if not inspect_examples:
+        raise VerificationError("Feature-mart evidence-pack drill-down is missing evidence-inspect examples.")
+
+    latest_change_occurred_at = max((str(row.get("occurred_at")) for row in change_rows if row.get("occurred_at")), default=None)
+    return {
+        "source": export.get("source"),
+        "listing_day_row_count": len(listing_day_rows),
+        "segment_day_row_count": len(segment_day_rows),
+        "price_change_row_count": len(price_change_rows),
+        "state_transition_row_count": len(state_transition_rows),
+        "change_fact_row_count": len(change_rows),
+        "latest_change_occurred_at": latest_change_occurred_at,
+        "change_fact_run_ids": _collect_change_fact_run_ids(change_rows),
+        "fresh_change_fact_run_ids": _collect_change_fact_run_ids(fresh_change_rows),
+        "fresh_change_fact_listing_ids": sorted(fresh_change_listing_ids),
+        "evidence_pack_row_count": len(evidence_packs),
+        "evidence_drill_down": {
+            "listing_id": int(evidence_pack.get("listing_id") or 0),
+            "price_change_count": int((dict(evidence_pack.get("window") or {})).get("price_change_count") or 0),
+            "state_transition_count": int((dict(evidence_pack.get("window") or {})).get("state_transition_count") or 0),
+            "manifest_ids": manifest_ids[:3],
+            "source_event_ids": source_event_ids[:3],
+            "run_ids": run_ids[:3],
+            "inspect_examples": inspect_examples[:3],
+        },
+    }
+
+
 def verify_cutover_stack(
     *,
     db_path: str | Path,
@@ -154,6 +319,21 @@ def verify_cutover_stack(
     finally:
         repository.close()
 
+    platform_audit = _validate_platform_audit(db_path=db_path, config=config)
+    feature_marts = _validate_feature_marts(
+        config=config,
+        latest_discovery_run_id=_optional_str(discovery_run.get("run_id")),
+        representative_listing_id=representative_listing_id,
+    )
+    route_parity = verify_clickhouse_routes(
+        db_path=db_path,
+        listing_id=representative_listing_id,
+        timeout=timeout,
+        host=host,
+        port=0,
+        clickhouse_database=config.clickhouse.database,
+    )
+
     object_store = S3ObjectStore.from_config(config)
     try:
         raw_event_keys = _non_marker_keys(object_store, config.storage.raw_events)
@@ -210,6 +390,11 @@ def verify_cutover_stack(
             "reports": ingest_reports,
             "status": ingest_status.as_dict(),
         },
+        "platform_audit": {
+            "overall_status": platform_audit.get("overall_status"),
+            "summary": platform_audit.get("summary"),
+            "paths": platform_audit.get("paths"),
+        },
         "postgres_truth": {
             "representative_listing_id": representative_listing_id,
             "latest_discovery_run_id": discovery_run.get("run_id"),
@@ -234,6 +419,8 @@ def verify_cutover_stack(
                 "state_probed_count": runtime_cycle.get("state_probed_count"),
             },
         },
+        "feature_marts": feature_marts,
+        "clickhouse_route_parity": route_parity,
         "object_storage": {
             "bucket": config.object_storage.bucket,
             "non_marker_counts": {
@@ -273,10 +460,44 @@ def _print_human_summary(proof: dict[str, Any]) -> None:
         )
     )
     print(f"- clickhouse ingest: {proof['clickhouse_ingest']['status']['status']}")
+    audit_summary = dict(proof["platform_audit"].get("summary") or {})
+    print(
+        "- platform audit: reconcile={reconcile} current-state={current_state} analytical={analytical} lifecycle={lifecycle} backfill={backfill}".format(
+            reconcile=audit_summary.get("reconciliation_status") or "unknown",
+            current_state=audit_summary.get("current_state_status") or "unknown",
+            analytical=audit_summary.get("analytical_status") or "unknown",
+            lifecycle=audit_summary.get("lifecycle_status") or "unknown",
+            backfill=audit_summary.get("backfill_status") or "unknown",
+        )
+    )
     print(
         f"- postgres truth: discovery={proof['postgres_truth']['latest_discovery_run_id']} · "
         f"listing={proof['postgres_truth']['representative_listing_id']} · "
         f"cycle={proof['postgres_truth']['latest_runtime_cycle']['cycle_id']}"
+    )
+    print(
+        "- feature marts: listing-day={listing_day} price-change={price_change} state-transition={state_transition} evidence-packs={packs}".format(
+            listing_day=proof["feature_marts"]["listing_day_row_count"],
+            price_change=proof["feature_marts"]["price_change_row_count"],
+            state_transition=proof["feature_marts"]["state_transition_row_count"],
+            packs=proof["feature_marts"]["evidence_pack_row_count"],
+        )
+    )
+    drill_down = dict(proof["feature_marts"].get("evidence_drill_down") or {})
+    print(
+        f"  - evidence drill-down listing={drill_down.get('listing_id')} · manifests={', '.join(drill_down.get('manifest_ids') or []) or 'n/a'}"
+    )
+    for command in list(drill_down.get("inspect_examples") or [])[:2]:
+        print(f"    - inspect: {command}")
+    print(
+        "- clickhouse route parity: repository={repository_source} clickhouse={clickhouse_source} parity={parity}".format(
+            repository_source=proof["clickhouse_route_parity"]["repository"]["dashboard_source"],
+            clickhouse_source=proof["clickhouse_route_parity"]["clickhouse"]["dashboard_source"],
+            parity=", ".join(
+                f"{label}={status}"
+                for label, status in dict(proof["clickhouse_route_parity"].get("parity") or {}).items()
+            ),
+        )
     )
     print(
         "- object storage: raw_events={raw_events} manifests={manifests} parquet={parquet}".format(
@@ -287,6 +508,27 @@ def _print_human_summary(proof: dict[str, Any]) -> None:
     print(f"- explorer listings: {proof['explorer']['total_listings']}")
     for check in proof["serving"]["checks"]:
         print(f"  - {check['label']}: HTTP {check['status']} · {check['details']} · {check['url']}")
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    return candidate or None
+
+
+def _get_clickhouse_client(config, *, database: str):
+    import clickhouse_connect
+
+    parts = urlsplit(config.clickhouse.url)
+    return clickhouse_connect.get_client(
+        host=parts.hostname or "127.0.0.1",
+        port=parts.port or (8443 if parts.scheme == "https" else 8123),
+        username=config.clickhouse.username,
+        password=config.clickhouse.password,
+        database=database,
+        secure=parts.scheme == "https",
+    )
 
 
 def main() -> int:

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T15:58:53.402Z",
+  "exported_at": "2026-03-31T16:12:42.361Z",
   "milestones": [
     {
       "id": "M001",
@@ -1829,19 +1829,26 @@
       "milestone_id": "M002",
       "slice_id": "S15",
       "id": "T06",
-      "title": "Operational closure + final acceptance against the corrected warehouse contract",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Expanded `verify_cutover_stack.py` to prove platform-audit posture, fresh change facts, evidence-pack drill-down, and ClickHouse route parity.",
+      "status": "complete",
+      "one_liner": "Expanded `verify_cutover_stack.py` to prove platform-audit posture, fresh change facts, evidence-pack drill-down, and ClickHouse route parity.",
+      "narrative": "Extended the final cutover acceptance proof so it no longer stops at doctor/ingest/object-storage checks. The verifier now validates platform-audit reconciliation/current-state/analytical/backfill posture, confirms ClickHouse feature marts contain populated change facts including a fresh row for the latest discovery run, requires evidence-pack drill-down commands tied to real manifest/event trace IDs, and embeds ClickHouse-vs-SQLite route parity proof to show the remaining SQLite read hot path is no longer required. Updated the README live cutover proof and VPS runbook to reflect the richer acceptance contract and expanded the live smoke test to assert the new proof sections.",
+      "verification_result": "Ran `python3 -m pytest tests/test_platform_audit.py tests/test_cutover_smoke.py -q` and got `3 passed, 1 skipped`. The passing smoke proof now covers platform audit posture, feature-mart freshness/drill-down, ClickHouse route parity, serving checks, and object-storage evidence.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T16:12:42.334Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Used `python3` for the final pytest run because an initial async `python -m pytest ...` launch failed before execution due a shell/launcher tokenization issue in the harness, not due repository code.",
+      "known_issues": "None.",
+      "key_files": [
+        "scripts/verify_cutover_stack.py",
+        "README.md",
+        "tests/test_cutover_smoke.py",
+        ".gsd/milestones/M002/slices/S15/tasks/T06-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Make `scripts/verify_cutover_stack.py` the single operator acceptance artifact by composing platform-audit posture, feature-mart/change-fact validation, and ClickHouse-vs-SQLite route parity."
+      ],
+      "full_summary_md": "---\nid: T06\nparent: S15\nmilestone: M002\nkey_files:\n  - scripts/verify_cutover_stack.py\n  - README.md\n  - tests/test_cutover_smoke.py\n  - .gsd/milestones/M002/slices/S15/tasks/T06-SUMMARY.md\nkey_decisions:\n  - Make `scripts/verify_cutover_stack.py` the single operator acceptance artifact by composing platform-audit posture, feature-mart/change-fact validation, and ClickHouse-vs-SQLite route parity.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T16:12:42.335Z\nblocker_discovered: false\n---\n\n# T06: Expanded `verify_cutover_stack.py` to prove platform-audit posture, fresh change facts, evidence-pack drill-down, and ClickHouse route parity.\n\n**Expanded `verify_cutover_stack.py` to prove platform-audit posture, fresh change facts, evidence-pack drill-down, and ClickHouse route parity.**\n\n## What Happened\n\nExtended the final cutover acceptance proof so it no longer stops at doctor/ingest/object-storage checks. The verifier now validates platform-audit reconciliation/current-state/analytical/backfill posture, confirms ClickHouse feature marts contain populated change facts including a fresh row for the latest discovery run, requires evidence-pack drill-down commands tied to real manifest/event trace IDs, and embeds ClickHouse-vs-SQLite route parity proof to show the remaining SQLite read hot path is no longer required. Updated the README live cutover proof and VPS runbook to reflect the richer acceptance contract and expanded the live smoke test to assert the new proof sections.\n\n## Verification\n\nRan `python3 -m pytest tests/test_platform_audit.py tests/test_cutover_smoke.py -q` and got `3 passed, 1 skipped`. The passing smoke proof now covers platform audit posture, feature-mart freshness/drill-down, ClickHouse route parity, serving checks, and object-storage evidence.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m pytest tests/test_platform_audit.py tests/test_cutover_smoke.py -q` | 0 | ✅ pass | 280ms |\n\n\n## Deviations\n\nUsed `python3` for the final pytest run because an initial async `python -m pytest ...` launch failed before execution due a shell/launcher tokenization issue in the harness, not due repository code.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `scripts/verify_cutover_stack.py`\n- `README.md`\n- `tests/test_cutover_smoke.py`\n- `.gsd/milestones/M002/slices/S15/tasks/T06-SUMMARY.md`\n",
       "description": "Close S15 only after the repaired warehouse contract is proven end to end. Update operator docs and verification so lifecycle posture, reconciliation health, change-fact freshness, feature-mart evidence drill-down, and the remaining SQLite hot-path removal are all exercised by the final acceptance proof.",
       "estimate": "1-2 sessions",
       "files": [
@@ -3075,6 +3082,17 @@
       "verdict": "✅ pass",
       "duration_ms": 68,
       "created_at": "2026-03-31T15:58:53.375Z"
+    },
+    {
+      "id": 66,
+      "task_id": "T06",
+      "slice_id": "S15",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_platform_audit.py tests/test_cutover_smoke.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 280,
+      "created_at": "2026-03-31T16:12:42.334Z"
     }
   ]
 }

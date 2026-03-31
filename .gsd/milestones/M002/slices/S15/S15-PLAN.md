@@ -25,7 +25,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/query/feature_marts.py, vinted_radar/cli.py, vinted_radar/platform/health.py, infra/clickhouse/migrations/V002__serving_warehouse.sql, tests/test_feature_marts.py
   - Verify: python -m pytest tests/test_feature_marts.py -q
-- [ ] **T06: Operational closure + final acceptance against the corrected warehouse contract** — Close S15 only after the repaired warehouse contract is proven end to end. Update operator docs and verification so lifecycle posture, reconciliation health, change-fact freshness, feature-mart evidence drill-down, and the remaining SQLite hot-path removal are all exercised by the final acceptance proof.
+- [x] **T06: Expanded `verify_cutover_stack.py` to prove platform-audit posture, fresh change facts, evidence-pack drill-down, and ClickHouse route parity.** — Close S15 only after the repaired warehouse contract is proven end to end. Update operator docs and verification so lifecycle posture, reconciliation health, change-fact freshness, feature-mart evidence drill-down, and the remaining SQLite hot-path removal are all exercised by the final acceptance proof.
   - Estimate: 1-2 sessions
   - Files: README.md, scripts/verify_cutover_stack.py, vinted_radar/services/platform_audit.py, vinted_radar/platform/health.py, tests/test_platform_audit.py, tests/test_cutover_smoke.py
   - Verify: python -m pytest tests/test_platform_audit.py tests/test_cutover_smoke.py -q
