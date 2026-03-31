@@ -23,6 +23,7 @@ OBJECT_STORE_PREFIX_ENV = "VINTED_RADAR_PLATFORM_OBJECT_STORE_PREFIX"
 RAW_EVENTS_PREFIX_ENV = "VINTED_RADAR_PLATFORM_RAW_EVENTS_PREFIX"
 MANIFESTS_PREFIX_ENV = "VINTED_RADAR_PLATFORM_MANIFESTS_PREFIX"
 PARQUET_PREFIX_ENV = "VINTED_RADAR_PLATFORM_PARQUET_PREFIX"
+ARCHIVES_PREFIX_ENV = "VINTED_RADAR_PLATFORM_ARCHIVES_PREFIX"
 POSTGRES_SCHEMA_VERSION_ENV = "VINTED_RADAR_PLATFORM_POSTGRES_SCHEMA_VERSION"
 CLICKHOUSE_SCHEMA_VERSION_ENV = "VINTED_RADAR_PLATFORM_CLICKHOUSE_SCHEMA_VERSION"
 EVENT_SCHEMA_VERSION_ENV = "VINTED_RADAR_PLATFORM_EVENT_SCHEMA_VERSION"
@@ -31,6 +32,18 @@ ENABLE_POSTGRES_WRITES_ENV = "VINTED_RADAR_PLATFORM_ENABLE_POSTGRES_WRITES"
 ENABLE_CLICKHOUSE_WRITES_ENV = "VINTED_RADAR_PLATFORM_ENABLE_CLICKHOUSE_WRITES"
 ENABLE_OBJECT_STORAGE_WRITES_ENV = "VINTED_RADAR_PLATFORM_ENABLE_OBJECT_STORAGE_WRITES"
 ENABLE_POLYGLOT_READS_ENV = "VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS"
+POSTGRES_BOOTSTRAP_AUDIT_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_BOOTSTRAP_AUDIT_RETENTION_DAYS"
+POSTGRES_OUTBOX_DELIVERED_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_OUTBOX_DELIVERED_RETENTION_DAYS"
+POSTGRES_OUTBOX_FAILED_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_OUTBOX_FAILED_RETENTION_DAYS"
+POSTGRES_RUNTIME_CYCLES_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_RUNTIME_CYCLES_RETENTION_DAYS"
+OBJECT_STORE_RAW_EVENTS_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_RAW_EVENTS_RETENTION_DAYS"
+OBJECT_STORE_MANIFESTS_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_MANIFESTS_RETENTION_DAYS"
+OBJECT_STORE_PARQUET_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_PARQUET_RETENTION_DAYS"
+OBJECT_STORE_ARCHIVES_RETENTION_DAYS_ENV = "VINTED_RADAR_PLATFORM_ARCHIVES_RETENTION_DAYS"
+OBJECT_STORE_RAW_EVENTS_RETENTION_CLASS_ENV = "VINTED_RADAR_PLATFORM_RAW_EVENTS_RETENTION_CLASS"
+OBJECT_STORE_MANIFESTS_RETENTION_CLASS_ENV = "VINTED_RADAR_PLATFORM_MANIFESTS_RETENTION_CLASS"
+OBJECT_STORE_PARQUET_RETENTION_CLASS_ENV = "VINTED_RADAR_PLATFORM_PARQUET_RETENTION_CLASS"
+OBJECT_STORE_ARCHIVES_RETENTION_CLASS_ENV = "VINTED_RADAR_PLATFORM_ARCHIVES_RETENTION_CLASS"
 
 DEFAULT_POSTGRES_DSN = "postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"
 DEFAULT_CLICKHOUSE_URL = "http://127.0.0.1:8123"
@@ -46,10 +59,23 @@ DEFAULT_OBJECT_STORE_PREFIX = "vinted-radar"
 DEFAULT_RAW_EVENTS_PREFIX_SUFFIX = "events/raw"
 DEFAULT_MANIFESTS_PREFIX_SUFFIX = "manifests"
 DEFAULT_PARQUET_PREFIX_SUFFIX = "parquet"
+DEFAULT_ARCHIVES_PREFIX_SUFFIX = "archives"
 DEFAULT_POSTGRES_SCHEMA_VERSION = POSTGRES_MUTABLE_SCHEMA_VERSION
 DEFAULT_CLICKHOUSE_SCHEMA_VERSION = CLICKHOUSE_SERVING_SCHEMA_VERSION
 DEFAULT_EVENT_SCHEMA_VERSION = 1
 DEFAULT_MANIFEST_SCHEMA_VERSION = 1
+DEFAULT_POSTGRES_BOOTSTRAP_AUDIT_RETENTION_DAYS = 30
+DEFAULT_POSTGRES_OUTBOX_DELIVERED_RETENTION_DAYS = 14
+DEFAULT_POSTGRES_OUTBOX_FAILED_RETENTION_DAYS = 30
+DEFAULT_POSTGRES_RUNTIME_CYCLES_RETENTION_DAYS = 90
+DEFAULT_OBJECT_STORE_RAW_EVENTS_RETENTION_DAYS = 730
+DEFAULT_OBJECT_STORE_MANIFESTS_RETENTION_DAYS = 3650
+DEFAULT_OBJECT_STORE_PARQUET_RETENTION_DAYS = 3650
+DEFAULT_OBJECT_STORE_ARCHIVES_RETENTION_DAYS = 3650
+DEFAULT_OBJECT_STORE_RAW_EVENTS_RETENTION_CLASS = "transient-evidence"
+DEFAULT_OBJECT_STORE_MANIFESTS_RETENTION_CLASS = "audit-manifest"
+DEFAULT_OBJECT_STORE_PARQUET_RETENTION_CLASS = "warehouse"
+DEFAULT_OBJECT_STORE_ARCHIVES_RETENTION_CLASS = "archive"
 _SECRET_MASK = "***"
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
@@ -115,6 +141,7 @@ class StoragePrefixConfig:
     raw_events: str
     manifests: str
     parquet: str
+    archives: str
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -122,6 +149,63 @@ class StoragePrefixConfig:
             "raw_events": self.raw_events,
             "manifests": self.manifests,
             "parquet": self.parquet,
+            "archives": self.archives,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresLifecycleConfig:
+    bootstrap_audit_retention_days: int
+    delivered_outbox_retention_days: int
+    failed_outbox_retention_days: int
+    runtime_cycles_retention_days: int
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "bootstrap_audit_retention_days": self.bootstrap_audit_retention_days,
+            "delivered_outbox_retention_days": self.delivered_outbox_retention_days,
+            "failed_outbox_retention_days": self.failed_outbox_retention_days,
+            "runtime_cycles_retention_days": self.runtime_cycles_retention_days,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectStoreRetentionPolicy:
+    retention_class: str
+    retention_days: int
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "retention_class": self.retention_class,
+            "retention_days": self.retention_days,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectStorageLifecycleConfig:
+    raw_events: ObjectStoreRetentionPolicy
+    manifests: ObjectStoreRetentionPolicy
+    parquet: ObjectStoreRetentionPolicy
+    archives: ObjectStoreRetentionPolicy
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "raw_events": self.raw_events.as_dict(),
+            "manifests": self.manifests.as_dict(),
+            "parquet": self.parquet.as_dict(),
+            "archives": self.archives.as_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleConfig:
+    postgres: PostgresLifecycleConfig
+    object_storage: ObjectStorageLifecycleConfig
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "postgres": self.postgres.as_dict(),
+            "object_storage": self.object_storage.as_dict(),
         }
 
 
@@ -163,6 +247,7 @@ class PlatformConfig:
     clickhouse: ClickHouseConfig
     object_storage: ObjectStorageConfig
     storage: StoragePrefixConfig
+    lifecycle: LifecycleConfig
     schema_versions: SchemaVersionConfig
     cutover: CutoverFlags
 
@@ -172,6 +257,7 @@ class PlatformConfig:
             "clickhouse": self.clickhouse.as_redacted_dict(),
             "object_storage": self.object_storage.as_redacted_dict(),
             "storage": self.storage.as_dict(),
+            "lifecycle": self.lifecycle.as_dict(),
             "schema_versions": self.schema_versions.as_dict(),
             "cutover": self.cutover.as_dict(),
         }
@@ -199,6 +285,11 @@ def load_platform_config(env: Mapping[str, str] | None = None) -> PlatformConfig
         environment,
         PARQUET_PREFIX_ENV,
         default=f"{root_prefix}/{DEFAULT_PARQUET_PREFIX_SUFFIX}",
+    )
+    archives_prefix = _read_storage_prefix(
+        environment,
+        ARCHIVES_PREFIX_ENV,
+        default=f"{root_prefix}/{DEFAULT_ARCHIVES_PREFIX_SUFFIX}",
     )
 
     postgres = PostgresConfig(
@@ -239,6 +330,80 @@ def load_platform_config(env: Mapping[str, str] | None = None) -> PlatformConfig
             default=DEFAULT_OBJECT_STORE_SECRET_KEY,
         ),
     )
+    lifecycle = LifecycleConfig(
+        postgres=PostgresLifecycleConfig(
+            bootstrap_audit_retention_days=_read_positive_int(
+                environment,
+                POSTGRES_BOOTSTRAP_AUDIT_RETENTION_DAYS_ENV,
+                default=DEFAULT_POSTGRES_BOOTSTRAP_AUDIT_RETENTION_DAYS,
+            ),
+            delivered_outbox_retention_days=_read_positive_int(
+                environment,
+                POSTGRES_OUTBOX_DELIVERED_RETENTION_DAYS_ENV,
+                default=DEFAULT_POSTGRES_OUTBOX_DELIVERED_RETENTION_DAYS,
+            ),
+            failed_outbox_retention_days=_read_positive_int(
+                environment,
+                POSTGRES_OUTBOX_FAILED_RETENTION_DAYS_ENV,
+                default=DEFAULT_POSTGRES_OUTBOX_FAILED_RETENTION_DAYS,
+            ),
+            runtime_cycles_retention_days=_read_positive_int(
+                environment,
+                POSTGRES_RUNTIME_CYCLES_RETENTION_DAYS_ENV,
+                default=DEFAULT_POSTGRES_RUNTIME_CYCLES_RETENTION_DAYS,
+            ),
+        ),
+        object_storage=ObjectStorageLifecycleConfig(
+            raw_events=ObjectStoreRetentionPolicy(
+                retention_class=_read_non_empty(
+                    environment,
+                    OBJECT_STORE_RAW_EVENTS_RETENTION_CLASS_ENV,
+                    default=DEFAULT_OBJECT_STORE_RAW_EVENTS_RETENTION_CLASS,
+                ),
+                retention_days=_read_positive_int(
+                    environment,
+                    OBJECT_STORE_RAW_EVENTS_RETENTION_DAYS_ENV,
+                    default=DEFAULT_OBJECT_STORE_RAW_EVENTS_RETENTION_DAYS,
+                ),
+            ),
+            manifests=ObjectStoreRetentionPolicy(
+                retention_class=_read_non_empty(
+                    environment,
+                    OBJECT_STORE_MANIFESTS_RETENTION_CLASS_ENV,
+                    default=DEFAULT_OBJECT_STORE_MANIFESTS_RETENTION_CLASS,
+                ),
+                retention_days=_read_positive_int(
+                    environment,
+                    OBJECT_STORE_MANIFESTS_RETENTION_DAYS_ENV,
+                    default=DEFAULT_OBJECT_STORE_MANIFESTS_RETENTION_DAYS,
+                ),
+            ),
+            parquet=ObjectStoreRetentionPolicy(
+                retention_class=_read_non_empty(
+                    environment,
+                    OBJECT_STORE_PARQUET_RETENTION_CLASS_ENV,
+                    default=DEFAULT_OBJECT_STORE_PARQUET_RETENTION_CLASS,
+                ),
+                retention_days=_read_positive_int(
+                    environment,
+                    OBJECT_STORE_PARQUET_RETENTION_DAYS_ENV,
+                    default=DEFAULT_OBJECT_STORE_PARQUET_RETENTION_DAYS,
+                ),
+            ),
+            archives=ObjectStoreRetentionPolicy(
+                retention_class=_read_non_empty(
+                    environment,
+                    OBJECT_STORE_ARCHIVES_RETENTION_CLASS_ENV,
+                    default=DEFAULT_OBJECT_STORE_ARCHIVES_RETENTION_CLASS,
+                ),
+                retention_days=_read_positive_int(
+                    environment,
+                    OBJECT_STORE_ARCHIVES_RETENTION_DAYS_ENV,
+                    default=DEFAULT_OBJECT_STORE_ARCHIVES_RETENTION_DAYS,
+                ),
+            ),
+        ),
+    )
     schema_versions = SchemaVersionConfig(
         postgres=postgres.schema_version,
         clickhouse=clickhouse.schema_version,
@@ -273,7 +438,9 @@ def load_platform_config(env: Mapping[str, str] | None = None) -> PlatformConfig
             raw_events=raw_events_prefix,
             manifests=manifests_prefix,
             parquet=parquet_prefix,
+            archives=archives_prefix,
         ),
+        lifecycle=lifecycle,
         schema_versions=schema_versions,
         cutover=cutover,
     )
@@ -372,6 +539,7 @@ def _mask_secret(value: str) -> str:
 
 
 __all__ = [
+    "ARCHIVES_PREFIX_ENV",
     "CLICKHOUSE_DATABASE_ENV",
     "CLICKHOUSE_PASSWORD_ENV",
     "CLICKHOUSE_SCHEMA_VERSION_ENV",
@@ -383,19 +551,35 @@ __all__ = [
     "ENABLE_POLYGLOT_READS_ENV",
     "ENABLE_POSTGRES_WRITES_ENV",
     "EVENT_SCHEMA_VERSION_ENV",
-    "MANIFEST_SCHEMA_VERSION_ENV",
+    "LifecycleConfig",
     "MANIFESTS_PREFIX_ENV",
+    "MANIFEST_SCHEMA_VERSION_ENV",
     "OBJECT_STORE_ACCESS_KEY_ENV",
+    "OBJECT_STORE_ARCHIVES_RETENTION_CLASS_ENV",
+    "OBJECT_STORE_ARCHIVES_RETENTION_DAYS_ENV",
     "OBJECT_STORE_BUCKET_ENV",
     "OBJECT_STORE_ENDPOINT_ENV",
+    "OBJECT_STORE_MANIFESTS_RETENTION_CLASS_ENV",
+    "OBJECT_STORE_MANIFESTS_RETENTION_DAYS_ENV",
+    "OBJECT_STORE_PARQUET_RETENTION_CLASS_ENV",
+    "OBJECT_STORE_PARQUET_RETENTION_DAYS_ENV",
     "OBJECT_STORE_PREFIX_ENV",
+    "OBJECT_STORE_RAW_EVENTS_RETENTION_CLASS_ENV",
+    "OBJECT_STORE_RAW_EVENTS_RETENTION_DAYS_ENV",
     "OBJECT_STORE_REGION_ENV",
     "OBJECT_STORE_SECRET_KEY_ENV",
     "ObjectStorageConfig",
+    "ObjectStorageLifecycleConfig",
+    "ObjectStoreRetentionPolicy",
     "PARQUET_PREFIX_ENV",
+    "POSTGRES_BOOTSTRAP_AUDIT_RETENTION_DAYS_ENV",
     "POSTGRES_DSN_ENV",
+    "POSTGRES_OUTBOX_DELIVERED_RETENTION_DAYS_ENV",
+    "POSTGRES_OUTBOX_FAILED_RETENTION_DAYS_ENV",
+    "POSTGRES_RUNTIME_CYCLES_RETENTION_DAYS_ENV",
     "POSTGRES_SCHEMA_VERSION_ENV",
     "PlatformConfig",
+    "PostgresLifecycleConfig",
     "RAW_EVENTS_PREFIX_ENV",
     "SchemaVersionConfig",
     "StoragePrefixConfig",

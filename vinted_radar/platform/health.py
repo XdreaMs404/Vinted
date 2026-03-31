@@ -249,6 +249,75 @@ def _render_platform_object_storage_lines(status: object | None) -> list[str]:
     return lines
 
 
+def render_lifecycle_report_text(report: object) -> str:
+    return "\n".join(render_lifecycle_report_lines(report))
+
+
+def render_lifecycle_report_lines(report: object) -> tuple[str, ...]:
+    as_dict = getattr(report, "as_dict", None)
+    payload = as_dict() if callable(as_dict) else {}
+    clickhouse = dict(payload.get("clickhouse") or {})
+    postgres = dict(payload.get("postgres") or {})
+    object_storage = dict(payload.get("object_storage") or {})
+    posture = dict(payload.get("posture") or {})
+    lines: list[str] = []
+    lines.append(f"Generated at: {payload.get('generated_at') or 'unknown'}")
+    lines.append(f"Apply changes: {'yes' if payload.get('apply') else 'no'}")
+    lines.append(f"PostgreSQL DSN: {payload.get('postgres_dsn') or 'n/a'}")
+    lines.append(
+        "ClickHouse: {url} / {database}".format(
+            url=payload.get("clickhouse_url") or "n/a",
+            database=payload.get("clickhouse_database") or "n/a",
+        )
+    )
+    lines.append(f"Object storage bucket: {payload.get('object_store_bucket') or 'n/a'}")
+    lines.append(f"Healthy: {'yes' if payload.get('ok') else 'no'}")
+    lines.append(f"ClickHouse TTL: {clickhouse.get('status') or 'unknown'}")
+    for action in list(clickhouse.get("actions") or []):
+        lines.append(
+            "- {table}: {status} | TTL {ttl_column} + INTERVAL {ttl_days} DAY".format(
+                table=action.get("table") or "unknown",
+                status=action.get("status") or "unknown",
+                ttl_column=action.get("ttl_column") or "n/a",
+                ttl_days=action.get("ttl_days") or 0,
+            )
+        )
+    lines.append(f"PostgreSQL prune/archive: {postgres.get('status') or 'unknown'}")
+    for action in list(postgres.get("actions") or []):
+        line = (
+            "- {table}: {status} | matched {matched_rows} | archived {archived_rows} | deleted {deleted_rows} | protected {protected_rows}".format(
+                table=action.get("table") or "unknown",
+                status=action.get("status") or "unknown",
+                matched_rows=action.get("matched_rows") or 0,
+                archived_rows=action.get("archived_rows") or 0,
+                deleted_rows=action.get("deleted_rows") or 0,
+                protected_rows=action.get("protected_rows") or 0,
+            )
+        )
+        if action.get("archive_key"):
+            line += f" | archive {action['archive_key']}"
+        lines.append(line)
+    lines.append(f"Object-storage lifecycle: {object_storage.get('status') or 'unknown'}")
+    for rule in list(object_storage.get("rules") or []):
+        lines.append(
+            "- {prefix_name}: {status} | class {retention_class} | expire {retention_days}d | objects {object_count}".format(
+                prefix_name=rule.get("prefix_name") or "unknown",
+                status=rule.get("status") or "unknown",
+                retention_class=rule.get("retention_class") or "n/a",
+                retention_days=rule.get("retention_days") or 0,
+                object_count=rule.get("object_count") or 0,
+            )
+        )
+    lines.append("Storage posture:")
+    lines.append(f"- bounded: {'yes' if posture.get('bounded') else 'no'}")
+    lines.append(f"- clickhouse ttl tables: {posture.get('clickhouse_ttl_table_count') or 0}")
+    lines.append(f"- postgres prune targets: {posture.get('postgres_prune_target_count') or 0}")
+    lines.append(f"- object-store rules: {posture.get('object_storage_rule_count') or 0}")
+    lines.append(f"- archived rows: {posture.get('archived_row_count') or 0}")
+    lines.append(f"- deleted rows: {posture.get('deleted_row_count') or 0}")
+    return tuple(lines)
+
+
 def _cutover_flag(config: object | None, name: str) -> bool:
     if config is None:
         return False
@@ -266,6 +335,8 @@ def _cutover_flag(config: object | None, name: str) -> bool:
 __all__ = [
     "CutoverStatusSnapshot",
     "PlatformHealthSnapshot",
+    "render_lifecycle_report_lines",
+    "render_lifecycle_report_text",
     "render_platform_report_lines",
     "render_platform_report_text",
     "summarize_cutover_state",

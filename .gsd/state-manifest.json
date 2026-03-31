@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T13:59:18.700Z",
+  "exported_at": "2026-03-31T14:42:39.070Z",
   "milestones": [
     {
       "id": "M001",
@@ -510,7 +510,7 @@
       "milestone_id": "M002",
       "id": "S14",
       "title": "Historical Backfill + Application Cutover",
-      "status": "pending",
+      "status": "complete",
       "risk": "high",
       "depends": [
         "S12",
@@ -518,9 +518,9 @@
       ],
       "demo": "After this: historical SQLite evidence is backfilled into PostgreSQL, ClickHouse, and the Parquet lake, the product reads the new platform end to end, and the live collector no longer depends on heavyweight SQLite history tables.",
       "created_at": "2026-03-28T12:13:33.599Z",
-      "completed_at": null,
-      "full_summary_md": "",
-      "full_uat_md": "",
+      "completed_at": "2026-03-31T14:17:42.142Z",
+      "full_summary_md": "---\nid: S14\nparent: M002\nmilestone: M002\nprovides:\n  - A resumable full backfill path from legacy SQLite into PostgreSQL mutable truth, ClickHouse replay inputs, and Parquet audit manifests\n  - A reconciliation contract and explicit cutover diagnostics for shadow validation and rollback decisions\n  - A live application cutover path where dashboard and runtime reads use PostgreSQL + ClickHouse while SQLite remains only a temporary fallback and safety valve\n  - A rerunnable cutover smoke verifier and documented VPS cutover and rollback runbook for real operator rollout\nrequires:\n  - slice: S12\n    provides: PostgreSQL mutable-truth schema, projector and backfill path, and runtime control-plane repository used for the live cutover.\n  - slice: S13\n    provides: ClickHouse serving warehouse, ingest worker, and repository-shaped analytics adapter used by overview, explorer, and detail reads.\naffects:\n  - S15\nkey_files:\n  - vinted_radar/services/full_backfill.py\n  - vinted_radar/services/reconciliation.py\n  - vinted_radar/cli.py\n  - vinted_radar/platform/health.py\n  - vinted_radar/dashboard.py\n  - vinted_radar/query/overview_clickhouse.py\n  - vinted_radar/services/discovery.py\n  - vinted_radar/services/state_refresh.py\n  - scripts/verify_cutover_stack.py\n  - scripts/verify_vps_serving.py\n  - README.md\n  - tests/test_full_backfill.py\n  - tests/test_reconciliation.py\n  - tests/test_dashboard.py\n  - tests/test_runtime_service.py\n  - tests/test_runtime_cli.py\n  - tests/test_cutover_smoke.py\n  - .gsd/KNOWLEDGE.md\n  - .gsd/PROJECT.md\nkey_decisions:\n  - Backfill PostgreSQL mutable truth directly from SQLite state/history, replay only live-compatible discovery/probe batches into ClickHouse, and keep legacy observation/runtime history as Parquet audit evidence.\n  - Persist full-backfill progress in a local JSON checkpoint so interrupted migrations can resume idempotently without duplicating ClickHouse facts or lake objects.\n  - Derive one shared cutover snapshot and expose the same mode/read-path/write-target contract across CLI, dashboard runtime payloads, and health diagnostics.\n  - Keep ClickHouse as the analytics backend while reading runtime/controller truth from PostgreSQL during cutover.\n  - Honor the published cutover read path in operator reads: `dual-write-shadow` stays on SQLite, while `polyglot-cutover` switches to the platform path.\npatterns_established:\n  - Split historical migration by store responsibility: PostgreSQL gets direct mutable-truth projection, ClickHouse gets only live-compatible serving facts, and the lake retains legacy audit evidence.\n  - Drive all cutover-facing product and operator surfaces from one shared cutover snapshot instead of re-deriving mode/read-path/write-target logic per route.\n  - Treat runtime/control-plane truth and analytical reads as separate dependencies during cutover: PostgreSQL owns controller truth, ClickHouse owns analytical serving, and shadow-mode operator reads must still honor the published SQLite read path.\nobservability_surfaces:\n  - `platform-reconcile` CLI reconciliation report across SQLite, PostgreSQL, ClickHouse, and manifest-backed object storage\n  - Shared cutover mode/read-path/write-target exposure in `runtime-status`, dashboard runtime payloads, `/api/runtime`, and `/health`\n  - `scripts/verify_cutover_stack.py` for end-to-end cutover smoke proof\n  - Expanded `scripts/verify_vps_serving.py` assertions for runtime and health cutover state during rollout and rollback\ndrill_down_paths:\n  - .gsd/milestones/M002/slices/S14/tasks/T01-SUMMARY.md\n  - .gsd/milestones/M002/slices/S14/tasks/T02-SUMMARY.md\n  - .gsd/milestones/M002/slices/S14/tasks/T03-SUMMARY.md\n  - .gsd/milestones/M002/slices/S14/tasks/T04-SUMMARY.md\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T14:17:42.144Z\nblocker_discovered: false\n---\n\n# S14: Historical Backfill + Application Cutover\n\n**Historical SQLite evidence is now backfillable into PostgreSQL, ClickHouse, and the Parquet lake, and the application/runtime stack can cut over to the new platform with explicit shadow and cutover diagnostics plus rollback proof.**\n\n## What Happened\n\nS14 turned the polyglot platform from staged infrastructure into the real migration and application path. T01 added a resumable full-backfill command that projects legacy SQLite mutable truth directly into PostgreSQL, replays live-compatible discovery and probe history through the existing ClickHouse ingest path, and exports observation/runtime history as Parquet-backed audit manifests with checkpointed progress and dry-run safety. T02 added cross-store reconciliation plus a shared cutover snapshot so CLI, dashboard runtime payloads, `/api/runtime`, `/runtime`, and `/health` all disclose the same mode, read path, write targets, and warnings. T03 then cut dashboard, runtime, CLI, and live mutable-truth writes onto the PostgreSQL + ClickHouse stack with SQLite preserved only as a temporary fallback and shadow safety valve. During slice closeout verification I found and fixed one integration regression in that contract: `runtime-status` must continue reading SQLite while the cutover snapshot still says `dual-write-shadow`; only `polyglot-cutover` should route those reads to the new platform. T04 completed the operator proof story with `scripts/verify_cutover_stack.py`, stronger `verify_vps_serving.py` cutover assertions, and a VPS cutover/rollback runbook in `README.md`.\n\n## Operational Readiness (Q8)\n- **Health signal:** `platform-doctor` healthy, reconciliation reports match across stores, `/api/runtime` and `/health` expose the expected cutover snapshot, and `verify_cutover_stack.py` can prove PostgreSQL truth, ClickHouse ingest settlement, object-storage evidence, and served routes together.\n- **Failure signal:** reconciliation mismatches, failed ClickHouse ingest checkpoints, cutover warnings on runtime/health surfaces, or `verify_cutover_stack.py` / `verify_vps_serving.py` reporting the wrong mode/read path or a missing representative listing.\n- **Recovery procedure:** set `VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS=false`; if the platform itself is unhealthy also disable the three platform-write flags, restart the dashboard first and then the collector/runtime service, and rerun `scripts/verify_vps_serving.py` to confirm the fallback path is healthy.\n- **Monitoring gaps:** this shell cannot execute the Docker-backed cutover smoke, and continuous scheduled reconciliation / retention enforcement still belongs to S15.\n\n## Verification\n\nSlice-plan verification passed with the following evidence:\n- `python3 -m pytest tests/test_full_backfill.py -q` → 4 passed\n- `python3 -m pytest tests/test_reconciliation.py -q` → 4 passed\n- `python3 -m pytest tests/test_dashboard.py tests/test_runtime_service.py -q` → 24 passed\n- `python3 -m pytest tests/test_runtime_cli.py -q` → 14 passed\n- `python3 -m pytest tests/test_cutover_smoke.py -q` → exit 0, 1 skipped (Docker unavailable in this shell)\n- `python3 -m pytest tests/test_cli_smoke.py tests/test_cutover_smoke.py -q` → 2 passed, 1 skipped\n\nTogether these checks prove the resumable backfill path, cross-store reconciliation, explicit cutover observability, application/runtime cutover behavior, the shadow-mode SQLite read-path fix, and the shipped smoke/runbook acceptance path.\n\n## Requirements Advanced\n\n- R002 — Historical observations, current-state truth, and runtime continuity can now be migrated off legacy SQLite without discarding the evidence needed for first/last-seen and revisit history.\n- R010 — Batch and runtime control now work against PostgreSQL mutable truth during platform writes, while the product can switch reads onto ClickHouse + PostgreSQL through explicit cutover flags rather than an implicit SQLite dependency.\n- R011 — Cutover mode, read path, write targets, and reconciliation status are now explicit across runtime and health diagnostics instead of being hidden behind silent migration state.\n\n## Requirements Validated\n\nNone.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Deviations\n\nUsed `python3` instead of `python` because this shell does not expose a `python` executable. Slice closeout also uncovered one integration regression: `runtime-status` incorrectly tried PostgreSQL during `dual-write-shadow` even though shadow-mode reads are supposed to remain on SQLite. I fixed that in `vinted_radar/cli.py` and reran the reconciliation and runtime CLI suites before closing the slice. The Docker-backed cutover smoke remains environment-gated here because the local shell has no Docker binary, so local acceptance relied on the clean skip plus the updated public-route smoke regression.\n\n## Known Limitations\n\nThe full container-backed cutover smoke remains unavailable in shells without Docker, so this environment could only prove the shipped harness wiring and the public-route smoke regression rather than the full live stack. Also, the SQLite fallback/shadow path remains intentionally present as a migration safety valve until operators fully commit to `polyglot-cutover`; ongoing retention and automated reconciliation are deferred to S15.\n\n## Follow-ups\n\nS15 should automate scheduled reconciliation and retention so shadow/cutover integrity remains continuously auditable instead of only operator-invoked. The Docker-backed `verify_cutover_stack.py` path should also run in a Docker-capable CI or VPS environment on every real cutover and rollback.\n\n## Files Created/Modified\n\n- `vinted_radar/services/full_backfill.py` — Added resumable orchestration for SQLite → PostgreSQL/ClickHouse/object-storage backfill with checkpointed progress.\n- `vinted_radar/cli.py` — Added reconciliation/reporting commands, cutover-aware runtime status behavior, and wired the backfill/cutover operator surface.\n- `vinted_radar/platform/health.py` — Centralized cutover mode/read-path/write-target summarization and platform-health rendering.\n- `vinted_radar/dashboard.py` — Cut dashboard/runtime payload assembly over to the polyglot query path with shared cutover diagnostics.\n- `vinted_radar/query/overview_clickhouse.py` — Provided ClickHouse-backed product reads while delegating runtime/control-plane truth to PostgreSQL.\n- `vinted_radar/services/discovery.py` — Projected live discovery mutable truth into PostgreSQL during cutover instead of relying on legacy SQLite-only mutation paths.\n- `vinted_radar/services/state_refresh.py` — Projected probe refresh results directly into PostgreSQL mutable truth during cutover.\n- `scripts/verify_cutover_stack.py` — Added rerunnable live cutover smoke proof across doctor, ingest, PostgreSQL truth, object storage, and served routes.\n- `scripts/verify_vps_serving.py` — Extended public-route verification to assert runtime/health cutover state during rollout and rollback.\n- `README.md` — Documented the cutover-mode contract plus VPS cutover and rollback runbook.\n- `tests/test_full_backfill.py` — Added focused regression coverage for full backfill.\n- `tests/test_reconciliation.py` — Added focused regression coverage for reconciliation and cutover diagnostics.\n- `tests/test_dashboard.py` — Added dashboard cutover regression coverage.\n- `tests/test_runtime_service.py` — Added runtime cutover regression coverage.\n- `tests/test_runtime_cli.py` — Added CLI runtime/control-plane cutover regression coverage.\n- `tests/test_cutover_smoke.py` — Added cutover smoke acceptance coverage.\n- `.gsd/KNOWLEDGE.md` — Recorded the dual-write-shadow read-path gotcha for future agents.\n- `.gsd/PROJECT.md` — Refreshed project state to mark S14 complete and describe the new cutover verification baseline.\n",
+      "full_uat_md": "# S14: Historical Backfill + Application Cutover — UAT\n\n**Milestone:** M002\n**Written:** 2026-03-31T14:17:42.144Z\n\n# S14 UAT — Historical Backfill + Application Cutover\n\n## Objective\nProve that historical SQLite evidence can be migrated into PostgreSQL, ClickHouse, and Parquet-backed object storage, that cutover state is explicit on operator and product surfaces, and that the application can read the new platform end to end with a documented rollback path.\n\n## Acceptance checks\n1. **Historical backfill:** `python3 -m pytest tests/test_full_backfill.py -q`\n   - Expected: resumable full-backfill flow passes with checkpoint, dry-run, PostgreSQL projection, ClickHouse replay, and lake-manifest coverage.\n2. **Reconciliation + observability:** `python3 -m pytest tests/test_reconciliation.py -q`\n   - Expected: SQLite/PostgreSQL/ClickHouse/object-storage reconciliation passes and runtime/health surfaces expose explicit cutover mode, read path, and write targets.\n3. **Application/runtime cutover:** `python3 -m pytest tests/test_dashboard.py tests/test_runtime_service.py -q` and `python3 -m pytest tests/test_runtime_cli.py -q`\n   - Expected: dashboard/runtime payloads and CLI control-plane behavior pass on the polyglot path, while `dual-write-shadow` still reads runtime status from SQLite.\n4. **Cutover smoke proof:** `python3 -m pytest tests/test_cutover_smoke.py -q`\n   - Expected: exit 0; in environments without Docker this should skip cleanly rather than fail.\n5. **Public-route smoke fallback:** `python3 -m pytest tests/test_cli_smoke.py tests/test_cutover_smoke.py -q`\n   - Expected: public-serving smoke remains green and the cutover smoke keeps a clean skip when Docker is unavailable.\n\n## Result\n**Pass with environment note.** All slice-level verification checks passed. The only environment constraint was the Docker-backed live cutover smoke, which skipped cleanly because this shell does not provide a `docker` binary.\n\n## Operator notes\n- `dual-write-shadow` keeps SQLite as the operator and product read path while platform writes shadow in PostgreSQL, ClickHouse, and object storage.\n- `polyglot-cutover` moves product and runtime reads onto PostgreSQL + ClickHouse.\n- Before and after a real rollout, operators should run `scripts/verify_cutover_stack.py` and `scripts/verify_vps_serving.py` from the same environment contract used by the services.\n- Rollback remains: disable `VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS`, disable platform write flags if the platform itself is unhealthy, restart dashboard first, then restart collector/runtime, and rerun the serving smoke.\n",
       "goal": "Migrate historical continuity, cut reads and writes over to the new platform end to end, and retire the SQLite-heavy live loop from the real product path without losing auditability or product truth.",
       "success_criteria": "- Historical SQLite data required for continuity is backfilled or explicitly retired under policy.\n- Dashboard, CLI, health, and collector read/write paths run on PostgreSQL + ClickHouse + object storage end to end.\n- Reconciliation proves continuity across old and new stores during cutover.\n- The live collector no longer depends on heavyweight SQLite history tables for the real product path.",
       "proof_level": "Historical backfill verification, dual-write reconciliation, browser/CLI route proof, and live cycle proof on the cut-over platform.",
@@ -1577,19 +1577,29 @@
       "milestone_id": "M002",
       "slice_id": "S15",
       "id": "T01",
-      "title": "Retention + bounded-storage jobs",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added a `platform-lifecycle` retention command that enforces ClickHouse TTL, archives/prunes transient PostgreSQL rows, and reports explicit storage posture.",
+      "status": "complete",
+      "one_liner": "Added a `platform-lifecycle` retention command that enforces ClickHouse TTL, archives/prunes transient PostgreSQL rows, and reports explicit storage posture.",
+      "narrative": "Implemented a dedicated lifecycle service for bounded platform storage. The new service reasserts ClickHouse TTL policies for fact and rollup tables, archives transient PostgreSQL rows under the object-store archives prefix before pruning them, and configures/report object-store lifecycle rules for raw events, manifests, parquet, and archive prefixes. I extended the shared platform config with explicit lifecycle settings, added CLI/report rendering for the new storage-posture surface, documented the operator contract, and added focused lifecycle tests. During verification I found and fixed an archive-key collision between delivered and failed outbox lifecycle jobs so each archive payload now persists under its own object key.",
+      "verification_result": "Verified the new lifecycle service and CLI/report surface with targeted pytest coverage. `tests/test_lifecycle_jobs.py` passed end to end, covering lifecycle config defaults/overrides, ClickHouse TTL enforcement, PostgreSQL archive/prune behavior, object-store lifecycle rule configuration, and CLI rendering. `tests/test_platform_config.py` also passed after the shared config contract gained lifecycle fields.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T14:42:39.042Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Local verification used `python3 -m pytest ...` instead of the plan's `python -m pytest ...` because this workstation does not expose a `python` binary in PATH.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/services/lifecycle.py",
+        "vinted_radar/platform/config.py",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/cli.py",
+        "tests/test_lifecycle_jobs.py",
+        "README.md"
+      ],
+      "key_decisions": [
+        "Treat delivered/failed outbox rows, bootstrap audit rows, and completed runtime-cycle history as transient PostgreSQL data that is archived to object storage before prune (recorded as D060).",
+        "Keep bounded-storage observability on one `platform-lifecycle` CLI/report surface instead of scattering retention state across hidden config and ad hoc commands."
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S15\nmilestone: M002\nkey_files:\n  - vinted_radar/services/lifecycle.py\n  - vinted_radar/platform/config.py\n  - vinted_radar/platform/health.py\n  - vinted_radar/cli.py\n  - tests/test_lifecycle_jobs.py\n  - README.md\nkey_decisions:\n  - Treat delivered/failed outbox rows, bootstrap audit rows, and completed runtime-cycle history as transient PostgreSQL data that is archived to object storage before prune (recorded as D060).\n  - Keep bounded-storage observability on one `platform-lifecycle` CLI/report surface instead of scattering retention state across hidden config and ad hoc commands.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T14:42:39.042Z\nblocker_discovered: false\n---\n\n# T01: Added a `platform-lifecycle` retention command that enforces ClickHouse TTL, archives/prunes transient PostgreSQL rows, and reports explicit storage posture.\n\n**Added a `platform-lifecycle` retention command that enforces ClickHouse TTL, archives/prunes transient PostgreSQL rows, and reports explicit storage posture.**\n\n## What Happened\n\nImplemented a dedicated lifecycle service for bounded platform storage. The new service reasserts ClickHouse TTL policies for fact and rollup tables, archives transient PostgreSQL rows under the object-store archives prefix before pruning them, and configures/report object-store lifecycle rules for raw events, manifests, parquet, and archive prefixes. I extended the shared platform config with explicit lifecycle settings, added CLI/report rendering for the new storage-posture surface, documented the operator contract, and added focused lifecycle tests. During verification I found and fixed an archive-key collision between delivered and failed outbox lifecycle jobs so each archive payload now persists under its own object key.\n\n## Verification\n\nVerified the new lifecycle service and CLI/report surface with targeted pytest coverage. `tests/test_lifecycle_jobs.py` passed end to end, covering lifecycle config defaults/overrides, ClickHouse TTL enforcement, PostgreSQL archive/prune behavior, object-store lifecycle rule configuration, and CLI rendering. `tests/test_platform_config.py` also passed after the shared config contract gained lifecycle fields.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m pytest tests/test_lifecycle_jobs.py -q` | 0 | ✅ pass | 1091ms |\n| 2 | `python3 -m pytest tests/test_platform_config.py -q` | 0 | ✅ pass | 602ms |\n\n\n## Deviations\n\nLocal verification used `python3 -m pytest ...` instead of the plan's `python -m pytest ...` because this workstation does not expose a `python` binary in PATH.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/services/lifecycle.py`\n- `vinted_radar/platform/config.py`\n- `vinted_radar/platform/health.py`\n- `vinted_radar/cli.py`\n- `tests/test_lifecycle_jobs.py`\n- `README.md`\n",
       "description": "Implement bounded-storage lifecycle controls. Add ClickHouse TTL policy activation, PostgreSQL pruning/archival jobs for mutable transient data, object-store retention classes/lifecycle config, and reporting that makes current storage posture visible instead of implicit.",
       "estimate": "2 sessions",
       "files": [
@@ -2395,6 +2405,66 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 177,
+      "id": "D056",
+      "when_context": "M002/S14/T02",
+      "scope": "observability",
+      "decision": "Cutover state derivation across CLI/dashboard/health surfaces",
+      "choice": "Use one shared summarize_cutover_state helper and thread the same snapshot into runtime-status, /api/runtime, /runtime, and /health",
+      "rationale": "S14 needs operators to see one consistent mode/read-path/write-target contract during shadow validation and cutover. Re-deriving those flags independently per surface would drift and make rollback/cutover state ambiguous.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 178,
+      "id": "D057",
+      "when_context": "M002/S14/T01",
+      "scope": "migration-operations",
+      "decision": "Historical backfill resumability",
+      "choice": "Persist full-backfill progress in a local JSON checkpoint and resume idempotently from that checkpoint",
+      "rationale": "S14 historical migration spans PostgreSQL mutable truth, ClickHouse replay, and object-storage manifests. A local checkpoint lets interrupted backfills restart without duplicating ClickHouse facts or lake objects, which is essential for large corpora and operator reruns.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 179,
+      "id": "D058",
+      "when_context": "M002/S14/T03",
+      "scope": "runtime-architecture",
+      "decision": "Runtime control-plane cutover threshold",
+      "choice": "Treat PostgreSQL write activation as sufficient to move runtime control-plane commands onto PostgreSQL before full polyglot reads are enabled",
+      "rationale": "During S14 the runtime controller and cycle truth already belong to PostgreSQL mutable truth once platform writes are active, even while dashboard/product analytical reads may still remain on SQLite/ClickHouse shadow paths. Moving pause/resume and runtime mutation surfaces early avoids split-brain control-plane state.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 180,
+      "id": "D059",
+      "when_context": "M002/S14 closeout",
+      "scope": "observability",
+      "decision": "Shadow-mode operator read-path contract",
+      "choice": "Keep runtime-status and other operator read surfaces on SQLite during dual-write-shadow, and switch them only when cutover read_path becomes polyglot-platform",
+      "rationale": "Slice closeout verification exposed that shadow-mode diagnostics become dishonest if runtime-status jumps to PostgreSQL just because platform writes are enabled. Operators need read surfaces to honor the published cutover snapshot so shadow validation stays on SQLite until read cutover is explicitly enabled.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 181,
+      "id": "D060",
+      "when_context": "M002/S15/T01",
+      "scope": "architecture",
+      "decision": "How platform retention should bound transient control-plane storage without losing operator evidence",
+      "choice": "Treat delivered/failed outbox rows, bootstrap audit rows, and completed runtime-cycle history as transient PostgreSQL data; archive them under the object-store archives prefix before pruning, re-assert ClickHouse TTL via lifecycle jobs, and publish the resulting storage posture through a dedicated CLI report.",
+      "rationale": "ClickHouse already owns bounded analytical retention and object storage already owns durable evidence. Keeping transient delivery/control-plane history indefinitely in PostgreSQL would grow the mutable store without improving replay or auditability. Archiving before prune preserves operator evidence while keeping PostgreSQL bounded and making the retention posture explicit.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -2804,6 +2874,28 @@
       "verdict": "✅ pass (2 passed, 1 skipped)",
       "duration_ms": 990,
       "created_at": "2026-03-31T13:59:18.670Z"
+    },
+    {
+      "id": 60,
+      "task_id": "T01",
+      "slice_id": "S15",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_lifecycle_jobs.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1091,
+      "created_at": "2026-03-31T14:42:39.042Z"
+    },
+    {
+      "id": 61,
+      "task_id": "T01",
+      "slice_id": "S15",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_platform_config.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 602,
+      "created_at": "2026-03-31T14:42:39.042Z"
     }
   ]
 }

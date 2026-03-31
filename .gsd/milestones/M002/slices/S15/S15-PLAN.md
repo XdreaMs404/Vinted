@@ -4,7 +4,7 @@
 **Demo:** After this: After this: TTL, compaction, reconciliation, and AI-ready feature/evidence marts keep the new platform bounded, auditable, and ready for grounded intelligence work.
 
 ## Tasks
-- [ ] **T01: Retention + bounded-storage jobs** — Implement bounded-storage lifecycle controls. Add ClickHouse TTL policy activation, PostgreSQL pruning/archival jobs for mutable transient data, object-store retention classes/lifecycle config, and reporting that makes current storage posture visible instead of implicit.
+- [x] **T01: Added a `platform-lifecycle` retention command that enforces ClickHouse TTL, archives/prunes transient PostgreSQL rows, and reports explicit storage posture.** — Implement bounded-storage lifecycle controls. Add ClickHouse TTL policy activation, PostgreSQL pruning/archival jobs for mutable transient data, object-store retention classes/lifecycle config, and reporting that makes current storage posture visible instead of implicit.
   - Estimate: 2 sessions
   - Files: vinted_radar/services/lifecycle.py, vinted_radar/platform/health.py, vinted_radar/cli.py, infra/clickhouse/, README.md, tests/test_lifecycle_jobs.py
   - Verify: python -m pytest tests/test_lifecycle_jobs.py -q

@@ -48,10 +48,23 @@ Shared environment contract loaded by `load_platform_config()`:
 | `VINTED_RADAR_PLATFORM_RAW_EVENTS_PREFIX` | `<root>/events/raw` | Raw event-envelope/object prefix. |
 | `VINTED_RADAR_PLATFORM_MANIFESTS_PREFIX` | `<root>/manifests` | Evidence/outbox manifest prefix. |
 | `VINTED_RADAR_PLATFORM_PARQUET_PREFIX` | `<root>/parquet` | Parquet/warehouse object prefix. |
-| `VINTED_RADAR_PLATFORM_POSTGRES_SCHEMA_VERSION` | `2` | Expected PostgreSQL migration baseline. |
-| `VINTED_RADAR_PLATFORM_CLICKHOUSE_SCHEMA_VERSION` | `1` | Expected ClickHouse migration baseline. |
+| `VINTED_RADAR_PLATFORM_ARCHIVES_PREFIX` | `<root>/archives` | Archive prefix for lifecycle-pruned PostgreSQL transient rows. |
+| `VINTED_RADAR_PLATFORM_POSTGRES_SCHEMA_VERSION` | `3` | Expected PostgreSQL migration baseline. |
+| `VINTED_RADAR_PLATFORM_CLICKHOUSE_SCHEMA_VERSION` | `2` | Expected ClickHouse migration baseline. |
 | `VINTED_RADAR_PLATFORM_EVENT_SCHEMA_VERSION` | `1` | Event-envelope schema version. |
 | `VINTED_RADAR_PLATFORM_MANIFEST_SCHEMA_VERSION` | `1` | Manifest schema version. |
+| `VINTED_RADAR_PLATFORM_BOOTSTRAP_AUDIT_RETENTION_DAYS` | `30` | How long to keep PostgreSQL bootstrap-audit rows before archiving + pruning. |
+| `VINTED_RADAR_PLATFORM_OUTBOX_DELIVERED_RETENTION_DAYS` | `14` | How long to keep delivered PostgreSQL outbox rows before archiving + pruning. |
+| `VINTED_RADAR_PLATFORM_OUTBOX_FAILED_RETENTION_DAYS` | `30` | How long to keep failed PostgreSQL outbox rows before archiving + pruning. |
+| `VINTED_RADAR_PLATFORM_RUNTIME_CYCLES_RETENTION_DAYS` | `90` | How long to keep completed PostgreSQL runtime-cycle history before archiving + pruning. |
+| `VINTED_RADAR_PLATFORM_RAW_EVENTS_RETENTION_CLASS` | `transient-evidence` | Logical retention class reported for raw event objects. |
+| `VINTED_RADAR_PLATFORM_RAW_EVENTS_RETENTION_DAYS` | `730` | Object-store expiry window for the raw-events prefix. |
+| `VINTED_RADAR_PLATFORM_MANIFESTS_RETENTION_CLASS` | `audit-manifest` | Logical retention class reported for manifest objects. |
+| `VINTED_RADAR_PLATFORM_MANIFESTS_RETENTION_DAYS` | `3650` | Object-store expiry window for the manifests prefix. |
+| `VINTED_RADAR_PLATFORM_PARQUET_RETENTION_CLASS` | `warehouse` | Logical retention class reported for Parquet warehouse objects. |
+| `VINTED_RADAR_PLATFORM_PARQUET_RETENTION_DAYS` | `3650` | Object-store expiry window for the Parquet prefix. |
+| `VINTED_RADAR_PLATFORM_ARCHIVES_RETENTION_CLASS` | `archive` | Logical retention class reported for lifecycle archive objects. |
+| `VINTED_RADAR_PLATFORM_ARCHIVES_RETENTION_DAYS` | `3650` | Object-store expiry window for the archive prefix. |
 | `VINTED_RADAR_PLATFORM_ENABLE_POSTGRES_WRITES` | `false` | Future cutover flag for PostgreSQL writes. |
 | `VINTED_RADAR_PLATFORM_ENABLE_CLICKHOUSE_WRITES` | `false` | Future cutover flag for ClickHouse writes. |
 | `VINTED_RADAR_PLATFORM_ENABLE_OBJECT_STORAGE_WRITES` | `false` | Future cutover flag for object-storage writes. |
@@ -81,6 +94,12 @@ Use the read-mostly doctor afterwards whenever you want a redacted health snapsh
 
 ```bash
 python -m vinted_radar.cli platform-doctor
+```
+
+When you want the bounded-storage jobs to actually enforce ClickHouse TTL, prune/archive transient PostgreSQL rows, and publish the current storage posture explicitly, run:
+
+```bash
+python -m vinted_radar.cli platform-lifecycle
 ```
 
 What `platform-bootstrap` wires up:

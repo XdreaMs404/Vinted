@@ -24,6 +24,7 @@ from vinted_radar.platform import (
     render_platform_report_lines,
     summarize_cutover_state,
 )
+from vinted_radar.platform.health import render_lifecycle_report_lines
 from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
@@ -33,6 +34,7 @@ from vinted_radar.services.discovery import DiscoveryOptions, build_default_serv
 from vinted_radar.services.evidence_export import HistoricalEvidenceExportReport, HistoricalEvidenceExporter
 from vinted_radar.services.evidence_lookup import EvidenceLookupResult, EvidenceLookupService
 from vinted_radar.services.full_backfill import FullBackfillReport, run_full_backfill
+from vinted_radar.services.lifecycle import LifecycleReport, run_lifecycle_jobs
 from vinted_radar.services.postgres_backfill import PostgresBackfillReport, backfill_postgres_mutable_truth
 from vinted_radar.services.reconciliation import ReconciliationReport, run_reconciliation
 from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
@@ -434,6 +436,41 @@ def platform_doctor(
         raise typer.Exit(code=1)
 
 
+@app.command("platform-lifecycle")
+def platform_lifecycle(
+    apply: bool = typer.Option(True, "--apply/--dry-run", help="Apply lifecycle controls or render the storage posture without mutating platform state."),
+    reference_now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic retention cutoffs and archive keys."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        report = run_lifecycle_jobs(
+            config=config,
+            apply=apply,
+            reference_now=reference_now,
+        )
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Platform lifecycle failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        if not report.ok:
+            raise typer.Exit(code=1)
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_lifecycle_report(report)
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
 @app.command("postgres-backfill")
 def postgres_backfill(
     db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
@@ -736,10 +773,14 @@ def runtime_status(
     output_format: str = typer.Option("table", "--format", help="table or json."),
     now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic runtime timing output."),
 ) -> None:
-    with _open_runtime_control_plane_repository(db) as repository:
-        status = repository.runtime_status(limit=limit, now=now)
-
     cutover = _load_cutover_snapshot()
+    if cutover.read_path == "polyglot-platform":
+        with _open_runtime_control_plane_repository(db) as repository:
+            status = repository.runtime_status(limit=limit, now=now)
+    else:
+        with RadarRepository(db) as repository:
+            status = repository.runtime_status(limit=limit, now=now)
+
     status = {**status, "cutover": cutover.as_dict()}
 
     if status["latest_cycle"] is None and status.get("controller") is None:
@@ -1819,6 +1860,11 @@ def _emit_platform_report(*, report: object, output_format: str) -> None:
 
 def _render_platform_report(report: object) -> None:
     for line in render_platform_report_lines(report):
+        typer.echo(line)
+
+
+def _render_lifecycle_report(report: LifecycleReport) -> None:
+    for line in render_lifecycle_report_lines(report):
         typer.echo(line)
 
 
