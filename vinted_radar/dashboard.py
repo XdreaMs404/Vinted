@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 
-from vinted_radar.platform import load_platform_config
+from vinted_radar.platform import load_platform_config, summarize_cutover_state
 from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import load_listing_score_detail
@@ -24,6 +24,14 @@ MAX_LIMIT = 24
 SEGMENT_LIMIT = 6
 DEFAULT_EXPLORER_PAGE_SIZE = 50
 MAX_EXPLORER_PAGE_SIZE = 100
+
+
+def _load_cutover_snapshot():
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        return summarize_cutover_state(None, config_error=str(exc))
+    return summarize_cutover_state(config)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +207,9 @@ class DashboardApplication:
 
         if path == "/api/runtime":
             with self._open_query_backend() as query_backend:
-                payload = query_backend.runtime_status(limit=8, now=self.now)
+                runtime_status = query_backend.runtime_status(limit=8, now=self.now)
+            payload = dict(runtime_status)
+            payload["cutover"] = _load_cutover_snapshot().as_dict()
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
@@ -244,6 +254,7 @@ class DashboardApplication:
                 coverage = query_backend.coverage_summary()
                 freshness = query_backend.overview_snapshot(now=self.now)["summary"]["inventory"]
                 runtime_status = query_backend.runtime_status(limit=1, now=self.now)
+            cutover = _load_cutover_snapshot()
             body = json.dumps(
                 {
                     "status": "ok",
@@ -254,6 +265,7 @@ class DashboardApplication:
                     "runtime_controller": runtime_status.get("controller"),
                     "latest_runtime_cycle": runtime_status["latest_cycle"],
                     "acquisition": runtime_status.get("acquisition"),
+                    "cutover": cutover.as_dict(),
                     "serving": {
                         "base_path": route_context.base_path or "/",
                         "public_base_url": route_context.public_base_url,
@@ -569,6 +581,7 @@ def build_runtime_payload(
     latest_cycle = runtime.get("latest_cycle") or {}
     heartbeat = runtime.get("heartbeat") or {}
     acquisition = runtime.get("acquisition") or {}
+    cutover = _load_cutover_snapshot()
     return {
         "generated_at": generated_at,
         "db_path": str(repository.db_path),
@@ -578,6 +591,7 @@ def build_runtime_payload(
         },
         "runtime": runtime,
         "acquisition": acquisition,
+        "cutover": cutover.as_dict(),
         "summary": {
             "status": runtime.get("status"),
             "phase": runtime.get("phase"),
@@ -596,6 +610,11 @@ def build_runtime_payload(
             "latest_cycle_id": runtime.get("latest_cycle_id"),
             "controller_mode": controller.get("mode"),
             "acquisition_status": acquisition.get("status"),
+            "cutover_mode": cutover.mode,
+            "cutover_read_path": cutover.read_path,
+            "cutover_dual_write_active": cutover.dual_write_active,
+            "cutover_write_targets": list(cutover.write_targets),
+            "cutover_warnings": list(cutover.warnings),
         },
         "latest_cycle": latest_cycle,
         "recent_cycles": runtime.get("recent_cycles") or [],
@@ -1814,6 +1833,9 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
         ("Statut courant", status_label),
         ("Phase", _runtime_phase_label(summary.get("phase"))),
         ("Mode", str(current_mode)),
+        ("Cutover", str(summary.get("cutover_mode") or "inconnu")),
+        ("Lecture", str(summary.get("cutover_read_path") or "inconnue")),
+        ("Écritures", ", ".join(list(summary.get("cutover_write_targets") or [])) or "n/a"),
         ("Dernier heartbeat", _format_optional_timestamp(summary.get("updated_at"))),
         ("Âge du heartbeat", _format_seconds_duration(heartbeat.get("age_seconds"))),
         ("Heartbeat périmé", "oui" if heartbeat.get("is_stale") else "non"),

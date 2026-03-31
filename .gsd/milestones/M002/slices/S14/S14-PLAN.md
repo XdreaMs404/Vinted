@@ -8,7 +8,7 @@
   - Estimate: 2-3 sessions
   - Files: vinted_radar/services/full_backfill.py, vinted_radar/cli.py, tests/test_full_backfill.py
   - Verify: python -m pytest tests/test_full_backfill.py -q
-- [ ] **T02: Reconciliation + cutover controls** — Add reconciliation and cutover controls. Implement row-count/time-window reconciliation across SQLite, PostgreSQL, ClickHouse, and object storage manifests; expose cutover mode in config/health/runtime diagnostics; and make dual-write/read-cutover state explicit so deployment is observable instead of implicit.
+- [x] **T02: Added a cross-store reconciliation command and made cutover state explicit in CLI, runtime, and health diagnostics.** — Add reconciliation and cutover controls. Implement row-count/time-window reconciliation across SQLite, PostgreSQL, ClickHouse, and object storage manifests; expose cutover mode in config/health/runtime diagnostics; and make dual-write/read-cutover state explicit so deployment is observable instead of implicit.
   - Estimate: 2 sessions
   - Files: vinted_radar/services/reconciliation.py, vinted_radar/platform/health.py, vinted_radar/cli.py, tests/test_reconciliation.py
   - Verify: python -m pytest tests/test_reconciliation.py -q

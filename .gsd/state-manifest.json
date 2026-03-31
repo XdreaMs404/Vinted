@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T12:09:21.683Z",
+  "exported_at": "2026-03-31T13:08:53.235Z",
   "milestones": [
     {
       "id": "M001",
@@ -1423,19 +1423,30 @@
       "milestone_id": "M002",
       "slice_id": "S14",
       "id": "T02",
-      "title": "Reconciliation + cutover controls",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added a cross-store reconciliation command and made cutover state explicit in CLI, runtime, and health diagnostics.",
+      "status": "complete",
+      "one_liner": "Added a cross-store reconciliation command and made cutover state explicit in CLI, runtime, and health diagnostics.",
+      "narrative": "Completed the partial reconciliation work by wiring the existing reconciliation service into a new `platform-reconcile` CLI command, adding table and JSON output, and failing the command when any store mismatches the SQLite baseline. Finished cutover observability by loading one shared cutover snapshot into `runtime-status`, runtime payload construction, `/api/runtime`, `/health`, and the runtime page controller facts so operators can see explicit read-path and dual-write state instead of inferring it from raw booleans. Added `tests/test_reconciliation.py` to cover the real reconciliation flow against a backfilled SQLite corpus plus fake PostgreSQL/ClickHouse/object-storage targets, the new CLI command wiring, platform health cutover rendering, and the runtime/health cutover surfaces.",
+      "verification_result": "Verified with `python3 -m pytest tests/test_reconciliation.py -q`, which passed all four focused tests. The suite proved PostgreSQL, ClickHouse, and manifest-backed object storage reconcile against the SQLite source, the new CLI forwards options and emits the reconciliation report, platform health text shows explicit cutover warnings, and runtime/health payloads expose the cutover snapshot.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T13:08:53.205Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Used `python3` instead of `python` for verification because the local shell exposes `python3` rather than `python`.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/services/reconciliation.py",
+        "vinted_radar/cli.py",
+        "vinted_radar/dashboard.py",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/platform/postgres_repository.py",
+        "tests/platform_test_fakes.py",
+        "tests/test_reconciliation.py"
+      ],
+      "key_decisions": [
+        "Reuse one shared cutover snapshot helper across CLI, dashboard runtime payloads, and health JSON instead of re-deriving deployment mode independently in each surface.",
+        "Reconciliation should compare source SQLite baselines to PostgreSQL, ClickHouse, and object-storage snapshots with row-count parity everywhere and time-window parity wherever the target store preserves source timestamps."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S14\nmilestone: M002\nkey_files:\n  - vinted_radar/services/reconciliation.py\n  - vinted_radar/cli.py\n  - vinted_radar/dashboard.py\n  - vinted_radar/platform/health.py\n  - vinted_radar/platform/postgres_repository.py\n  - tests/platform_test_fakes.py\n  - tests/test_reconciliation.py\nkey_decisions:\n  - Reuse one shared cutover snapshot helper across CLI, dashboard runtime payloads, and health JSON instead of re-deriving deployment mode independently in each surface.\n  - Reconciliation should compare source SQLite baselines to PostgreSQL, ClickHouse, and object-storage snapshots with row-count parity everywhere and time-window parity wherever the target store preserves source timestamps.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T13:08:53.205Z\nblocker_discovered: false\n---\n\n# T02: Added a cross-store reconciliation command and made cutover state explicit in CLI, runtime, and health diagnostics.\n\n**Added a cross-store reconciliation command and made cutover state explicit in CLI, runtime, and health diagnostics.**\n\n## What Happened\n\nCompleted the partial reconciliation work by wiring the existing reconciliation service into a new `platform-reconcile` CLI command, adding table and JSON output, and failing the command when any store mismatches the SQLite baseline. Finished cutover observability by loading one shared cutover snapshot into `runtime-status`, runtime payload construction, `/api/runtime`, `/health`, and the runtime page controller facts so operators can see explicit read-path and dual-write state instead of inferring it from raw booleans. Added `tests/test_reconciliation.py` to cover the real reconciliation flow against a backfilled SQLite corpus plus fake PostgreSQL/ClickHouse/object-storage targets, the new CLI command wiring, platform health cutover rendering, and the runtime/health cutover surfaces.\n\n## Verification\n\nVerified with `python3 -m pytest tests/test_reconciliation.py -q`, which passed all four focused tests. The suite proved PostgreSQL, ClickHouse, and manifest-backed object storage reconcile against the SQLite source, the new CLI forwards options and emits the reconciliation report, platform health text shows explicit cutover warnings, and runtime/health payloads expose the cutover snapshot.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m pytest tests/test_reconciliation.py -q` | 0 | ✅ pass | 927ms |\n\n\n## Deviations\n\nUsed `python3` instead of `python` for verification because the local shell exposes `python3` rather than `python`.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/services/reconciliation.py`\n- `vinted_radar/cli.py`\n- `vinted_radar/dashboard.py`\n- `vinted_radar/platform/health.py`\n- `vinted_radar/platform/postgres_repository.py`\n- `tests/platform_test_fakes.py`\n- `tests/test_reconciliation.py`\n",
       "description": "Add reconciliation and cutover controls. Implement row-count/time-window reconciliation across SQLite, PostgreSQL, ClickHouse, and object storage manifests; expose cutover mode in config/health/runtime diagnostics; and make dual-write/read-cutover state explicit so deployment is observable instead of implicit.",
       "estimate": "2 sessions",
       "files": [
@@ -2704,6 +2715,17 @@
       "verdict": "✅ pass",
       "duration_ms": 786,
       "created_at": "2026-03-31T12:09:21.650Z"
+    },
+    {
+      "id": 56,
+      "task_id": "T02",
+      "slice_id": "S14",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_reconciliation.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 927,
+      "created_at": "2026-03-31T13:08:53.205Z"
     }
   ]
 }

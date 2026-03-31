@@ -32,6 +32,7 @@ from vinted_radar.services.evidence_export import HistoricalEvidenceExportReport
 from vinted_radar.services.evidence_lookup import EvidenceLookupResult, EvidenceLookupService
 from vinted_radar.services.full_backfill import FullBackfillReport, run_full_backfill
 from vinted_radar.services.postgres_backfill import PostgresBackfillReport, backfill_postgres_mutable_truth
+from vinted_radar.services.reconciliation import ReconciliationReport, run_reconciliation
 from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
 from vinted_radar.services.state_refresh import build_default_state_refresh_service
 from vinted_radar.serving import build_dashboard_urls
@@ -81,6 +82,14 @@ def _build_polyglot_control_plane_repository() -> object | None:
     if not config.cutover.enable_polyglot_reads:
         return None
     return PostgresMutableTruthRepository.from_dsn(config.postgres.dsn)
+
+
+def _load_cutover_snapshot():
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        return summarize_cutover_state(None, config_error=str(exc))
+    return summarize_cutover_state(config)
 
 
 @contextmanager
@@ -452,6 +461,41 @@ def full_backfill(
     _render_full_backfill_report(report=report, checkpoint_path=resolved_checkpoint)
 
 
+@app.command("platform-reconcile")
+def platform_reconcile(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    reference_now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic reconciliation windows."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        report = run_reconciliation(
+            db,
+            config=config,
+            reference_now=reference_now,
+        )
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Platform reconciliation failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        if not report.ok:
+            raise typer.Exit(code=1)
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_reconciliation_report(report)
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
 @app.command("clickhouse-ingest")
 def clickhouse_ingest(
     limit: int = typer.Option(100, "--limit", min=1, help="Maximum outbox rows to claim in one ingest pass."),
@@ -642,8 +686,12 @@ def runtime_status(
     with _open_runtime_control_plane_repository(db) as repository:
         status = repository.runtime_status(limit=limit, now=now)
 
+    cutover = _load_cutover_snapshot()
+    status = {**status, "cutover": cutover.as_dict()}
+
     if status["latest_cycle"] is None and status.get("controller") is None:
         typer.echo(f"Database: {db}")
+        typer.echo(f"Cutover mode: {cutover.mode}")
         typer.echo("No runtime cycles recorded yet.")
         return
 
@@ -660,6 +708,11 @@ def runtime_status(
     typer.echo(f"Runtime now: {status.get('status') or 'n/a'} (phase {status.get('phase') or 'n/a'})")
     typer.echo(f"Controller mode: {status.get('mode') or latest.get('mode') or 'n/a'}")
     typer.echo(f"Updated at: {status.get('updated_at') or 'n/a'}")
+    typer.echo(f"Cutover mode: {cutover.mode}")
+    typer.echo(f"Cutover read path: {cutover.read_path}")
+    typer.echo(f"Cutover write targets: {', '.join(cutover.write_targets) or 'n/a'}")
+    if cutover.warnings:
+        typer.echo("Cutover warnings: " + " | ".join(cutover.warnings))
     heartbeat = status.get("heartbeat") or {}
     if heartbeat:
         typer.echo(
@@ -1771,6 +1824,42 @@ def _render_platform_object_storage_status(status: object) -> None:
     typer.echo(f"- detail: {getattr(status, 'detail', 'n/a')}")
     if getattr(status, 'error', None):
         typer.echo(f"- error: {getattr(status, 'error')}")
+
+
+
+def _render_reconciliation_report(report: ReconciliationReport) -> None:
+    payload = report.as_dict()
+    cutover = payload["cutover"] if isinstance(payload.get("cutover"), dict) else {}
+    typer.echo(f"SQLite source: {payload['sqlite_db_path']}")
+    typer.echo(f"Generated at: {payload['generated_at']}")
+    typer.echo(f"Overall status: {payload['overall_status']}")
+    typer.echo(f"Cutover mode: {cutover.get('mode') or 'unknown'}")
+    typer.echo(f"Read path: {cutover.get('read_path') or 'unknown'}")
+    typer.echo(f"Write targets: {', '.join(list(cutover.get('write_targets') or [])) or 'n/a'}")
+    warnings = list(cutover.get("warnings") or [])
+    if warnings:
+        typer.echo("Cutover warnings: " + " | ".join(str(item) for item in warnings))
+    typer.echo(f"PostgreSQL DSN: {payload['postgres_dsn']}")
+    typer.echo(f"ClickHouse: {payload['clickhouse_url']} / {payload['clickhouse_database']}")
+    typer.echo(f"Object storage bucket: {payload['object_store_bucket']}")
+    for section_name in ("postgres", "clickhouse", "object_storage"):
+        section = payload[section_name]
+        typer.echo(f"{section['store']}: {section['status']}")
+        for dataset in list(section.get("datasets") or []):
+            expected = dict(dataset.get("expected") or {})
+            actual = dict(dataset.get("actual") or {})
+            line = (
+                f"- {dataset.get('dataset')}: status {dataset.get('status')} | "
+                f"count {dataset.get('count_status')} ({expected.get('row_count') or 0} -> {actual.get('row_count') or 0}) | "
+                f"window {dataset.get('window_status')} ({expected.get('window_start') or 'n/a'} .. {expected.get('window_end') or 'n/a'} -> {actual.get('window_start') or 'n/a'} .. {actual.get('window_end') or 'n/a'})"
+            )
+            batch_count = actual.get("batch_count")
+            if batch_count is not None:
+                line += f" | batches {batch_count}"
+            typer.echo(line)
+            notes = list(dataset.get("notes") or [])
+            if notes:
+                typer.echo("  notes: " + " | ".join(str(item) for item in notes))
 
 
 
