@@ -133,7 +133,6 @@ class RecordingClickHouseClient:
 
     def query(self, sql: str):
         match = re.search(r"FROM\s+[A-Za-z0-9_]+\.([A-Za-z0-9_]+)\s+WHERE\s+source_event_id\s*=\s*'([^']+)'", sql)
-        rows: list[list[object]] = []
         if match is not None:
             table, source_event_id = match.group(1), match.group(2)
             rows = [
@@ -141,7 +140,51 @@ class RecordingClickHouseClient:
                 for row in self.tables.get(table, [])
                 if row.get("source_event_id") == source_event_id
             ]
-        return SimpleNamespace(result_rows=rows)
+            return SimpleNamespace(result_rows=rows)
+
+        marker = re.search(r"/\*\s*clickhouse-ingest:\s*([a-z\-]+)\s+([^*]+?)\s*\*/", sql, re.S)
+        if marker is None:
+            return SimpleNamespace(result_rows=[])
+
+        operation = marker.group(1)
+        params = self._parse_marker_params(marker.group(2))
+        if operation == "latest-seen-before":
+            rows = self._latest_rows_before(
+                table="fact_listing_seen_events",
+                listing_ids=self._parse_listing_ids(params.get("listing_ids", "")),
+                before=str(params.get("before", "")),
+                time_field="observed_at",
+            )
+            return SimpleNamespace(result_rows=rows)
+        if operation == "latest-probe-before":
+            rows = self._latest_rows_before(
+                table="fact_listing_probe_events",
+                listing_ids=self._parse_listing_ids(params.get("listing_ids", "")),
+                before=str(params.get("before", "")),
+                time_field="probed_at",
+            )
+            return SimpleNamespace(result_rows=rows)
+        if operation == "latest-change-before":
+            rows = self._latest_rows_before(
+                table="fact_listing_change_events",
+                listing_ids=self._parse_listing_ids(params.get("listing_ids", "")),
+                before=str(params.get("before", "")),
+                time_field="occurred_at",
+            )
+            return SimpleNamespace(result_rows=rows)
+        if operation == "catalog-latest-seen-before":
+            rows = self._latest_catalog_seen_rows_before(
+                catalog_id=int(params["catalog_id"]),
+                before=str(params.get("before", "")),
+            )
+            return SimpleNamespace(result_rows=rows)
+        if operation == "run-catalog-listing-ids":
+            rows = self._run_catalog_listing_ids(
+                catalog_id=int(params["catalog_id"]),
+                run_id=str(params["run_id"]),
+            )
+            return SimpleNamespace(result_rows=rows)
+        return SimpleNamespace(result_rows=[])
 
     def insert(self, *, table: str, data, column_names, database: str | None = None) -> None:
         rows = [dict(zip(column_names, row, strict=False)) for row in data]
@@ -154,6 +197,69 @@ class RecordingClickHouseClient:
                 "row_count": len(rows),
             }
         )
+
+    def _parse_marker_params(self, raw: str) -> dict[str, str]:
+        params: dict[str, str] = {}
+        for part in raw.split():
+            key, value = part.split("=", 1)
+            params[key] = value
+        return params
+
+    def _parse_listing_ids(self, raw: str) -> set[int]:
+        return {int(value) for value in raw.split(",") if value}
+
+    def _latest_rows_before(
+        self,
+        *,
+        table: str,
+        listing_ids: set[int],
+        before: str,
+        time_field: str,
+    ) -> list[dict[str, object]]:
+        latest: dict[int, dict[str, object]] = {}
+        for row in self.tables.get(table, []):
+            listing_id = row.get("listing_id")
+            occurred_at = row.get(time_field)
+            if listing_id is None or occurred_at is None:
+                continue
+            normalized_listing_id = int(listing_id)
+            if normalized_listing_id not in listing_ids or str(occurred_at) >= before:
+                continue
+            current = latest.get(normalized_listing_id)
+            if current is None or (str(occurred_at), str(row["event_id"])) > (
+                str(current[time_field]),
+                str(current["event_id"]),
+            ):
+                latest[normalized_listing_id] = dict(row)
+        return [latest[key] for key in sorted(latest)]
+
+    def _latest_catalog_seen_rows_before(self, *, catalog_id: int, before: str) -> list[dict[str, object]]:
+        latest: dict[int, dict[str, object]] = {}
+        for row in self.tables.get("fact_listing_seen_events", []):
+            if int(row.get("primary_catalog_id") or 0) != catalog_id:
+                continue
+            observed_at = row.get("observed_at")
+            listing_id = row.get("listing_id")
+            if listing_id is None or observed_at is None or str(observed_at) >= before:
+                continue
+            normalized_listing_id = int(listing_id)
+            current = latest.get(normalized_listing_id)
+            if current is None or (str(observed_at), str(row["event_id"])) > (
+                str(current["observed_at"]),
+                str(current["event_id"]),
+            ):
+                latest[normalized_listing_id] = dict(row)
+        return [latest[key] for key in sorted(latest)]
+
+    def _run_catalog_listing_ids(self, *, catalog_id: int, run_id: str) -> list[dict[str, object]]:
+        listing_ids = sorted(
+            {
+                int(row["listing_id"])
+                for row in self.tables.get("fact_listing_seen_events", [])
+                if int(row.get("primary_catalog_id") or 0) == catalog_id and str(row.get("run_id") or "") == run_id
+            }
+        )
+        return [{"listing_id": listing_id} for listing_id in listing_ids]
 
 
 class ConstantNow:
@@ -411,10 +517,34 @@ def test_full_backfill_pipeline_projects_postgres_writes_manifests_and_ingests_c
     assert repository.runtime_cycles[0][0]["cycle_id"] == cycle_id
     assert repository.runtime_controllers[0][0]["status"] == "idle"
 
-    assert set(clickhouse_client.tables) == {"fact_listing_seen_events", "fact_listing_probe_events"}
+    assert set(clickhouse_client.tables) == {
+        "fact_listing_seen_events",
+        "fact_listing_probe_events",
+        "fact_listing_change_events",
+    }
     assert len(clickhouse_client.tables["fact_listing_seen_events"]) == 2
     assert len(clickhouse_client.tables["fact_listing_probe_events"]) == 1
     assert clickhouse_client.tables["fact_listing_probe_events"][0]["probe_outcome"] == "active"
+    change_rows = clickhouse_client.tables["fact_listing_change_events"]
+    assert len(change_rows) == 4
+    assert sorted(row["change_kind"] for row in change_rows) == [
+        "engagement_shift",
+        "state_transition",
+        "state_transition",
+        "state_transition",
+    ]
+    probe_change_rows = [row for row in change_rows if row["source_event_type"] == "vinted.state-refresh.probe.batch"]
+    assert sorted(row["change_kind"] for row in probe_change_rows) == ["engagement_shift", "state_transition"]
+    probe_state_transition = next(row for row in probe_change_rows if row["change_kind"] == "state_transition")
+    assert probe_state_transition["previous_state_code"] == "active"
+    assert probe_state_transition["current_state_code"] == "active"
+    assert probe_state_transition["previous_confidence_score"] == 0.9
+    assert probe_state_transition["current_confidence_score"] == 0.95
+    probe_engagement_shift = next(row for row in probe_change_rows if row["change_kind"] == "engagement_shift")
+    assert probe_engagement_shift["previous_favourite_count"] is None
+    assert probe_engagement_shift["current_favourite_count"] == 5
+    assert probe_engagement_shift["previous_view_count"] is None
+    assert probe_engagement_shift["current_view_count"] == 21
 
     raw_event_payloads = [
         EventEnvelope.from_json(record["Body"].decode("utf-8"))
@@ -426,6 +556,17 @@ def test_full_backfill_pipeline_projects_postgres_writes_manifests_and_ingests_c
         for (bucket, key), record in s3_client.objects.items()
         if bucket == "vinted-radar-test" and key.startswith("tenant-a/manifests/") and key.endswith(".json")
     ]
+
+    discovery_manifests = sorted(
+        (manifest for manifest in manifest_payloads if manifest.manifest_type == "sqlite-discovery-evidence-batch"),
+        key=lambda manifest: int(manifest.metadata["page_chunk_index"]),
+    )
+    assert len(discovery_manifests) == 2
+    assert [manifest.metadata["page_chunk_index"] for manifest in discovery_manifests] == [0, 1]
+    assert [manifest.metadata["page_chunk_count"] for manifest in discovery_manifests] == [2, 2]
+    assert all(manifest.metadata["pagination_current_page"] == 1 for manifest in discovery_manifests)
+    assert all(manifest.metadata["pagination_total_pages"] == 1 for manifest in discovery_manifests)
+    assert all(manifest.metadata["next_page_url"] is None for manifest in discovery_manifests)
 
     event_types = sorted(event.event_type for event in raw_event_payloads)
     assert event_types == [

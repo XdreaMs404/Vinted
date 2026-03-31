@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T15:11:23.052Z",
+  "exported_at": "2026-03-31T15:40:41.833Z",
   "milestones": [
     {
       "id": "M001",
@@ -1725,19 +1725,28 @@
       "milestone_id": "M002",
       "slice_id": "S15",
       "id": "T04",
-      "title": "Truthful change-fact derivation + replay path",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Made ClickHouse replay derive truthful change facts with terminal-chunk-aware backfill manifests.",
+      "status": "complete",
+      "one_liner": "Made ClickHouse replay derive truthful change facts with terminal-chunk-aware backfill manifests.",
+      "narrative": "Completed the missing change-fact replay path by wiring truthful discovery replay metadata through full backfill and tightening previous-snapshot reconstruction in ClickHouse ingest. `vinted_radar/services/full_backfill.py` now groups discovery replay rows by run/catalog/page before chunk emission so manifests carry `page_chunk_index`, `page_chunk_count`, `pagination_current_page`, `pagination_total_pages`, and `next_page_url`, which makes terminal-page follow-up miss derivation truthful during replay. `vinted_radar/platform/clickhouse_ingest.py` was also fixed to coalesce string dimensions correctly from prior change rows/seen rows during replay-state reconstruction. The tests were updated to use stateful ClickHouse fakes, distinguish primary fact inserts from derived change inserts, and assert replayed probe batches derive the expected state-transition and engagement-shift facts from prior ClickHouse history.",
+      "verification_result": "Ran `python3 -m pytest tests/test_clickhouse_ingest.py tests/test_full_backfill.py -q` because this workstation exposes `python3` instead of a `python` symlink. The suite passed with 10 tests green, covering replay-safe primary fact dedupe, derived change-fact inserts, terminal-chunk-aware backfill manifests, and replay history lookups used by change derivation.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T15:40:41.805Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/platform/clickhouse_ingest.py",
+        "vinted_radar/services/full_backfill.py",
+        "tests/test_clickhouse_ingest.py",
+        "tests/test_full_backfill.py",
+        ".gsd/milestones/M002/slices/S15/tasks/T04-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Carry pagination and chunk metadata in replayed discovery manifests so follow-up miss transitions only emit on the final replay chunk of a terminal catalog page.",
+        "Verify replay-state reconstruction with ClickHouse test doubles that answer historical seen/probe/change queries instead of source-event-only fakes."
+      ],
+      "full_summary_md": "---\nid: T04\nparent: S15\nmilestone: M002\nkey_files:\n  - vinted_radar/platform/clickhouse_ingest.py\n  - vinted_radar/services/full_backfill.py\n  - tests/test_clickhouse_ingest.py\n  - tests/test_full_backfill.py\n  - .gsd/milestones/M002/slices/S15/tasks/T04-SUMMARY.md\nkey_decisions:\n  - Carry pagination and chunk metadata in replayed discovery manifests so follow-up miss transitions only emit on the final replay chunk of a terminal catalog page.\n  - Verify replay-state reconstruction with ClickHouse test doubles that answer historical seen/probe/change queries instead of source-event-only fakes.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T15:40:41.805Z\nblocker_discovered: false\n---\n\n# T04: Made ClickHouse replay derive truthful change facts with terminal-chunk-aware backfill manifests.\n\n**Made ClickHouse replay derive truthful change facts with terminal-chunk-aware backfill manifests.**\n\n## What Happened\n\nCompleted the missing change-fact replay path by wiring truthful discovery replay metadata through full backfill and tightening previous-snapshot reconstruction in ClickHouse ingest. `vinted_radar/services/full_backfill.py` now groups discovery replay rows by run/catalog/page before chunk emission so manifests carry `page_chunk_index`, `page_chunk_count`, `pagination_current_page`, `pagination_total_pages`, and `next_page_url`, which makes terminal-page follow-up miss derivation truthful during replay. `vinted_radar/platform/clickhouse_ingest.py` was also fixed to coalesce string dimensions correctly from prior change rows/seen rows during replay-state reconstruction. The tests were updated to use stateful ClickHouse fakes, distinguish primary fact inserts from derived change inserts, and assert replayed probe batches derive the expected state-transition and engagement-shift facts from prior ClickHouse history.\n\n## Verification\n\nRan `python3 -m pytest tests/test_clickhouse_ingest.py tests/test_full_backfill.py -q` because this workstation exposes `python3` instead of a `python` symlink. The suite passed with 10 tests green, covering replay-safe primary fact dedupe, derived change-fact inserts, terminal-chunk-aware backfill manifests, and replay history lookups used by change derivation.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m pytest tests/test_clickhouse_ingest.py tests/test_full_backfill.py -q` | 0 | ✅ pass | 470ms |\n\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/platform/clickhouse_ingest.py`\n- `vinted_radar/services/full_backfill.py`\n- `tests/test_clickhouse_ingest.py`\n- `tests/test_full_backfill.py`\n- `.gsd/milestones/M002/slices/S15/tasks/T04-SUMMARY.md`\n",
       "description": "Implement the missing change-fact pipeline instead of approximating marts at query time. Extend the live cutover and historical replay paths so listing-seen/state-refresh batches deterministically produce populated change facts for price deltas, state transitions, engagement shifts, and follow-up miss transitions, then land them in the existing ClickHouse change tables with idempotent replay semantics.",
       "estimate": "2-3 sessions",
       "files": [
@@ -3023,6 +3032,17 @@
       "verdict": "✅ pass",
       "duration_ms": 460,
       "created_at": "2026-03-31T15:02:27.816Z"
+    },
+    {
+      "id": 63,
+      "task_id": "T04",
+      "slice_id": "S15",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_clickhouse_ingest.py tests/test_full_backfill.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 470,
+      "created_at": "2026-03-31T15:40:41.805Z"
     }
   ]
 }

@@ -42,15 +42,58 @@ class RecordingClickHouseClient:
 
     def query(self, sql: str) -> FakeClickHouseResult:
         match = re.search(r"FROM\s+[A-Za-z0-9_]+\.([A-Za-z0-9_]+)\s+WHERE\s+source_event_id\s*=\s*'([^']+)'", sql)
-        if match is None:
+        if match is not None:
+            table, source_event_id = match.group(1), match.group(2)
+            rows = [
+                [row["event_id"]]
+                for row in self.tables.get(table, [])
+                if row.get("source_event_id") == source_event_id
+            ]
+            return FakeClickHouseResult(rows)
+
+        marker = re.search(r"/\*\s*clickhouse-ingest:\s*([a-z\-]+)\s+([^*]+?)\s*\*/", sql, re.S)
+        if marker is None:
             return FakeClickHouseResult([])
-        table, source_event_id = match.group(1), match.group(2)
-        rows = [
-            [row["event_id"]]
-            for row in self.tables.get(table, [])
-            if row.get("source_event_id") == source_event_id
-        ]
-        return FakeClickHouseResult(rows)
+
+        operation = marker.group(1)
+        params = self._parse_marker_params(marker.group(2))
+        if operation == "latest-seen-before":
+            rows = self._latest_rows_before(
+                table="fact_listing_seen_events",
+                listing_ids=self._parse_listing_ids(params.get("listing_ids", "")),
+                before=str(params.get("before", "")),
+                time_field="observed_at",
+            )
+            return FakeClickHouseResult(rows)
+        if operation == "latest-probe-before":
+            rows = self._latest_rows_before(
+                table="fact_listing_probe_events",
+                listing_ids=self._parse_listing_ids(params.get("listing_ids", "")),
+                before=str(params.get("before", "")),
+                time_field="probed_at",
+            )
+            return FakeClickHouseResult(rows)
+        if operation == "latest-change-before":
+            rows = self._latest_rows_before(
+                table="fact_listing_change_events",
+                listing_ids=self._parse_listing_ids(params.get("listing_ids", "")),
+                before=str(params.get("before", "")),
+                time_field="occurred_at",
+            )
+            return FakeClickHouseResult(rows)
+        if operation == "catalog-latest-seen-before":
+            rows = self._latest_catalog_seen_rows_before(
+                catalog_id=int(params["catalog_id"]),
+                before=str(params.get("before", "")),
+            )
+            return FakeClickHouseResult(rows)
+        if operation == "run-catalog-listing-ids":
+            rows = self._run_catalog_listing_ids(
+                catalog_id=int(params["catalog_id"]),
+                run_id=str(params["run_id"]),
+            )
+            return FakeClickHouseResult(rows)
+        return FakeClickHouseResult([])
 
     def insert(self, *, table: str, data, column_names, database: str | None = None) -> None:
         if self.fail_table == table:
@@ -65,6 +108,69 @@ class RecordingClickHouseClient:
                 "row_count": len(rows),
             }
         )
+
+    def _parse_marker_params(self, raw: str) -> dict[str, str]:
+        params: dict[str, str] = {}
+        for part in raw.split():
+            key, value = part.split("=", 1)
+            params[key] = value
+        return params
+
+    def _parse_listing_ids(self, raw: str) -> set[int]:
+        return {int(value) for value in raw.split(",") if value}
+
+    def _latest_rows_before(
+        self,
+        *,
+        table: str,
+        listing_ids: set[int],
+        before: str,
+        time_field: str,
+    ) -> list[dict[str, object]]:
+        latest: dict[int, dict[str, object]] = {}
+        for row in self.tables.get(table, []):
+            listing_id = row.get("listing_id")
+            occurred_at = row.get(time_field)
+            if listing_id is None or occurred_at is None:
+                continue
+            normalized_listing_id = int(listing_id)
+            if normalized_listing_id not in listing_ids or str(occurred_at) >= before:
+                continue
+            current = latest.get(normalized_listing_id)
+            if current is None or (str(occurred_at), str(row["event_id"])) > (
+                str(current[time_field]),
+                str(current["event_id"]),
+            ):
+                latest[normalized_listing_id] = dict(row)
+        return [latest[key] for key in sorted(latest)]
+
+    def _latest_catalog_seen_rows_before(self, *, catalog_id: int, before: str) -> list[dict[str, object]]:
+        latest: dict[int, dict[str, object]] = {}
+        for row in self.tables.get("fact_listing_seen_events", []):
+            if int(row.get("primary_catalog_id") or 0) != catalog_id:
+                continue
+            observed_at = row.get("observed_at")
+            listing_id = row.get("listing_id")
+            if listing_id is None or observed_at is None or str(observed_at) >= before:
+                continue
+            normalized_listing_id = int(listing_id)
+            current = latest.get(normalized_listing_id)
+            if current is None or (str(observed_at), str(row["event_id"])) > (
+                str(current["observed_at"]),
+                str(current["event_id"]),
+            ):
+                latest[normalized_listing_id] = dict(row)
+        return [latest[key] for key in sorted(latest)]
+
+    def _run_catalog_listing_ids(self, *, catalog_id: int, run_id: str) -> list[dict[str, object]]:
+        listing_ids = sorted(
+            {
+                int(row["listing_id"])
+                for row in self.tables.get("fact_listing_seen_events", [])
+                if int(row.get("primary_catalog_id") or 0) == catalog_id and str(row.get("run_id") or "") == run_id
+            }
+        )
+        return [{"listing_id": listing_id} for listing_id in listing_ids]
 
 
 class RecordingCheckpointRepository:
@@ -360,12 +466,21 @@ def test_clickhouse_ingest_only_inserts_missing_rows_on_replay() -> None:
     assert report.processed_count == 1
     assert report.records[0].inserted_row_count == 1
     assert report.records[0].existing_row_count == 1
+    assert report.records[0].change_row_count == 2
+    assert report.records[0].change_inserted_row_count == 2
+    assert report.records[0].change_existing_row_count == 0
     assert len(client.tables["fact_listing_seen_events"]) == 2
-    assert client.insert_calls[-1]["row_count"] == 1
+    assert len(client.tables["fact_listing_change_events"]) == 2
+    seen_insert_calls = [call for call in client.insert_calls if call["table"] == "fact_listing_seen_events"]
+    change_insert_calls = [call for call in client.insert_calls if call["table"] == "fact_listing_change_events"]
+    assert seen_insert_calls[-1]["row_count"] == 1
+    assert change_insert_calls[-1]["row_count"] == 2
     assert connection.outbox[(event.event_id, "clickhouse")].status == "delivered"
     checkpoint = repository.outbox_checkpoint(consumer_name=CLICKHOUSE_INGEST_CONSUMER, sink="clickhouse")
     assert checkpoint is not None
     assert checkpoint["metadata"]["existing_row_count"] == 1
+    assert checkpoint["metadata"]["change_row_count"] == 2
+    assert checkpoint["metadata"]["change_inserted_row_count"] == 2
 
 
 def test_clickhouse_ingest_marks_failure_and_exposes_checkpoint_error_state() -> None:

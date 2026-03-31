@@ -102,6 +102,7 @@ class _PreparedBatch:
     rows: tuple[dict[str, object], ...]
     batch_event: EventEnvelope
     publish_clickhouse: bool
+    manifest_metadata: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +454,7 @@ class FullBackfillService:
             rows=prepared.rows,
             manifest_type=_manifest_type(prepared.dataset),
             manifest_metadata={
+                **prepared.manifest_metadata,
                 "legacy_dataset": prepared.dataset,
                 "group_key": prepared.group_key,
                 "capture_source": "sqlite_backfill",
@@ -575,13 +577,19 @@ class FullBackfillService:
                 source_catalog.path AS source_catalog_path,
                 primary_catalog.title AS primary_catalog_title,
                 primary_catalog.path AS primary_catalog_path,
-                resolved_root.title AS resolved_root_title
+                resolved_root.title AS resolved_root_title,
+                scans.pagination_total_pages AS scan_pagination_total_pages,
+                scans.next_page_url AS scan_next_page_url
             FROM listing_discoveries AS discoveries
             LEFT JOIN listings ON listings.listing_id = discoveries.listing_id
             LEFT JOIN catalogs AS source_catalog ON source_catalog.catalog_id = discoveries.source_catalog_id
             LEFT JOIN catalogs AS primary_catalog ON primary_catalog.catalog_id = listings.primary_catalog_id
             LEFT JOIN catalogs AS resolved_root
               ON resolved_root.catalog_id = COALESCE(source_catalog.root_catalog_id, primary_catalog.root_catalog_id, listings.primary_root_catalog_id)
+            LEFT JOIN catalog_scans AS scans
+              ON scans.run_id = discoveries.run_id
+             AND scans.catalog_id = discoveries.source_catalog_id
+             AND scans.page_number = discoveries.source_page_number
             ORDER BY
                 discoveries.run_id ASC,
                 discoveries.source_catalog_id ASC,
@@ -592,9 +600,10 @@ class FullBackfillService:
         )
         current_group: tuple[str, int | None, int | None] | None = None
         current_rows: list[dict[str, object]] = []
-        chunk_index = 0
         for row in cursor:
             hydrated = _hydrate_discovery_row(row)
+            hydrated["pagination_total_pages"] = _optional_int(row["scan_pagination_total_pages"])
+            hydrated["next_page_url"] = _optional_str(row["scan_next_page_url"])
             group = (
                 str(hydrated["run_id"]),
                 _optional_int(hydrated.get("catalog_id")),
@@ -602,18 +611,29 @@ class FullBackfillService:
             )
             if current_group is None:
                 current_group = group
-            if group != current_group or len(current_rows) >= batch_size:
-                yield self._prepare_discovery_batch(current_group, current_rows, chunk_index=chunk_index)
-                if group != current_group:
-                    current_group = group
-                    current_rows = []
-                    chunk_index = 0
-                else:
-                    current_rows = []
-                    chunk_index += 1
+            elif group != current_group:
+                chunk_count = max((len(current_rows) - 1) // max(batch_size, 1) + 1, 1)
+                for chunk_index in range(chunk_count):
+                    start = chunk_index * max(batch_size, 1)
+                    yield self._prepare_discovery_batch(
+                        current_group,
+                        current_rows[start : start + max(batch_size, 1)],
+                        chunk_index=chunk_index,
+                        chunk_count=chunk_count,
+                    )
+                current_group = group
+                current_rows = []
             current_rows.append(hydrated)
         if current_group is not None and current_rows:
-            yield self._prepare_discovery_batch(current_group, current_rows, chunk_index=chunk_index)
+            chunk_count = max((len(current_rows) - 1) // max(batch_size, 1) + 1, 1)
+            for chunk_index in range(chunk_count):
+                start = chunk_index * max(batch_size, 1)
+                yield self._prepare_discovery_batch(
+                    current_group,
+                    current_rows[start : start + max(batch_size, 1)],
+                    chunk_index=chunk_index,
+                    chunk_count=chunk_count,
+                )
 
     def _prepare_discovery_batch(
         self,
@@ -621,6 +641,7 @@ class FullBackfillService:
         rows: Sequence[dict[str, object]],
         *,
         chunk_index: int,
+        chunk_count: int,
     ) -> _PreparedBatch:
         run_id, catalog_id, page_number = group
         first = rows[0]
@@ -642,6 +663,7 @@ class FullBackfillService:
                 "root_catalog_id": first.get("root_catalog_id"),
                 "page_number": page_number,
                 "chunk_index": chunk_index,
+                "page_chunk_count": chunk_count,
                 "row_count": len(rows),
                 "listing_ids": [int(row["listing_id"]) for row in rows],
             },
@@ -650,6 +672,9 @@ class FullBackfillService:
                 "root_title": first.get("root_title"),
                 "catalog_title": first.get("catalog_title"),
                 "catalog_path": first.get("catalog_path"),
+                "pagination_current_page": page_number,
+                "pagination_total_pages": first.get("pagination_total_pages"),
+                "next_page_url": first.get("next_page_url"),
             },
             identity={
                 "capture_source": "sqlite_backfill",
@@ -666,6 +691,20 @@ class FullBackfillService:
             rows=tuple(dict(row) for row in rows),
             batch_event=batch_event,
             publish_clickhouse=True,
+            manifest_metadata={
+                "run_id": run_id,
+                "catalog_id": catalog_id,
+                "root_catalog_id": first.get("root_catalog_id"),
+                "catalog_path": first.get("catalog_path"),
+                "page_number": page_number,
+                "page_chunk_index": chunk_index,
+                "page_chunk_count": chunk_count,
+                "pagination_current_page": page_number,
+                "pagination_total_pages": first.get("pagination_total_pages"),
+                "next_page_url": first.get("next_page_url"),
+                "first_observed_at": rows[0].get("observed_at"),
+                "last_observed_at": rows[-1].get("observed_at"),
+            },
         )
 
     def _iter_observation_batches(self, source: RadarRepository, *, batch_size: int) -> Iterator[_PreparedBatch]:
@@ -773,6 +812,12 @@ class FullBackfillService:
             rows=tuple(dict(row) for row in rows),
             batch_event=batch_event,
             publish_clickhouse=False,
+            manifest_metadata={
+                "run_id": run_id,
+                "chunk_index": chunk_index,
+                "first_observed_at": rows[0].get("observed_at"),
+                "last_observed_at": rows[-1].get("observed_at"),
+            },
         )
 
     def _iter_probe_batches(
@@ -894,6 +939,13 @@ class FullBackfillService:
             rows=tuple(dict(row) for row in rows),
             batch_event=batch_event,
             publish_clickhouse=True,
+            manifest_metadata={
+                "probed_on": probed_on,
+                "chunk_index": chunk_index,
+                "reference_now": first.get("reference_now"),
+                "first_probed_at": rows[0].get("probed_at"),
+                "last_probed_at": rows[-1].get("probed_at"),
+            },
         )
 
     def _iter_runtime_cycle_batches(self, source: RadarRepository, *, batch_size: int) -> Iterator[_PreparedBatch]:
@@ -964,6 +1016,12 @@ class FullBackfillService:
             rows=tuple(dict(row) for row in rows),
             batch_event=batch_event,
             publish_clickhouse=False,
+            manifest_metadata={
+                "started_on": started_on,
+                "chunk_index": chunk_index,
+                "first_cycle_id": rows[0].get("cycle_id"),
+                "last_cycle_id": rows[-1].get("cycle_id"),
+            },
         )
 
     def _iter_runtime_controller_batches(
@@ -1006,6 +1064,11 @@ class FullBackfillService:
             rows=(row,),
             batch_event=batch_event,
             publish_clickhouse=False,
+            manifest_metadata={
+                "controller_id": 1,
+                "reference_now": reference_now,
+                "updated_at": row.get("updated_at"),
+            },
         )
 
     def _current_checkpoint_mutation_target(self) -> dict[str, object]:

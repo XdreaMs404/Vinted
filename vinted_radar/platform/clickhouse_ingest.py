@@ -1822,6 +1822,17 @@ def _coalesce(primary: object, fallback: object | None = None) -> object | None:
 
 
 
+def _coalesce_str(primary: object, fallback: object | None = None, default: str | None = None) -> str | None:
+    value = _optional_str(primary)
+    if value is not None:
+        return value
+    value = _optional_str(fallback)
+    if value is not None:
+        return value
+    return default
+
+
+
 def _coalesce_int(primary: object, fallback_row: Mapping[str, object] | None, fallback_key: str) -> int | None:
     value = _optional_int(primary)
     if value is not None:
