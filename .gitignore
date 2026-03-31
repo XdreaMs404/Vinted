@@ -17,6 +17,7 @@
 .gsd/journal/
 .gsd/milestones/**/*-CONTINUE.md
 .gsd/milestones/**/continue.md
+.gsd/milestones/**/*-SECRETS.md
 .DS_Store
 Thumbs.db
 *.swp

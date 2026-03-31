@@ -1,0 +1,2230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GSD Report — Vinted — M002</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-0:#0f1115;--bg-1:#16181d;--bg-2:#1e2028;--bg-3:#272a33;
+  --border-1:#2b2e38;--border-2:#3b3f4c;
+  --text-0:#ededef;--text-1:#a1a1aa;--text-2:#71717a;
+  --accent:#5e6ad2;--accent-subtle:rgba(94,106,210,.12);
+  --ok:#22c55e;--ok-subtle:rgba(34,197,94,.12);--warn:#ef4444;--caution:#eab308;
+  /* Chart palette — 6 hues for bar charts */
+  --c0:#5e6ad2;--c1:#e5796d;--c2:#14b8a6;--c3:#a78bfa;--c4:#f59e0b;--c5:#10b981;
+  /* Token breakdown — 4 distinct hues */
+  --tk-input:#5e6ad2;--tk-output:#e5796d;--tk-cache-r:#2dd4bf;--tk-cache-w:#64748b;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono','Fira Code',ui-monospace,SFMono-Regular,monospace;
+}
+html{scroll-behavior:smooth;font-size:13px}
+body{background:var(--bg-0);color:var(--text-0);font-family:var(--font);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:var(--mono);font-size:12px;background:var(--bg-3);padding:1px 5px;border-radius:3px}
+.mono{font-family:var(--mono);font-size:12px}
+.muted{color:var(--text-2)}
+.accent{color:var(--accent)}
+.sep{color:var(--border-2);margin:0 4px}
+.empty{color:var(--text-2);padding:8px 0;font-size:13px}
+.indent{padding-left:12px}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+
+/* Status dots — geometric, no emoji */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;vertical-align:middle}
+.dot-sm{width:6px;height:6px}
+.dot-complete{background:var(--ok);opacity:.6}
+.dot-active{background:var(--accent)}
+.dot-pending{background:transparent;border:1.5px solid var(--border-2)}
+.dot-parked{background:var(--warn);opacity:.5}
+
+/* Header */
+header{background:var(--bg-1);border-bottom:1px solid var(--border-1);padding:12px 32px;position:sticky;top:0;z-index:200}
+.header-inner{display:flex;align-items:center;gap:16px;max-width:1280px;margin:0 auto}
+.branding{display:flex;align-items:baseline;gap:6px;flex-shrink:0}
+.logo{font-size:18px;font-weight:800;letter-spacing:-.5px;color:var(--text-0)}
+.version{font-size:10px;color:var(--text-2);font-family:var(--mono)}
+.header-meta{flex:1;min-width:0}
+.header-meta h1{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header-path{font-size:11px;color:var(--text-2);font-family:var(--mono);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.header-right{text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.generated{font-size:11px;color:var(--text-2)}
+.back-link{font-size:12px;color:var(--text-1)}
+.back-link:hover{color:var(--accent)}
+
+/* TOC nav */
+.toc{background:var(--bg-1);border-bottom:1px solid var(--border-1);overflow-x:auto}
+.toc ul{display:flex;list-style:none;max-width:1280px;margin:0 auto;padding:0 32px}
+.toc a{display:inline-block;padding:8px 12px;color:var(--text-2);font-size:12px;font-weight:500;border-bottom:2px solid transparent;transition:color .12s,border-color .12s;white-space:nowrap;text-decoration:none}
+.toc a:hover{color:var(--text-0);border-bottom-color:var(--border-2)}
+.toc a.active{color:var(--text-0);border-bottom-color:var(--accent)}
+
+/* Layout */
+main{max-width:1280px;margin:0 auto;padding:32px;display:flex;flex-direction:column;gap:48px}
+section{scroll-margin-top:82px}
+section>h2{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-1);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border-1);display:flex;align-items:center;gap:8px}
+h3{font-size:13px;font-weight:600;color:var(--text-1);margin:20px 0 8px}
+.count{font-size:11px;font-weight:500;color:var(--text-2);background:var(--bg-3);border-radius:3px;padding:1px 6px}
+.count-warn{color:var(--caution)}
+
+/* KV grid (stats/metrics) */
+.kv-grid{display:flex;flex-wrap:wrap;gap:1px;background:var(--border-1);border:1px solid var(--border-1);border-radius:4px;overflow:hidden;margin-bottom:16px}
+.kv{background:var(--bg-1);padding:10px 16px;display:flex;flex-direction:column;gap:2px;min-width:110px;flex:1}
+.kv-val{font-size:18px;font-weight:600;color:var(--text-0);font-variant-numeric:tabular-nums}
+.kv-lbl{font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.4px}
+
+/* Progress bar */
+.progress-wrap{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.progress-track{flex:1;height:4px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:var(--accent);border-radius:2px}
+.progress-label{font-size:12px;font-weight:600;color:var(--text-1);min-width:40px;text-align:right}
+.active-info{font-size:12px;color:var(--text-1);margin-bottom:4px}
+.activity-line{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-1);padding:6px 0}
+
+/* Tables */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{color:var(--text-2);font-weight:500;padding:6px 12px;text-align:left;border-bottom:1px solid var(--border-1);font-size:11px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+.tbl td{padding:6px 12px;border-bottom:1px solid var(--border-1);vertical-align:top}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tbody tr:hover td{background:var(--accent-subtle)}
+.tbl-kv td:first-child{color:var(--text-2);width:180px}
+.table-scroll{overflow-x:auto;border:1px solid var(--border-1);border-radius:4px}
+.table-scroll .tbl{border:none}
+
+/* Health */
+.h-ok td:first-child{color:var(--text-1)}
+.h-caution td{color:var(--caution)}
+.h-warn td{color:var(--warn)}
+
+/* Labels */
+.label{font-size:10px;font-weight:500;color:var(--accent);text-transform:uppercase;letter-spacing:.4px}
+.risk{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;flex-shrink:0}
+.risk-low{color:var(--text-2)}
+.risk-medium{color:var(--caution)}
+.risk-high{color:var(--warn)}
+.risk-unknown{color:var(--text-2)}
+
+/* Tags */
+.tag-row{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.tag{font-size:11px;font-family:var(--mono);color:var(--text-2);background:var(--bg-3);border-radius:3px;padding:1px 6px}
+
+/* Verification */
+.verif{font-size:12px;color:var(--text-1);padding:4px 0;margin-bottom:6px}
+.verif-blocker{color:var(--warn)}
+
+/* Detail blocks */
+.detail-block{font-size:12px;color:var(--text-2);margin-bottom:6px}
+.detail-label{font-weight:600;color:var(--text-1);display:block;margin-bottom:2px}
+.detail-block ul{padding-left:16px;margin-top:2px}
+.detail-block li{margin-bottom:1px}
+
+/* Progress tree */
+.ms-block{border:1px solid var(--border-1);border-radius:4px;overflow:hidden;margin-bottom:8px}
+.ms-summary{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;list-style:none;background:var(--bg-1);user-select:none;font-size:13px}
+.ms-summary:hover{background:var(--bg-2)}
+.ms-summary::-webkit-details-marker{display:none}
+.ms-id{font-weight:600}
+.ms-title{flex:1;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ms-body{padding:6px 12px 8px 24px;display:flex;flex-direction:column;gap:4px}
+
+.sl-block{border:1px solid var(--border-1);border-radius:3px;overflow:hidden}
+.sl-summary{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;list-style:none;background:var(--bg-2);font-size:12px;user-select:none}
+.sl-summary:hover{background:var(--bg-3)}
+.sl-summary::-webkit-details-marker{display:none}
+.sl-crit{border-left:2px solid var(--accent)}
+.sl-deps::before{content:'\2190 ';color:var(--border-2)}
+.sl-detail{padding:8px 12px;background:var(--bg-0);border-top:1px solid var(--border-1)}
+
+.task-list{list-style:none;padding:4px 0 0;display:flex;flex-direction:column;gap:2px}
+.task-row{display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 6px;border-radius:2px}
+
+/* Dep graph */
+.dep-block{margin-bottom:28px}
+.dep-legend{display:flex;gap:14px;font-size:12px;color:var(--text-2);margin-bottom:8px;align-items:center}
+.dep-legend span{display:flex;align-items:center;gap:4px}
+.dep-wrap{overflow-x:auto;background:var(--bg-1);border:1px solid var(--border-1);border-radius:4px;padding:16px}
+.dep-svg{display:block}
+.edge{fill:none;stroke:var(--border-2);stroke-width:1.5}
+.edge-crit{stroke:var(--accent);stroke-width:2}
+.node rect{fill:var(--bg-2);stroke:var(--border-2);stroke-width:1}
+.n-done rect{fill:var(--ok-subtle);stroke:rgba(34,197,94,.4)}
+.n-active rect{fill:var(--accent-subtle);stroke:var(--accent)}
+.n-crit rect{stroke:var(--accent)!important;stroke-width:1.5!important}
+.n-id{font-family:var(--mono);font-size:10px;fill:var(--text-1);font-weight:600;text-anchor:middle}
+.n-title{font-size:9px;fill:var(--text-2);text-anchor:middle}
+.n-active .n-id{fill:var(--accent)}
+
+/* Metrics */
+.token-block{background:var(--bg-1);border:1px solid var(--border-1);border-radius:4px;padding:14px;margin-bottom:16px}
+.token-bar{display:flex;height:16px;border-radius:2px;overflow:hidden;gap:1px;margin-bottom:8px}
+.tseg{height:100%;min-width:2px}
+.seg-1{background:var(--tk-input)}
+.seg-2{background:var(--tk-output)}
+.seg-3{background:var(--tk-cache-r)}
+.seg-4{background:var(--tk-cache-w)}
+.token-legend{display:flex;flex-wrap:wrap;gap:12px}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
+.leg-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.chart-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
+.chart-block{background:var(--bg-1);border:1px solid var(--border-1);border-radius:4px;padding:14px}
+.bar-row{display:grid;grid-template-columns:120px 1fr 68px;align-items:center;gap:6px;margin-bottom:2px}
+.bar-lbl{font-size:12px;color:var(--text-2);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{height:14px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;border-radius:2px;background:var(--c0)}
+.bar-c0{background:var(--c0)}.bar-c1{background:var(--c1)}.bar-c2{background:var(--c2)}
+.bar-c3{background:var(--c3)}.bar-c4{background:var(--c4)}.bar-c5{background:var(--c5)}
+.bar-val{font-size:11px;font-variant-numeric:tabular-nums;color:var(--text-1)}
+.bar-sub{font-size:10px;color:var(--text-2);padding-left:128px;margin-bottom:6px}
+
+/* Changelog */
+.cl-entry{border-bottom:1px solid var(--border-1);padding:12px 0}
+.cl-entry:last-child{border-bottom:none}
+.cl-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.cl-title{flex:1;font-weight:500}
+.cl-date{margin-left:auto;white-space:nowrap}
+.cl-liner{font-size:13px;color:var(--text-1);margin-bottom:6px}
+.files-detail summary{font-size:12px;cursor:pointer}
+.file-list{list-style:none;padding-left:10px;margin-top:4px;display:flex;flex-direction:column;gap:2px}
+.file-list li{font-size:12px;color:var(--text-1)}
+
+/* Footer */
+footer{border-top:1px solid var(--border-1);padding:20px 32px;margin-top:40px}
+.footer-inner{display:flex;align-items:center;gap:6px;justify-content:center;font-size:11px;color:var(--text-2)}
+
+/* Executive summary & ETA */
+.exec-summary{font-size:13px;color:var(--text-1);margin-bottom:12px;line-height:1.7}
+.eta-line{font-size:12px;color:var(--accent);margin-top:4px}
+
+/* Cost over time chart */
+.cost-svg{display:block;margin:8px 0;background:var(--bg-1);border:1px solid var(--border-1);border-radius:4px}
+.cost-line{fill:none;stroke:var(--accent);stroke-width:2}
+.cost-area{fill:var(--accent-subtle);stroke:none}
+.cost-axis{fill:var(--text-2);font-family:var(--mono);font-size:10px}
+.cost-grid{stroke:var(--border-1);stroke-width:1;stroke-dasharray:4,4}
+
+/* Budget burndown */
+.burndown-wrap{background:var(--bg-1);border:1px solid var(--border-1);border-radius:4px;padding:14px;margin-bottom:16px}
+.burndown-bar{display:flex;height:20px;border-radius:3px;overflow:hidden;gap:1px;margin-bottom:8px}
+.burndown-spent{background:var(--accent);height:100%}
+.burndown-projected{background:var(--caution);height:100%;opacity:.6}
+.burndown-overshoot{background:var(--warn);height:100%;opacity:.7}
+.burndown-legend{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text-2)}
+.burndown-legend span{display:flex;align-items:center;gap:4px}
+.burndown-dot{display:inline-block;width:8px;height:8px;border-radius:2px}
+
+/* Blockers */
+.blocker-card{border-left:3px solid var(--warn);background:var(--bg-1);border-radius:0 4px 4px 0;padding:10px 14px;margin-bottom:8px}
+.blocker-id{font-family:var(--mono);font-size:12px;color:var(--warn);margin-bottom:2px}
+.blocker-text{font-size:12px;color:var(--text-1)}
+.blocker-risk{font-size:11px;color:var(--caution);margin-top:2px}
+
+/* Gantt */
+.gantt-wrap{overflow-x:auto;background:var(--bg-1);border:1px solid var(--border-1);border-radius:4px;padding:16px;margin-top:16px}
+.gantt-svg{display:block}
+.gantt-bar-done{fill:var(--ok);opacity:.7}
+.gantt-bar-active{fill:var(--accent)}
+.gantt-bar-pending{fill:var(--border-2)}
+.gantt-label{fill:var(--text-2);font-family:var(--mono);font-size:10px}
+.gantt-axis{fill:var(--text-2);font-family:var(--mono);font-size:9px}
+
+/* Interactive */
+.tl-filter{display:block;width:100%;padding:6px 10px;margin-bottom:8px;background:var(--bg-2);border:1px solid var(--border-1);border-radius:4px;color:var(--text-0);font-size:12px;font-family:var(--font);outline:none}
+.tl-filter:focus{border-color:var(--accent)}
+.tl-filter::placeholder{color:var(--text-2)}
+.sec-toggle{background:none;border:1px solid var(--border-2);color:var(--text-2);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:14px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.sec-toggle:hover{border-color:var(--text-1);color:var(--text-1)}
+.theme-toggle{background:var(--bg-3);border:1px solid var(--border-2);color:var(--text-1);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:var(--font)}
+.theme-toggle:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Light theme */
+.light-theme{--bg-0:#fff;--bg-1:#fafafa;--bg-2:#f5f5f5;--bg-3:#ebebeb;--border-1:#e5e5e5;--border-2:#d4d4d4;--text-0:#1a1a1a;--text-1:#525252;--text-2:#a3a3a3;--accent:#4f46e5;--accent-subtle:rgba(79,70,229,.08);--ok:#16a34a;--ok-subtle:rgba(22,163,74,.08);--warn:#dc2626;--caution:#ca8a04;--c0:#4f46e5;--c1:#dc2626;--c2:#0d9488;--c3:#7c3aed;--c4:#d97706;--c5:#059669;--tk-input:#4f46e5;--tk-output:#dc2626;--tk-cache-r:#0d9488;--tk-cache-w:#64748b}
+
+/* Responsive */
+@media(max-width:768px){
+  header{padding:10px 16px}
+  .header-inner{flex-wrap:wrap;gap:8px}
+  .header-meta h1{font-size:13px}
+  main{padding:16px}
+  .kv-grid{gap:1px}
+  .kv{min-width:80px;padding:8px 10px}
+  .kv-val{font-size:14px}
+  .chart-row{grid-template-columns:1fr}
+  .toc ul{padding:0 16px}
+  .toc a{padding:6px 8px;font-size:11px}
+  .bar-row{grid-template-columns:80px 1fr 56px}
+  .ms-body{padding-left:12px}
+}
+@media(max-width:480px){
+  .kv{min-width:60px;padding:6px 8px}
+  .kv-val{font-size:12px}
+  .kv-lbl{font-size:9px}
+  .bar-row{grid-template-columns:60px 1fr 48px}
+  .bar-lbl{font-size:10px}
+  .toc ul{flex-wrap:wrap}
+  .header-right{display:none}
+  .gantt-wrap{overflow-x:auto}
+}
+
+/* Print */
+@media print{
+  header,nav.toc{position:static}
+  body{background:#fff;color:#1a1a1a}
+  :root{--bg-0:#fff;--bg-1:#fafafa;--bg-2:#f5f5f5;--bg-3:#ebebeb;--border-1:#e5e5e5;--border-2:#d4d4d4;--text-0:#1a1a1a;--text-1:#525252;--text-2:#a3a3a3;--accent:#4f46e5;--ok:#16a34a;--ok-subtle:rgba(22,163,74,.08);--c0:#4f46e5;--c1:#dc2626;--c2:#0d9488;--c3:#7c3aed;--c4:#d97706;--c5:#059669;--tk-input:#4f46e5;--tk-output:#dc2626;--tk-cache-r:#0d9488;--tk-cache-w:#64748b}
+  section{page-break-inside:avoid}
+  .table-scroll{overflow:visible}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <div class="branding">
+      <span class="logo">GSD</span>
+      <span class="version">v2.58.0</span>
+    </div>
+    <div class="header-meta">
+      <h1>Vinted <span class="sep">/</span> <span class="mono accent">M002</span></h1>
+      <span class="header-path">/home/utilisateur/Vinted</span>
+    </div>
+    <div class="header-right">
+      <a class="back-link" href="index.html">All Reports</a>
+      <div class="generated">Tue, Mar 31, 2026, 06:37 PM GMT+2</div>
+    </div>
+  </div>
+</header>
+<nav class="toc" aria-label="Report sections">
+  <ul>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#blockers">Blockers</a></li>
+    <li><a href="#progress">Progress</a></li>
+    <li><a href="#timeline">Timeline</a></li>
+    <li><a href="#depgraph">Dependencies</a></li>
+    <li><a href="#metrics">Metrics</a></li>
+    <li><a href="#health">Health</a></li>
+    <li><a href="#changelog">Changelog</a></li>
+    <li><a href="#knowledge">Knowledge</a></li>
+    <li><a href="#captures">Captures</a></li>
+    <li><a href="#stats">Artifacts</a></li>
+    <li><a href="#discussion">Planning</a></li>
+  </ul>
+</nav>
+<main>
+
+<section id="summary">
+  <h2>Summary</h2>
+  
+    <p class="exec-summary">Vinted is 100% complete across 4 milestones. $76.48 spent.</p>
+    <div class="kv-grid"><div class="kv"><span class="kv-val">2/4</span><span class="kv-lbl">Milestones</span></div><div class="kv"><span class="kv-val">21/21</span><span class="kv-lbl">Slices</span></div><div class="kv"><span class="kv-val">pre-planning</span><span class="kv-lbl">Phase</span></div><div class="kv"><span class="kv-val">$76.48</span><span class="kv-lbl">Cost</span></div><div class="kv"><span class="kv-val">131.29M</span><span class="kv-lbl">Tokens</span></div><div class="kv"><span class="kv-val">7h 6m</span><span class="kv-lbl">Duration</span></div><div class="kv"><span class="kv-val">1946</span><span class="kv-lbl">Tool calls</span></div><div class="kv"><span class="kv-val">33</span><span class="kv-lbl">Units</span></div><div class="kv"><span class="kv-val">1.7/hr</span><span class="kv-lbl">Rate</span></div><div class="kv"><span class="kv-val">$3.64</span><span class="kv-lbl">Cost/slice</span></div><div class="kv"><span class="kv-val">67.5k</span><span class="kv-lbl">Tokens/tool</span></div><div class="kv"><span class="kv-val">90.0%</span><span class="kv-lbl">Cache hit</span></div><div class="kv"><span class="kv-val">M002</span><span class="kv-lbl">Scope</span></div></div>
+    <div class="progress-wrap">
+      <div class="progress-track"><div class="progress-fill" style="width:100%"></div></div>
+      <span class="progress-label">100%</span>
+    </div>
+    
+    
+    
+  
+</section>
+
+<section id="blockers">
+  <h2>Blockers</h2>
+  <p class="empty">No blockers or high-risk items found.</p>
+</section>
+
+<section id="progress">
+  <h2>Progress</h2>
+  
+      <details class="ms-block" open>
+        <summary class="ms-summary ms-complete">
+          <span class="dot dot-complete"></span>
+          <span class="mono ms-id">M001</span>
+          <span class="ms-title">M001: Listing-Level Market Radar</span>
+          <span class="muted">6/6</span>
+          
+          
+        </summary>
+        <div class="ms-body">
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S01</span>
+        <span class="muted">Public Discovery + Normalized Ingestion</span>
+        <span class="risk risk-high">high</span>
+        
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Public Homme/Femme seed sync from the embedded `/catalog` tree</span><span class="tag">provides: SQLite-backed normalized listing ingestion with card-level raw evidence fragments</span><span class="tag">provides: Batch CLI coverage reporting over persisted runs, scans, listings, and sightings</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D010</li><li>D011</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Public acquisition stays browserless while `/catalog` keeps exposing `catalogTree` and SSR item cards.</li><li>Coverage and failures are first-class persisted runtime surfaces, not transient console output.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S02</span>
+        <span class="muted">Intelligent Revisits + Observation History</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S01</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Per-run normalized listing history in `listing_observations`</span><span class="tag">provides: CLI freshness, revisit-plan, and listing history inspection surfaces</span><span class="tag">provides: Forward migration from S01 discovery-only SQLite databases</span><span class="tag">requires: Public seed sync, normalized listings, discovery diagnostics, and the batch `discover` entrypoint</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D011</li><li>D012</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>`listing_observations` holds one row per listing per run for cadence/freshness queries.</li><li>`listing_discoveries` remains the lower-level per-sighting evidence surface.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S03</span>
+        <span class="muted">Prudent State Machine + Confidence Surfaces</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S02</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Cautious current-state evaluation over history plus direct public item-page probes</span><span class="tag">provides: Persisted `item_page_probes` diagnostics</span><span class="tag">provides: CLI state refresh, summary, and per-listing inspection surfaces</span><span class="tag">requires: `listing_observations`, freshness history, revisit candidates, and repeated-run SQLite state</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D012</li><li>D013</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Direct item-page probe evidence outranks history when it yields a distinct public state signal.</li><li>Current listing state is derived, not source-of-truth persisted business state.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S04</span>
+        <span class="muted">Market Scores + Lightweight Contextualization</span>
+        <span class="risk risk-medium">medium</span>
+        <span class="muted sl-deps">S02, S03</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Explainable listing-level `demand` and `premium` scores</span><span class="tag">provides: Market summary surfaces for performing and rising segments</span><span class="tag">provides: Context-thresholded price baselines with graceful no-context fallback</span><span class="tag">requires: listing history, freshness, revisit cadence, and primary-catalog scan history</span><span class="tag">requires: cautious current-state evaluations, confidence, and probe-backed state evidence</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D014</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Demand and premium remain separate score surfaces.</li><li>Premium stays demand-led and only gets a contextual price boost when the peer sample clears explicit support thresholds.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S05</span>
+        <span class="muted">Mixed Dashboard + Filters + Listing Detail</span>
+        <span class="risk risk-medium">medium</span>
+        <span class="muted sl-deps">S03, S04</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Local mixed dashboard with market-summary modules, coverage/freshness/confidence cards, and filterable ranking proof</span><span class="tag">provides: Listing-detail drill-down with history, transitions, score factors, and state reasons</span><span class="tag">provides: Matching JSON diagnostics for the exact dashboard payload and selected listing detail</span><span class="tag">requires: cautious state explanations, confidence labels, basis kinds, and listing history/state inputs</span><span class="tag">requires: demand/premium score payloads, contextual price explanations, and market-summary aggregates</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D015</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Drive dashboard HTML and JSON diagnostics from the same server-side payload assembly.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S06</span>
+        <span class="muted">Local Batch + Continuous End-to-End Loop</span>
+        <span class="risk risk-medium">medium</span>
+        <span class="muted sl-deps">S01, S02, S03, S04, S05</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A real local `batch` operator command that runs one coherent discovery plus state-refresh radar cycle</span><span class="tag">provides: A real local `continuous` operator command that repeats the radar cycle while optionally serving the dashboard from the same DB</span><span class="tag">provides: Persisted runtime-cycle diagnostics in SQLite, exposed through `runtime-status`, `/api/runtime`, `/health`, and the dashboard runtime card</span><span class="tag">requires: public discovery, normalized listing persistence, and coverage footprint</span><span class="tag">requires: repeated observation history, freshness, and revisit surfaces</span><span class="tag">requires: cautious state evaluation, confidence labels, and item-page probe evidence</span><span class="tag">requires: demand/premium scoring and market-summary assembly from repository-backed evidence</span><span class="tag">requires: the server-rendered dashboard and truthful JSON diagnostics</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D016</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Persist operator runtime state in `runtime_cycles` and let both the CLI and dashboard read that table instead of inventing separate scheduler state files.</li></ul></div>
+        
+      </div>
+    </details></div>
+      </details>
+      <details class="ms-block" open>
+        <summary class="ms-summary ms-complete">
+          <span class="dot dot-complete"></span>
+          <span class="mono ms-id">M002</span>
+          <span class="ms-title">Enriched Market Intelligence Experience</span>
+          <span class="muted">15/15</span>
+          
+          
+        </summary>
+        <div class="ms-body">
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S01</span>
+        <span class="muted">SQL-Backed Overview Home + First Comparative Modules</span>
+        <span class="risk risk-high">high</span>
+        
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Public Homme/Femme seed sync from the embedded `/catalog` tree</span><span class="tag">provides: SQLite-backed normalized listing ingestion with card-level raw evidence fragments</span><span class="tag">provides: Batch CLI coverage reporting over persisted runs, scans, listings, and sightings</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D010</li><li>D011</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Public acquisition stays browserless while `/catalog` keeps exposing `catalogTree` and SSR item cards.</li><li>Coverage and failures are first-class persisted runtime surfaces, not transient console output.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S02</span>
+        <span class="muted">Runtime Truth + Pause/Resume Surface</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S01</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Per-run normalized listing history in `listing_observations`</span><span class="tag">provides: CLI freshness, revisit-plan, and listing history inspection surfaces</span><span class="tag">provides: Forward migration from S01 discovery-only SQLite databases</span><span class="tag">requires: Public seed sync, normalized listings, discovery diagnostics, and the batch `discover` entrypoint</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D011</li><li>D012</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>`listing_observations` holds one row per listing per run for cadence/freshness queries.</li><li>`listing_discoveries` remains the lower-level per-sighting evidence surface.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S03</span>
+        <span class="muted">Responsive French Product Shell + VPS Serving Path</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S01, S02</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Cautious current-state evaluation over history plus direct public item-page probes</span><span class="tag">provides: Persisted `item_page_probes` diagnostics</span><span class="tag">provides: CLI state refresh, summary, and per-listing inspection surfaces</span><span class="tag">requires: `listing_observations`, freshness history, revisit candidates, and repeated-run SQLite state</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D012</li><li>D013</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Direct item-page probe evidence outranks history when it yields a distinct public state signal.</li><li>Current listing state is derived, not source-of-truth persisted business state.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S04</span>
+        <span class="muted">Full Explorer + Comparative Intelligence</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S01, S03</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Explainable listing-level `demand` and `premium` scores</span><span class="tag">provides: Market summary surfaces for performing and rising segments</span><span class="tag">provides: Context-thresholded price baselines with graceful no-context fallback</span><span class="tag">requires: listing history, freshness, revisit cadence, and primary-catalog scan history</span><span class="tag">requires: cautious current-state evaluations, confidence, and probe-backed state evidence</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D014</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Demand and premium remain separate score surfaces.</li><li>Premium stays demand-led and only gets a contextual price boost when the peer sample clears explicit support thresholds.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S05</span>
+        <span class="muted">Listing Detail Narrative + Progressive Proof</span>
+        <span class="risk risk-medium">medium</span>
+        <span class="muted sl-deps">S01, S03, S04</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Local mixed dashboard with market-summary modules, coverage/freshness/confidence cards, and filterable ranking proof</span><span class="tag">provides: Listing-detail drill-down with history, transitions, score factors, and state reasons</span><span class="tag">provides: Matching JSON diagnostics for the exact dashboard payload and selected listing detail</span><span class="tag">requires: cautious state explanations, confidence labels, basis kinds, and listing history/state inputs</span><span class="tag">requires: demand/premium score payloads, contextual price explanations, and market-summary aggregates</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D015</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Drive dashboard HTML and JSON diagnostics from the same server-side payload assembly.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S06</span>
+        <span class="muted">Acquisition Hardening + Degraded-Mode Visibility</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S02, S03, S04, S05</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A real local `batch` operator command that runs one coherent discovery plus state-refresh radar cycle</span><span class="tag">provides: A real local `continuous` operator command that repeats the radar cycle while optionally serving the dashboard from the same DB</span><span class="tag">provides: Persisted runtime-cycle diagnostics in SQLite, exposed through `runtime-status`, `/api/runtime`, `/health`, and the dashboard runtime card</span><span class="tag">requires: public discovery, normalized listing persistence, and coverage footprint</span><span class="tag">requires: repeated observation history, freshness, and revisit surfaces</span><span class="tag">requires: cautious state evaluation, confidence labels, and item-page probe evidence</span><span class="tag">requires: demand/premium scoring and market-summary assembly from repository-backed evidence</span><span class="tag">requires: the server-rendered dashboard and truthful JSON diagnostics</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D016</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Persist operator runtime state in `runtime_cycles` and let both the CLI and dashboard read that table instead of inventing separate scheduler state files.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S07</span>
+        <span class="muted">Live VPS End-to-End Acceptance Closure</span>
+        <span class="risk risk-medium">medium</span>
+        <span class="muted sl-deps">S01, S02, S03, S04, S05, S06</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Final integrated acceptance for M002, combining realistic large-corpus mounted proof, public VPS recovery/proof, and closure of the real remote user loop</span><span class="tag">requires: SQL-backed overview home and repository-owned state classification on the main user path</span><span class="tag">requires: persisted runtime controller truth across CLI, runtime UI, and health surfaces</span><span class="tag">requires: shared responsive product shell and VPS-serving contract</span><span class="tag">requires: SQL-first explorer workflow and comparison modules</span><span class="tag">requires: narrative-first listing detail with progressive proof and preserved explorer context</span><span class="tag">requires: degraded acquisition contract across overview, explorer, detail, runtime, and health</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>Close S07 with split but explicit proof: keep the realistic large-corpus acceptance on `data/m001-closeout.db`, and separately recover/prove the real public VPS entrypoint on a fresh healthy live DB instead of pretending the corrupted 61 GB DB was acceptable evidence.</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>For final web-product closeout, require both scale proof and real-entrypoint proof; when the live operational DB is untrustworthy, recover the public service first and document the proof split instead of collapsing both needs into one dishonest claim.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S08</span>
+        <span class="muted">Native API Price Bounds for Discovery</span>
+        <span class="risk risk-low">low</span>
+        <span class="muted sl-deps">S06</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Native API-side price bounds for discovery plus shared runtime CLI support for `max_price`</span><span class="tag">requires: acquisition/runtime plumbing that batch and continuous both share</span><span class="tag">requires: the post-closeout integrated operator path that S08 extends without introducing a parallel entrypoint</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D031 — apply configured price bounds at the API boundary while retaining a local safety net before persistence</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Push price windows upstream whenever the API supports them, but keep local persistence guards so acquisition correctness does not depend on upstream behavior being perfect</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S09</span>
+        <span class="muted">High-Throughput Proxy Pool + Webshare Acquisition Operator Flow</span>
+        <span class="risk risk-medium">medium</span>
+        <span class="muted sl-deps">S06, S08</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A high-throughput, credential-safe Webshare proxy-pool operator path with real multi-route transport and preflight-backed live proof</span><span class="tag">requires: acquisition/runtime plumbing and degraded-mode honesty across discovery, state refresh, and runtime surfaces</span><span class="tag">requires: the API-bound discovery path that the new proxy preflight now probes directly after warm-up</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D032 — use a gitignored local proxy-file contract plus route-local sync/async transport state and preflight-backed operator proof instead of retry-only proxy rotation</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Normalize provider-specific proxy exports once at the config boundary, then treat the pool as route-local transport state with per-route warm-up/throttling/cooldowns and safe runtime metadata only</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S10</span>
+        <span class="muted">Polyglot Data Platform Foundation</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S09</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A shared, validated, redacted platform configuration contract for PostgreSQL, ClickHouse, and S3-compatible object storage with staged cutover flags.</span><span class="tag">provides: Idempotent `platform-bootstrap` and `platform-doctor` operator commands backed by versioned PostgreSQL/ClickHouse migrations and object-store prefix probes.</span><span class="tag">provides: Deterministic versioned event-envelope and evidence-manifest contracts plus a leased PostgreSQL outbox ready for multi-sink delivery.</span><span class="tag">provides: A real Docker-backed smoke proof and shared health-rendering path that future slices can reuse for local/VPS platform verification.</span><span class="tag">requires: the post-S09 operator hardening and storage-growth evidence that justified replacing the monolithic SQLite boundary with a staged polyglot platform</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D034 — use one dataclass-based `vinted_radar.platform.config` loader for PostgreSQL, ClickHouse, and S3-compatible settings with normalized prefixes, explicit per-provider schema versions, redacted diagnostics, and cutover flags defaulting to false.</li><li>D035 — use versioned `V###__name.sql` migration directories with per-provider ledgers plus persistent object-store prefix markers and write probes so bootstrap and doctor stay idempotent and observable.</li><li>D036 — use canonical-JSON versioned event envelopes with deterministic UUIDv5 IDs, deterministic SHA-256 manifest checksums/IDs, and a PostgreSQL outbox keyed by unique `(event_id, sink)` rows with leased claim/retry state.</li><li>D037 — use env-substituted host ports, unique Docker compose project names, and shared health-rendering helpers so the real smoke stack stays isolated and the CLI/test readiness text cannot drift.</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Centralize the polyglot env contract in `vinted_radar.platform.config` and keep all cutover flags explicit and disabled by default until downstream slices prove their writers/readers.</li><li>Keep provider-specific schema-version expectations instead of one shared platform version, because PostgreSQL and ClickHouse migrations advance independently.</li><li>Use versioned `V###__name.sql` directories plus per-provider ledgers, object-store `.prefix` markers, and write probes so bootstrap and doctor remain idempotent and observable.</li><li>Use deterministic event-envelope IDs, manifest IDs/checksums, and unique `(event_id, sink)` outbox rows with leased retry state so downstream sinks can stay replay-safe.</li><li>Parameterize the data-platform compose stack and reuse shared health renderers so real smoke tests stay isolated and assert the same readiness contract operators see.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S11</span>
+        <span class="muted">Minimal Evidence Contract + Parquet Lake</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S10</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A shared minimal listing-card evidence contract for both HTML and API catalog cards, plus backward-compatible normalization for historical rows.</span><span class="tag">provides: An immutable S3-compatible Parquet lake writer with deterministic event/parquet/manifest keys, uploaded manifests, ZSTD compression, and checksum-guarded rewrites.</span><span class="tag">provides: Collector-side discovery and state-refresh evidence emission that can publish manifested Parquet batches and outbox metadata idempotently.</span><span class="tag">provides: Historical SQLite evidence export and event/manifest lookup tooling that turns the lake into a real replay/debug surface instead of a write-only archive.</span><span class="tag">requires: The shared polyglot platform config, deterministic event/manifest contracts, object-store prefixes, and leased outbox seams that S11 reuses for immutable evidence publishing.</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D038 — Persist versioned minimal listing-card evidence envelopes (`schema_version`, `evidence_source`, `fragments`) for both HTML and API cards, while keeping normalization backward-compatible with legacy flat payloads.</li><li>D039 — Anchor each evidence batch on a deterministic batch `EventEnvelope`, upload the batch event JSON plus the partitioned Parquet object under deterministic keys, and reject same-key rewrites when the recorded SHA-256 differs.</li><li>D040 — Auto-wire collector evidence emission from platform cutover flags in the default discovery/state-refresh factories, emit deterministic Parquet/manifests batches when object-storage writes are enabled, and surface emitted batch metadata on service reports.</li><li>D041 — Export legacy SQLite discovery, observation, and probe rows under explicit `vinted.backfill.*` batch event types with `capture_source=sqlite_backfill` metadata instead of pretending they came from live collector invocations.</li><li>D042 — Decode canonical-JSON Parquet cell strings back into navigable nested `row.*`, `event.*`, and `manifest.*` fragments during evidence inspection.</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Evolve listing-card proof through a shared versioned `schema_version` + `evidence_source` + `fragments` envelope, but keep normalizers compatible with older flat payloads so historical rows do not become unreadable.</li><li>Treat the Parquet lake as immutable storage: deterministic batch event -&gt; deterministic Parquet key -&gt; deterministic manifest key, all protected by recorded SHA-256 checksums.</li><li>Emit one discovery batch per accepted catalog page and one state-refresh batch per refresh invocation so retries stay idempotent and downstream sinks can reason about stable batch boundaries.</li><li>When collector services auto-wire platform publishers from cutover flags, close the full service rather than only the SQLite repository so newly owned S3/Postgres clients are released correctly.</li><li>Keep historical backfill distinguishable from live ingestion (`vinted.backfill.*`) and decode JSON-like Parquet cells on lookup so the lake remains replayable and drillable down to concrete evidence fragments.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S12</span>
+        <span class="muted">PostgreSQL Control Plane + Current-State Projection</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S10, S11</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A bounded PostgreSQL mutable-truth schema for runtime controller state, runtime cycles, discovery runs, catalogs, listing identity, listing presence summaries, and listing current state.</span><span class="tag">provides: Replay-safe PostgreSQL projector/repository seams that can consume manifested batch evidence without duplicating raw blobs into mutable tables.</span><span class="tag">provides: A PostgreSQL-backed runtime control-plane path for runtime-status, pause/resume, controller heartbeats, and runtime cycle/controller persistence under the polyglot-read cutover.</span><span class="tag">provides: An explicit `postgres-backfill` operator command plus regression coverage that proves current-state/control-plane cutover does not silently fall back to SQLite runtime mutation.</span><span class="tag">requires: The PostgreSQL/ClickHouse/S3-compatible platform foundation, versioned migrations, outbox plumbing, and shared health/bootstrap seams that S12 reuses for mutable truth.</span><span class="tag">requires: The deterministic manifested batch/evidence-lake contract that S12 projectors and future backfills can consume without inventing a second raw-evidence format.</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D043 — use separate PostgreSQL mutable-truth tables for runtime controller state, runtime cycles, discovery runs, catalogs, listing identity, listing current state, listing presence summaries, mutable manifests, and outbox checkpoints with natural keys and projector provenance fields.</li><li>D044 — project listing identity/presence/current-state from outbox-backed page batches, but never derive follow-up misses from page-scoped listing-seen manifests alone.</li><li>D045 — provide an explicit `postgres-backfill` CLI command and prove runtime cutover with a service-level smoke test that asserts SQLite runtime tables stay untouched when control-plane writes are redirected.</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Separate immutable evidence storage from bounded mutable truth: S11 owns raw proof, while S12 owns current-state/control-plane projection in PostgreSQL via natural-key upserts.</li><li>Use replay-safe projector contracts for listing identity, presence, current state, and runtime control-plane truth, and keep follow-up misses derived only from catalog-complete inputs.</li><li>Prove control-plane cutover by asserting the legacy SQLite runtime tables remain empty during the external-control-plane smoke run, not just by observing a green runtime cycle.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S13</span>
+        <span class="muted">ClickHouse Serving Warehouse + Rollups</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S10, S11, S12</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A ClickHouse V002 serving warehouse with append-only listing-seen/probe facts, long-lived rollups, latest-per-listing serving tables, and materialized-view wiring.</span><span class="tag">provides: A replay-safe outbox-to-ClickHouse ingest worker with checkpoint, lag, and failure state that operators and downstream cutover work can inspect.</span><span class="tag">provides: A repository-shaped ClickHouse product-query adapter that preserves overview, explorer, and listing-detail route contracts while sourcing analytics from ClickHouse.</span><span class="tag">provides: A reusable route-parity verifier and backend-shape normalization rule for SQLite-to-ClickHouse analytical cutover.</span><span class="tag">requires: The PostgreSQL/ClickHouse/S3 platform foundation, versioned migrations, shared config, and outbox/bootstrap seams that S13 extends for serving analytics.</span><span class="tag">requires: The manifested parquet evidence-lake contract that S13 ingests into ClickHouse instead of inventing a second raw-evidence format.</span><span class="tag">requires: The PostgreSQL mutable-truth and outbox-checkpoint seams that S13 reuses for serving-ingest checkpoint state and future application cutover.</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>D047 — use 730-day raw fact TTL, 3650-day serving rollups, and latest-per-listing serving tables fed by materialized views.</li><li>D048 — use deterministic row-level fact ids plus source-event lookups so ClickHouse ingest inserts only missing rows on retries and partial replays.</li><li>D051 — switch dashboard product reads through a repository-shaped ClickHouse adapter so route payload builders stay stable during cutover.</li><li>D052 — normalize probe presentation at the dashboard serialization and route-proof layer instead of forcing every backend to emit the repository’s flat row shape.</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Use deterministic row-level ids plus source-event lookups to make ClickHouse fact ingest replay-safe across outbox retries and partial batch writes.</li><li>Preserve existing dashboard/explorer/detail payload builders by introducing a repository-shaped ClickHouse adapter instead of rewriting product routes during cutover.</li><li>Normalize backend-specific row-shape differences at the dashboard serialization boundary and prove parity with a reusable route verifier rather than coupling every backend to one internal row layout.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S14</span>
+        <span class="muted">Historical Backfill + Application Cutover</span>
+        <span class="risk risk-high">high</span>
+        <span class="muted sl-deps">S12, S13</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: A resumable full backfill path from legacy SQLite into PostgreSQL mutable truth, ClickHouse replay inputs, and Parquet audit manifests</span><span class="tag">provides: A reconciliation contract and explicit cutover diagnostics for shadow validation and rollback decisions</span><span class="tag">provides: A live application cutover path where dashboard and runtime reads use PostgreSQL + ClickHouse while SQLite remains only a temporary fallback and safety valve</span><span class="tag">provides: A rerunnable cutover smoke verifier and documented VPS cutover and rollback runbook for real operator rollout</span><span class="tag">requires: PostgreSQL mutable-truth schema, projector and backfill path, and runtime control-plane repository used for the live cutover.</span><span class="tag">requires: ClickHouse serving warehouse, ingest worker, and repository-shaped analytics adapter used by overview, explorer, and detail reads.</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>Backfill PostgreSQL mutable truth directly from SQLite state/history, replay only live-compatible discovery/probe batches into ClickHouse, and keep legacy observation/runtime history as Parquet audit evidence.</li><li>Persist full-backfill progress in a local JSON checkpoint so interrupted migrations can resume idempotently without duplicating ClickHouse facts or lake objects.</li><li>Derive one shared cutover snapshot and expose the same mode/read-path/write-target contract across CLI, dashboard runtime payloads, and health diagnostics.</li><li>Keep ClickHouse as the analytics backend while reading runtime/controller truth from PostgreSQL during cutover.</li><li>Honor the published cutover read path in operator reads: `dual-write-shadow` stays on SQLite, while `polyglot-cutover` switches to the platform path.</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Split historical migration by store responsibility: PostgreSQL gets direct mutable-truth projection, ClickHouse gets only live-compatible serving facts, and the lake retains legacy audit evidence.</li><li>Drive all cutover-facing product and operator surfaces from one shared cutover snapshot instead of re-deriving mode/read-path/write-target logic per route.</li><li>Treat runtime/control-plane truth and analytical reads as separate dependencies during cutover: PostgreSQL owns controller truth, ClickHouse owns analytical serving, and shadow-mode operator reads must still honor the published SQLite read path.</li></ul></div>
+        
+      </div>
+    </details>
+    <details class="sl-block">
+      <summary class="sl-summary ">
+        <span class="dot dot-complete dot-sm"></span>
+        <span class="mono muted">S15</span>
+        <span class="muted">Retention, Reconciliation, and AI-Ready Feature Marts</span>
+        <span class="risk risk-medium">medium</span>
+        <span class="muted sl-deps">S14</span>
+        
+        
+      </summary>
+      <div class="sl-detail">
+        <div class="tag-row"><span class="tag">provides: Bounded-storage lifecycle controls for ClickHouse, transient PostgreSQL control-plane rows, and object-storage retention classes.</span><span class="tag">provides: One operator-facing audit surface that explains reconciliation, ingestion lag, lifecycle drift, and backfill posture across the polyglot platform.</span><span class="tag">provides: Truthful ClickHouse change facts derived during replay/backfill with terminal-page-aware manifest semantics.</span><span class="tag">provides: Stable AI-ready listing-day, segment-day, price-change, state-transition, and evidence-pack exports with explicit traceability.</span><span class="tag">provides: A stronger end-to-end cutover verifier that proves audit posture, warehouse freshness, evidence drill-down, and SQLite analytical hot-path retirement.</span><span class="tag">requires: Historical backfill, cross-store reconciliation, cutover diagnostics, and the PostgreSQL + ClickHouse application read path that S15 hardens and extends.</span></div>
+        <div class="verif ">
+        passed
+       </div>
+        <div class="detail-block"><span class="detail-label">Decisions</span><ul><li>Archive transient PostgreSQL control-plane history before pruning it, keep ClickHouse bounded with explicit TTL reassertion, and expose the resulting storage posture through `platform-lifecycle`.</li><li>Consolidate reconciliation, lag, lifecycle drift, and backfill posture into one `platform-audit` contract that is shared by CLI, runtime, and health surfaces.</li><li>Carry pagination and chunk metadata through replay manifests, and emit follow-up-miss transitions only on the final chunk of a terminal catalog page so derived change facts stay truthful.</li><li>Expose AI-ready exports as stable ClickHouse marts plus grouped evidence packs with manifest/window/run traceability rather than forcing downstream consumers to rescan raw fact tables.</li><li>Use `scripts/verify_cutover_stack.py` as the authoritative post-cutover acceptance proof and require platform-audit posture, fresh change facts, evidence drill-down, and route parity in that proof.</li></ul></div>
+        <div class="detail-block"><span class="detail-label">Patterns</span><ul><li>Bound platform storage by responsibility: ClickHouse raw/rollup history uses TTL, PostgreSQL keeps only transient control-plane history long enough to archive and prune, and object storage holds durable raw evidence plus lifecycle-governed archives.</li><li>Mirror one audit contract into CLI, runtime, and health surfaces instead of asking operators to correlate reconciliation, checkpoints, lifecycle posture, and backfill state by hand.</li><li>Treat replay chunk metadata as part of the truth contract for change-fact derivation; historical backfill must know when a catalog page is terminal before emitting missing-from-scan transitions.</li><li>Publish downstream-ready analytical surfaces as stable marts and evidence packs that always carry explicit manifest/window/run traceability.</li><li>Make the final operator proof validate warehouse freshness and evidence drill-down, not just platform liveness and HTTP route reachability.</li></ul></div>
+        
+      </div>
+    </details></div>
+      </details>
+      <details class="ms-block" open>
+        <summary class="ms-summary ms-active">
+          <span class="dot dot-active"></span>
+          <span class="mono ms-id">M003</span>
+          <span class="ms-title">Product-Level Intelligence + Grounded AI Layer</span>
+          <span class="muted">0/0</span>
+          <span class="label">critical path</span>
+          
+        </summary>
+        <div class="ms-body"><p class="empty indent">No slices in roadmap yet.</p></div>
+      </details>
+      <details class="ms-block" >
+        <summary class="ms-summary ms-pending">
+          <span class="dot dot-pending"></span>
+          <span class="mono ms-id">M004</span>
+          <span class="ms-title">SaaS Hardening and Commercialization — Context Draft</span>
+          <span class="muted">0/0</span>
+          
+          
+        </summary>
+        <div class="ms-body"><p class="empty indent">No slices in roadmap yet.</p></div>
+      </details>
+</section>
+
+<section id="timeline">
+  <h2>Timeline</h2>
+  
+    <div class="table-scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th>#</th><th>Type</th><th>ID</th><th>Model</th>
+          <th>Started</th><th>Duration</th><th>Cost</th>
+          <th>Tokens</th><th>Tools</th><th>Tier</th><th>Routed</th><th>Trunc</th><th>CHF</th>
+        </tr></thead>
+        <tbody>
+      <tr style="background:rgba(239,68,68,0.052)">
+        <td class="muted">1</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S12/T02</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 30, 2026, 10:55 PM</td>
+        <td>12m 24s</td>
+        <td class="num">$1.98</td>
+        <td class="num">4.25M</td>
+        <td class="num">68</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.110)">
+        <td class="muted">2</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S12/T03</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 30, 2026, 11:07 PM</td>
+        <td>17m 15s</td>
+        <td class="num">$4.18</td>
+        <td class="num">12.65M</td>
+        <td class="num">104</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="muted">3</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S12/T04</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 30, 2026, 11:25 PM</td>
+        <td>16m 1s</td>
+        <td class="num">$0.414</td>
+        <td class="num">377.5k</td>
+        <td class="num">30</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="muted">4</td>
+        <td class="mono">rewrite-docs</td>
+        <td class="mono muted">M002/S13</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 08:23 AM</td>
+        <td>5m 43s</td>
+        <td class="num">$0.803</td>
+        <td class="num">1.73M</td>
+        <td class="num">46</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.057)">
+        <td class="muted">5</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S13/T01</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 08:29 AM</td>
+        <td>12m 6s</td>
+        <td class="num">$2.16</td>
+        <td class="num">3.79M</td>
+        <td class="num">91</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.136)">
+        <td class="muted">6</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S13/T02</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 08:41 AM</td>
+        <td>22m 55s</td>
+        <td class="num">$5.16</td>
+        <td class="num">7.47M</td>
+        <td class="num">90</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.064)">
+        <td class="muted">7</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S13/T03</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 09:04 AM</td>
+        <td>17m 39s</td>
+        <td class="num">$2.44</td>
+        <td class="num">3.53M</td>
+        <td class="num">66</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.026)">
+        <td class="muted">8</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S13/T04</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 09:22 AM</td>
+        <td>6m 46s</td>
+        <td class="num">$0.997</td>
+        <td class="num">1.57M</td>
+        <td class="num">40</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.060)">
+        <td class="muted">9</td>
+        <td class="mono">complete-slice</td>
+        <td class="mono muted">M002/S13</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 09:28 AM</td>
+        <td>12m 32s</td>
+        <td class="num">$2.28</td>
+        <td class="num">3.16M</td>
+        <td class="num">66</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="muted">10</td>
+        <td class="mono">complete-slice</td>
+        <td class="mono muted">M002/S13</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 09:41 AM</td>
+        <td>8m 0s</td>
+        <td class="num">$0.116</td>
+        <td class="num">74.7k</td>
+        <td class="num">6</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="muted">11</td>
+        <td class="mono">rewrite-docs</td>
+        <td class="mono muted">M002/S13</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 12:59 PM</td>
+        <td>6m 19s</td>
+        <td class="num">$0.833</td>
+        <td class="num">1.80M</td>
+        <td class="num">42</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.108)">
+        <td class="muted">12</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S13/T03</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 01:05 PM</td>
+        <td>21m 47s</td>
+        <td class="num">$4.08</td>
+        <td class="num">5.39M</td>
+        <td class="num">64</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.069)">
+        <td class="muted">13</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S13/T04</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 01:27 PM</td>
+        <td>13m 9s</td>
+        <td class="num">$2.63</td>
+        <td class="num">4.58M</td>
+        <td class="num">55</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.043)">
+        <td class="muted">14</td>
+        <td class="mono">complete-slice</td>
+        <td class="mono muted">M002/S13</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 01:40 PM</td>
+        <td>7m 54s</td>
+        <td class="num">$1.65</td>
+        <td class="num">2.60M</td>
+        <td class="num">39</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="muted">15</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S14/T01</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 01:48 PM</td>
+        <td>5m 39s</td>
+        <td class="num">$0.577</td>
+        <td class="num">832.4k</td>
+        <td class="num">39</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.085)">
+        <td class="muted">16</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S14/T02</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 02:36 PM</td>
+        <td>18m 58s</td>
+        <td class="num">$3.24</td>
+        <td class="num">5.37M</td>
+        <td class="num">76</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.069)">
+        <td class="muted">17</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S14/T02</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 02:55 PM</td>
+        <td>13m 40s</td>
+        <td class="num">$2.61</td>
+        <td class="num">3.22M</td>
+        <td class="num">63</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.050)">
+        <td class="muted">18</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S14/T03</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 03:09 PM</td>
+        <td>8m 59s</td>
+        <td class="num">$1.88</td>
+        <td class="num">3.12M</td>
+        <td class="num">44</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.091)">
+        <td class="muted">19</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S14/T03</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 03:18 PM</td>
+        <td>14m 43s</td>
+        <td class="num">$3.46</td>
+        <td class="num">7.72M</td>
+        <td class="num">98</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.056)">
+        <td class="muted">20</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S14/T04</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 03:32 PM</td>
+        <td>13m 27s</td>
+        <td class="num">$2.12</td>
+        <td class="num">3.32M</td>
+        <td class="num">55</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.079)">
+        <td class="muted">21</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S14/T04</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 03:46 PM</td>
+        <td>13m 12s</td>
+        <td class="num">$2.99</td>
+        <td class="num">5.33M</td>
+        <td class="num">71</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.097)">
+        <td class="muted">22</td>
+        <td class="mono">complete-slice</td>
+        <td class="mono muted">M002/S14</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 03:59 PM</td>
+        <td>18m 30s</td>
+        <td class="num">$3.69</td>
+        <td class="num">4.42M</td>
+        <td class="num">83</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.150)">
+        <td class="muted">23</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S15/T01</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 04:17 PM</td>
+        <td>24m 55s</td>
+        <td class="num">$5.69</td>
+        <td class="num">8.49M</td>
+        <td class="num">95</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.115)">
+        <td class="muted">24</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S15/T02</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 04:42 PM</td>
+        <td>19m 43s</td>
+        <td class="num">$4.37</td>
+        <td class="num">6.55M</td>
+        <td class="num">58</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.046)">
+        <td class="muted">25</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S15/T03</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 05:02 PM</td>
+        <td>4m 18s</td>
+        <td class="num">$1.74</td>
+        <td class="num">2.53M</td>
+        <td class="num">54</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="muted">26</td>
+        <td class="mono">replan-slice</td>
+        <td class="mono muted">M002/S15</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 05:07 PM</td>
+        <td>4m 36s</td>
+        <td class="num">$0.609</td>
+        <td class="num">1.15M</td>
+        <td class="num">38</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.062)">
+        <td class="muted">27</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S15/T04</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 05:11 PM</td>
+        <td>17m 30s</td>
+        <td class="num">$2.34</td>
+        <td class="num">4.68M</td>
+        <td class="num">54</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.049)">
+        <td class="muted">28</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S15/T04</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 05:29 PM</td>
+        <td>11m 39s</td>
+        <td class="num">$1.86</td>
+        <td class="num">4.71M</td>
+        <td class="num">72</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.064)">
+        <td class="muted">29</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S15/T05</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 05:40 PM</td>
+        <td>18m 6s</td>
+        <td class="num">$2.42</td>
+        <td class="num">5.22M</td>
+        <td class="num">57</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.091)">
+        <td class="muted">30</td>
+        <td class="mono">execute-task</td>
+        <td class="mono muted">M002/S15/T06</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 05:59 PM</td>
+        <td>13m 59s</td>
+        <td class="num">$3.44</td>
+        <td class="num">5.43M</td>
+        <td class="num">82</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.041)">
+        <td class="muted">31</td>
+        <td class="mono">complete-slice</td>
+        <td class="mono muted">M002/S15</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 06:13 PM</td>
+        <td>9m 3s</td>
+        <td class="num">$1.54</td>
+        <td class="num">3.01M</td>
+        <td class="num">50</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.024)">
+        <td class="muted">32</td>
+        <td class="mono">validate-milestone</td>
+        <td class="mono muted">M002</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 06:22 PM</td>
+        <td>7m 11s</td>
+        <td class="num">$0.897</td>
+        <td class="num">1.47M</td>
+        <td class="num">23</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr>
+      <tr style="background:rgba(239,68,68,0.034)">
+        <td class="muted">33</td>
+        <td class="mono">complete-milestone</td>
+        <td class="mono muted">M002</td>
+        <td>gpt-5.4</td>
+        <td class="muted">Mar 31, 2026, 06:29 PM</td>
+        <td>7m 45s</td>
+        <td class="num">$1.29</td>
+        <td class="num">1.75M</td>
+        <td class="num">27</td>
+        <td class="mono"></td>
+        <td></td>
+        <td class="num"></td>
+        <td></td>
+      </tr></tbody>
+      </table>
+    </div>
+</section>
+
+<section id="depgraph">
+  <h2>Dependencies</h2>
+  
+    <div class="dep-block">
+      <h3>M001: M001: Listing-Level Market Radar</h3>
+      <div class="dep-legend">
+    <span><span class="dot dot-complete dot-sm"></span> done</span>
+    <span><span class="dot dot-active dot-sm"></span> active</span>
+    <span><span class="dot dot-pending dot-sm"></span> pending</span>
+    <span><span class="dot dot-parked dot-sm"></span> parked</span>
+  </div>
+      <div class="dep-wrap">
+        <svg class="dep-svg" viewBox="0 0 1100 80" width="1100" height="80">
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--border-2)"/>
+            </marker>
+            <marker id="arr-crit" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+          <path d="M150,40 C178,40 178,40 206,40" class="edge" marker-end="url(#arr)"/><path d="M336,40 C364,40 364,40 392,40" class="edge" marker-end="url(#arr)"/><path d="M336,40 C457,40 457,40 578,40" class="edge" marker-end="url(#arr)"/><path d="M522,40 C550,40 550,40 578,40" class="edge" marker-end="url(#arr)"/><path d="M522,40 C643,40 643,40 764,40" class="edge" marker-end="url(#arr)"/><path d="M708,40 C736,40 736,40 764,40" class="edge" marker-end="url(#arr)"/><path d="M150,40 C550,40 550,40 950,40" class="edge" marker-end="url(#arr)"/><path d="M336,40 C643,40 643,40 950,40" class="edge" marker-end="url(#arr)"/><path d="M522,40 C736,40 736,40 950,40" class="edge" marker-end="url(#arr)"/><path d="M708,40 C829,40 829,40 950,40" class="edge" marker-end="url(#arr)"/><path d="M894,40 C922,40 922,40 950,40" class="edge" marker-end="url(#arr)"/>
+          <g class="node n-done" transform="translate(20,20)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S01</text>
+      <text x="65" y="30" class="n-title">Public Discovery …</text>
+      <title>S01: Public Discovery + Normalized Ingestion</title>
+    </g><g class="node n-done" transform="translate(206,20)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S02</text>
+      <text x="65" y="30" class="n-title">Intelligent Revis…</text>
+      <title>S02: Intelligent Revisits + Observation History</title>
+    </g><g class="node n-done" transform="translate(392,20)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S03</text>
+      <text x="65" y="30" class="n-title">Prudent State Mac…</text>
+      <title>S03: Prudent State Machine + Confidence Surfaces</title>
+    </g><g class="node n-done" transform="translate(578,20)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S04</text>
+      <text x="65" y="30" class="n-title">Market Scores + L…</text>
+      <title>S04: Market Scores + Lightweight Contextualization</title>
+    </g><g class="node n-done" transform="translate(764,20)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S05</text>
+      <text x="65" y="30" class="n-title">Mixed Dashboard +…</text>
+      <title>S05: Mixed Dashboard + Filters + Listing Detail</title>
+    </g><g class="node n-done" transform="translate(950,20)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S06</text>
+      <text x="65" y="30" class="n-title">Local Batch + Con…</text>
+      <title>S06: Local Batch + Continuous End-to-End Loop</title>
+    </g>
+        </svg>
+      </div>
+    </div>
+    <div class="dep-block">
+      <h3>M002: Enriched Market Intelligence Experience</h3>
+      <div class="dep-legend">
+    <span><span class="dot dot-complete dot-sm"></span> done</span>
+    <span><span class="dot dot-active dot-sm"></span> active</span>
+    <span><span class="dot dot-pending dot-sm"></span> pending</span>
+    <span><span class="dot dot-parked dot-sm"></span> parked</span>
+  </div>
+      <div class="dep-wrap">
+        <svg class="dep-svg" viewBox="0 0 2588 134" width="2588" height="134">
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--border-2)"/>
+            </marker>
+            <marker id="arr-crit" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+          <path d="M150,67 C178,67 178,67 206,67" class="edge" marker-end="url(#arr)"/><path d="M150,67 C271,67 271,67 392,67" class="edge" marker-end="url(#arr)"/><path d="M336,67 C364,67 364,67 392,67" class="edge" marker-end="url(#arr)"/><path d="M150,67 C364,67 364,67 578,67" class="edge" marker-end="url(#arr)"/><path d="M522,67 C550,67 550,67 578,67" class="edge" marker-end="url(#arr)"/><path d="M150,67 C457,67 457,67 764,67" class="edge" marker-end="url(#arr)"/><path d="M522,67 C643,67 643,67 764,67" class="edge" marker-end="url(#arr)"/><path d="M708,67 C736,67 736,67 764,67" class="edge" marker-end="url(#arr)"/><path d="M336,67 C643,67 643,67 950,67" class="edge" marker-end="url(#arr)"/><path d="M522,67 C736,67 736,67 950,67" class="edge" marker-end="url(#arr)"/><path d="M708,67 C829,67 829,67 950,67" class="edge" marker-end="url(#arr)"/><path d="M894,67 C922,67 922,67 950,67" class="edge" marker-end="url(#arr)"/><path d="M150,67 C643,67 643,40 1136,40" class="edge" marker-end="url(#arr)"/><path d="M336,67 C736,67 736,40 1136,40" class="edge" marker-end="url(#arr)"/><path d="M522,67 C829,67 829,40 1136,40" class="edge" marker-end="url(#arr)"/><path d="M708,67 C922,67 922,40 1136,40" class="edge" marker-end="url(#arr)"/><path d="M894,67 C1015,67 1015,40 1136,40" class="edge" marker-end="url(#arr)"/><path d="M1080,67 C1108,67 1108,40 1136,40" class="edge" marker-end="url(#arr)"/><path d="M1080,67 C1108,67 1108,94 1136,94" class="edge" marker-end="url(#arr)"/><path d="M1080,67 C1201,67 1201,67 1322,67" class="edge" marker-end="url(#arr)"/><path d="M1266,94 C1294,94 1294,67 1322,67" class="edge" marker-end="url(#arr)"/><path d="M1452,67 C1480,67 1480,67 1508,67" class="edge" marker-end="url(#arr)"/><path d="M1638,67 C1666,67 1666,67 1694,67" class="edge" marker-end="url(#arr)"/><path d="M1638,67 C1759,67 1759,67 1880,67" class="edge" marker-end="url(#arr)"/><path d="M1824,67 C1852,67 1852,67 1880,67" class="edge" marker-end="url(#arr)"/><path d="M1638,67 C1852,67 1852,67 2066,67" class="edge" marker-end="url(#arr)"/><path d="M1824,67 C1945,67 1945,67 2066,67" class="edge" marker-end="url(#arr)"/><path d="M2010,67 C2038,67 2038,67 2066,67" class="edge" marker-end="url(#arr)"/><path d="M2010,67 C2131,67 2131,67 2252,67" class="edge" marker-end="url(#arr)"/><path d="M2196,67 C2224,67 2224,67 2252,67" class="edge" marker-end="url(#arr)"/><path d="M2382,67 C2410,67 2410,67 2438,67" class="edge" marker-end="url(#arr)"/>
+          <g class="node n-done" transform="translate(20,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S01</text>
+      <text x="65" y="30" class="n-title">SQL-Backed Overvi…</text>
+      <title>S01: SQL-Backed Overview Home + First Comparative Modules</title>
+    </g><g class="node n-done" transform="translate(206,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S02</text>
+      <text x="65" y="30" class="n-title">Runtime Truth + P…</text>
+      <title>S02: Runtime Truth + Pause/Resume Surface</title>
+    </g><g class="node n-done" transform="translate(392,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S03</text>
+      <text x="65" y="30" class="n-title">Responsive French…</text>
+      <title>S03: Responsive French Product Shell + VPS Serving Path</title>
+    </g><g class="node n-done" transform="translate(578,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S04</text>
+      <text x="65" y="30" class="n-title">Full Explorer + C…</text>
+      <title>S04: Full Explorer + Comparative Intelligence</title>
+    </g><g class="node n-done" transform="translate(764,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S05</text>
+      <text x="65" y="30" class="n-title">Listing Detail Na…</text>
+      <title>S05: Listing Detail Narrative + Progressive Proof</title>
+    </g><g class="node n-done" transform="translate(950,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S06</text>
+      <text x="65" y="30" class="n-title">Acquisition Harde…</text>
+      <title>S06: Acquisition Hardening + Degraded-Mode Visibility</title>
+    </g><g class="node n-done" transform="translate(1136,20)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S07</text>
+      <text x="65" y="30" class="n-title">Live VPS End-to-E…</text>
+      <title>S07: Live VPS End-to-End Acceptance Closure</title>
+    </g><g class="node n-done" transform="translate(1136,74)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S08</text>
+      <text x="65" y="30" class="n-title">Native API Price …</text>
+      <title>S08: Native API Price Bounds for Discovery</title>
+    </g><g class="node n-done" transform="translate(1322,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S09</text>
+      <text x="65" y="30" class="n-title">High-Throughput P…</text>
+      <title>S09: High-Throughput Proxy Pool + Webshare Acquisition Operator Flow</title>
+    </g><g class="node n-done" transform="translate(1508,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S10</text>
+      <text x="65" y="30" class="n-title">Polyglot Data Pla…</text>
+      <title>S10: Polyglot Data Platform Foundation</title>
+    </g><g class="node n-done" transform="translate(1694,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S11</text>
+      <text x="65" y="30" class="n-title">Minimal Evidence …</text>
+      <title>S11: Minimal Evidence Contract + Parquet Lake</title>
+    </g><g class="node n-done" transform="translate(1880,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S12</text>
+      <text x="65" y="30" class="n-title">PostgreSQL Contro…</text>
+      <title>S12: PostgreSQL Control Plane + Current-State Projection</title>
+    </g><g class="node n-done" transform="translate(2066,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S13</text>
+      <text x="65" y="30" class="n-title">ClickHouse Servin…</text>
+      <title>S13: ClickHouse Serving Warehouse + Rollups</title>
+    </g><g class="node n-done" transform="translate(2252,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S14</text>
+      <text x="65" y="30" class="n-title">Historical Backfi…</text>
+      <title>S14: Historical Backfill + Application Cutover</title>
+    </g><g class="node n-done" transform="translate(2438,47)">
+      <rect width="130" height="40" rx="4"/>
+      <text x="65" y="16" class="n-id">S15</text>
+      <text x="65" y="30" class="n-title">Retention, Reconc…</text>
+      <title>S15: Retention, Reconciliation, and AI-Ready Feature Marts</title>
+    </g>
+        </svg>
+      </div>
+    </div>
+</section>
+
+<section id="metrics">
+  <h2>Metrics</h2>
+  
+    <div class="kv-grid"><div class="kv"><span class="kv-val">$76.48</span><span class="kv-lbl">Total cost</span></div><div class="kv"><span class="kv-val">131.29M</span><span class="kv-lbl">Total tokens</span></div><div class="kv"><span class="kv-val">13.09M</span><span class="kv-lbl">Input</span></div><div class="kv"><span class="kv-val">964.1k</span><span class="kv-lbl">Output</span></div><div class="kv"><span class="kv-val">117.24M</span><span class="kv-lbl">Cache read</span></div><div class="kv"><span class="kv-val">0</span><span class="kv-lbl">Cache write</span></div><div class="kv"><span class="kv-val">7h 6m</span><span class="kv-lbl">Duration</span></div><div class="kv"><span class="kv-val">33</span><span class="kv-lbl">Units</span></div><div class="kv"><span class="kv-val">1946</span><span class="kv-lbl">Tool calls</span></div><div class="kv"><span class="kv-val">0</span><span class="kv-lbl">Truncations</span></div></div>
+    
+    
+    <div class="token-block">
+      <h3>Token breakdown</h3>
+      <div class="token-bar"><div class="tseg seg-1" style="width:9.97%" title="Input: 13.09M (10.0%)"></div><div class="tseg seg-2" style="width:0.73%" title="Output: 964.1k (0.7%)"></div><div class="tseg seg-3" style="width:89.30%" title="Cache read: 117.24M (89.3%)"></div></div>
+      <div class="token-legend"><span class="leg-item"><span class="leg-dot seg-1"></span>Input: 13.09M (10.0%)</span><span class="leg-item"><span class="leg-dot seg-2"></span>Output: 964.1k (0.7%)</span><span class="leg-item"><span class="leg-dot seg-3"></span>Cache read: 117.24M (89.3%)</span></div>
+    </div>
+    
+    <div class="token-block">
+      <h3>Cost over time</h3>
+      <svg class="cost-svg" viewBox="0 0 600 200" width="600" height="200">
+        <line x1="50" y1="20" x2="570" y2="20" class="cost-grid"/><text x="46" y="23" class="cost-axis" text-anchor="end">$76.48</text><line x1="50" y1="57.5" x2="570" y2="57.5" class="cost-grid"/><text x="46" y="60.5" class="cost-axis" text-anchor="end">$57.36</text><line x1="50" y1="95" x2="570" y2="95" class="cost-grid"/><text x="46" y="98" class="cost-axis" text-anchor="end">$38.24</text><line x1="50" y1="132.5" x2="570" y2="132.5" class="cost-grid"/><text x="46" y="135.5" class="cost-axis" text-anchor="end">$19.12</text><line x1="50" y1="170" x2="570" y2="170" class="cost-grid"/><text x="46" y="173" class="cost-axis" text-anchor="end">$0.0000</text>
+        <path d="M50.0,166.1 L66.3,157.9 L82.5,157.1 L98.8,155.5 L115.0,151.3 L131.3,141.2 L147.5,136.4 L163.8,134.4 L180.0,130.0 L196.3,129.7 L212.5,128.1 L228.8,120.1 L245.0,114.9 L261.3,111.7 L277.5,110.6 L293.8,104.2 L310.0,99.1 L326.3,95.4 L342.5,88.6 L358.8,84.5 L375.0,78.6 L391.3,71.4 L407.5,60.2 L423.8,51.6 L440.0,48.2 L456.3,47.0 L472.5,42.5 L488.8,38.8 L505.0,34.1 L521.3,27.3 L537.5,24.3 L553.8,22.5 L570.0,20.0 L570.0,170.0 L50.0,170.0 Z" class="cost-area"/>
+        <path d="M50.0,166.1 L66.3,157.9 L82.5,157.1 L98.8,155.5 L115.0,151.3 L131.3,141.2 L147.5,136.4 L163.8,134.4 L180.0,130.0 L196.3,129.7 L212.5,128.1 L228.8,120.1 L245.0,114.9 L261.3,111.7 L277.5,110.6 L293.8,104.2 L310.0,99.1 L326.3,95.4 L342.5,88.6 L358.8,84.5 L375.0,78.6 L391.3,71.4 L407.5,60.2 L423.8,51.6 L440.0,48.2 L456.3,47.0 L472.5,42.5 L488.8,38.8 L505.0,34.1 L521.3,27.3 L537.5,24.3 L553.8,22.5 L570.0,20.0" class="cost-line"/>
+        <text x="50" y="196" class="cost-axis">#1</text>
+        <text x="570" y="196" class="cost-axis" text-anchor="end">#33</text>
+      </svg>
+    </div>
+    
+    <div class="chart-row">
+      <div class="chart-block"><h3>Cost by phase</h3>
+      <div class="bar-row">
+        <div class="bar-lbl">execution</div>
+        <div class="bar-track"><div class="bar-fill bar-c0" style="width:100.0%"></div></div>
+        <div class="bar-val">$67.21</div>
+      </div>
+      <div class="bar-sub">28 units</div>
+      <div class="bar-row">
+        <div class="bar-lbl">completion</div>
+        <div class="bar-track"><div class="bar-fill bar-c1" style="width:13.8%"></div></div>
+        <div class="bar-val">$9.28</div>
+      </div>
+      <div class="bar-sub">5 units</div></div>
+      <div class="chart-block"><h3>Tokens by phase</h3>
+      <div class="bar-row">
+        <div class="bar-lbl">execution</div>
+        <div class="bar-track"><div class="bar-fill bar-c0" style="width:100.0%"></div></div>
+        <div class="bar-val">118.02M</div>
+      </div>
+      <div class="bar-sub">$67.21</div>
+      <div class="bar-row">
+        <div class="bar-lbl">completion</div>
+        <div class="bar-track"><div class="bar-fill bar-c1" style="width:11.2%"></div></div>
+        <div class="bar-val">13.27M</div>
+      </div>
+      <div class="bar-sub">$9.28</div></div>
+    </div>
+    
+    <div class="chart-row">
+      <div class="chart-block"><h3>Cost by slice</h3>
+      <div class="bar-row">
+        <div class="bar-lbl">M002</div>
+        <div class="bar-track"><div class="bar-fill bar-c0" style="width:9.1%"></div></div>
+        <div class="bar-val">$2.19</div>
+      </div>
+      <div class="bar-sub">2 units</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S12</div>
+        <div class="bar-track"><div class="bar-fill bar-c1" style="width:27.4%"></div></div>
+        <div class="bar-val">$6.58</div>
+      </div>
+      <div class="bar-sub">3 units</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S13</div>
+        <div class="bar-track"><div class="bar-fill bar-c2" style="width:96.4%"></div></div>
+        <div class="bar-val">$23.15</div>
+      </div>
+      <div class="bar-sub">11 units</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S14</div>
+        <div class="bar-track"><div class="bar-fill bar-c3" style="width:85.7%"></div></div>
+        <div class="bar-val">$20.56</div>
+      </div>
+      <div class="bar-sub">8 units</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S15</div>
+        <div class="bar-track"><div class="bar-fill bar-c4" style="width:100.0%"></div></div>
+        <div class="bar-val">$24.00</div>
+      </div>
+      <div class="bar-sub">9 units</div></div>
+      <div class="chart-block"><h3>Cost by model</h3>
+      <div class="bar-row">
+        <div class="bar-lbl">gpt-5.4</div>
+        <div class="bar-track"><div class="bar-fill bar-c0" style="width:100.0%"></div></div>
+        <div class="bar-val">$76.48</div>
+      </div>
+      <div class="bar-sub">33 units</div></div>
+      <div class="chart-block"><h3>Duration by slice</h3>
+      <div class="bar-row">
+        <div class="bar-lbl">M002</div>
+        <div class="bar-track"><div class="bar-fill bar-c0" style="width:11.1%"></div></div>
+        <div class="bar-val">14m 57s</div>
+      </div>
+      <div class="bar-sub">$2.19</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S12</div>
+        <div class="bar-track"><div class="bar-fill bar-c1" style="width:33.9%"></div></div>
+        <div class="bar-val">45m 41s</div>
+      </div>
+      <div class="bar-sub">$6.58</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S13</div>
+        <div class="bar-track"><div class="bar-fill bar-c2" style="width:100.0%"></div></div>
+        <div class="bar-val">2h 14m</div>
+      </div>
+      <div class="bar-sub">$23.15</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S14</div>
+        <div class="bar-track"><div class="bar-fill bar-c3" style="width:79.5%"></div></div>
+        <div class="bar-val">1h 47m</div>
+      </div>
+      <div class="bar-sub">$20.56</div>
+      <div class="bar-row">
+        <div class="bar-lbl">M002/S15</div>
+        <div class="bar-track"><div class="bar-fill bar-c4" style="width:91.8%"></div></div>
+        <div class="bar-val">2h 3m</div>
+      </div>
+      <div class="bar-sub">$24.00</div></div>
+    </div>
+    
+    <div class="gantt-wrap">
+      <h3>Slice timeline</h3>
+      <svg class="gantt-svg" viewBox="0 0 700 210" width="700" height="210">
+        <text x="134" y="49" class="gantt-label" text-anchor="end">M002/S12</text>
+      <rect x="140.0" y="36.0" width="20.9" height="18" rx="2" class="gantt-bar-done"><title>M002/S12: 45m 44s</title></rect>
+<text x="134" y="79" class="gantt-label" text-anchor="end">M002/S13</text>
+      <rect x="399.7" y="66.0" width="148.5" height="18" rx="2" class="gantt-bar-done"><title>M002/S13: 5h 25m</title></rect>
+<text x="134" y="109" class="gantt-label" text-anchor="end">M002/S14</text>
+      <rect x="548.2" y="96.0" width="68.2" height="18" rx="2" class="gantt-bar-done"><title>M002/S14: 2h 29m</title></rect>
+<text x="134" y="139" class="gantt-label" text-anchor="end">M002/S15</text>
+      <rect x="616.4" y="126.0" width="56.7" height="18" rx="2" class="gantt-bar-done"><title>M002/S15: 2h 4m</title></rect>
+<text x="134" y="169" class="gantt-label" text-anchor="end">M002</text>
+      <rect x="673.2" y="156.0" width="6.8" height="18" rx="2" class="gantt-bar-pending"><title>M002: 14m 57s</title></rect>
+        <text x="140.0" y="202" class="gantt-axis" text-anchor="middle">Mar 30, 2026, 10:55 PM</text><text x="275.0" y="202" class="gantt-axis" text-anchor="middle">Mar 31, 2026, 03:50 AM</text><text x="410.0" y="202" class="gantt-axis" text-anchor="middle">Mar 31, 2026, 08:46 AM</text><text x="545.0" y="202" class="gantt-axis" text-anchor="middle">Mar 31, 2026, 01:41 PM</text><text x="680.0" y="202" class="gantt-axis" text-anchor="middle">Mar 31, 2026, 06:37 PM</text>
+      </svg>
+    </div>
+  
+</section>
+
+<section id="health">
+  <h2>Health</h2>
+  
+    <table class="tbl tbl-kv"><tbody><tr><td>Token profile</td><td>standard</td></tr><tr class="h-ok"><td>Truncation rate</td><td>0.0% per unit (0 total)</td></tr><tr class="h-ok"><td>Continue-here rate</td><td>0.0% per unit (0 total)</td></tr><tr><td>Tool calls</td><td>1946</td></tr><tr><td>Messages</td><td>1037 assistant / 0 user</td></tr></tbody></table>
+    
+    <h3>Tier breakdown</h3>
+    <table class="tbl">
+      <thead><tr><th>Tier</th><th>Units</th><th>Cost</th><th>Tokens</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">unknown</td>
+           <td>33</td><td>$76.48</td>
+           <td>131.29M</td></tr>
+      </tbody>
+    </table>
+    
+    
+      <h3>Doctor Run History</h3>
+      <table class="tbl">
+        <thead><tr><th></th><th>Time</th><th>Summary</th></tr></thead>
+        <tbody><tr style="color:#22c55e">
+        <td class="mono">✓</td>
+        <td class="mono">2026-03-31 11:54:32</td>
+        <td>Clean · 4 fixed · Git remote &#39;origin&#39; is unreachable — Remote: https://github.com/XdreaMs404/Vinted.git</td>
+      </tr>
+      <tr><td colspan="3"><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Git remote &#39;origin&#39; is unreachable — Remote: https://github.com/XdreaMs404/Vinted.git <span class="mono" style="color:#888">environment</span></div><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Anthropic (Claude) — not configured — Run /gsd keys to authenticate <span class="mono" style="color:#888">project</span></div><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Directory &quot;S01&quot; exists in M001/slices/ but is not referenced in the roadmap <span class="mono" style="color:#888">M001</span></div><div style="margin-left:2em;color:#22c55e;font-size:0.85em">↳ re-rendered stale projections for M002</div><div style="margin-left:2em;color:#22c55e;font-size:0.85em">↳ re-rendered missing projections for M003</div></td></tr><tr style="color:#22c55e">
+        <td class="mono">✓</td>
+        <td class="mono">2026-03-31 05:44:26</td>
+        <td>Clean · Git remote &#39;origin&#39; is unreachable — Remote: https://github.com/XdreaMs404/Vinted.git</td>
+      </tr>
+      <tr><td colspan="3"><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Git remote &#39;origin&#39; is unreachable — Remote: https://github.com/XdreaMs404/Vinted.git <span class="mono" style="color:#888">environment</span></div><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Anthropic (Claude) — not configured — Run /gsd keys to authenticate <span class="mono" style="color:#888">project</span></div><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Missing tasks directory for M001/S05 (slice is complete — cosmetic only) <span class="mono" style="color:#888">M001/S05</span></div></td></tr><tr style="color:#22c55e">
+        <td class="mono">✓</td>
+        <td class="mono">2026-03-31 05:36:01</td>
+        <td>Clean · Anthropic (Claude) — not configured — Run /gsd keys to authenticate</td>
+      </tr>
+      <tr><td colspan="3"><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Anthropic (Claude) — not configured — Run /gsd keys to authenticate <span class="mono" style="color:#888">project</span></div><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Milestone M004 title contains em/en dash (— or –), which conflict with GSD state document delimiters. Rename the milestone to remove these characters to prevent state corruption. <span class="mono" style="color:#888">M004</span></div></td></tr><tr style="color:#22c55e">
+        <td class="mono">✓</td>
+        <td class="mono">2026-03-30 19:52:04</td>
+        <td>Clean · Anthropic (Claude) — not configured — Run /gsd keys to authenticate</td>
+      </tr>
+      <tr><td colspan="3"><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Anthropic (Claude) — not configured — Run /gsd keys to authenticate <span class="mono" style="color:#888">project</span></div><div style="margin-left:2em;color:#eab308;font-size:0.85em">⚠ Milestone M004 title contains em/en dash (— or –), which conflict with GSD state document delimiters. Rename the milestone to remove these characters to prevent state corruption. <span class="mono" style="color:#888">M004</span></div></td></tr></tbody>
+      </table>
+  
+</section>
+
+<section id="changelog">
+  <h2>Changelog <span class="count">21</span></h2>
+  
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S15</span>
+          <span class="cl-title">Retention, Reconciliation, and AI-Ready Feature Marts</span>
+          <span class="muted cl-date">Mar 31, 2026, 06:18 PM</span>
+        </div>
+        <p class="cl-liner">S15 closed M002&#39;s platform migration with bounded-storage lifecycle controls, unified audit/reconciliation visibility, truthful ClickHouse change-fact replay, AI-ready feature marts and evidence packs, and a stronger end-to-end acceptance proof.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>Archive transient PostgreSQL control-plane history before pruning it, keep ClickHouse bounded with explicit TTL reassertion, and expose the resulting storage posture through `platform-lifecycle`.</li><li>Consolidate reconciliation, lag, lifecycle drift, and backfill posture into one `platform-audit` contract that is shared by CLI, runtime, and health surfaces.</li><li>Carry pagination and chunk metadata through replay manifests, and emit follow-up-miss transitions only on the final chunk of a terminal catalog page so derived change facts stay truthful.</li><li>Expose AI-ready exports as stable ClickHouse marts plus grouped evidence packs with manifest/window/run traceability rather than forcing downstream consumers to rescan raw fact tables.</li><li>Use `scripts/verify_cutover_stack.py` as the authoritative post-cutover acceptance proof and require platform-audit posture, fresh change facts, evidence drill-down, and route parity in that proof.</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">17 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/services/lifecycle.py</code> — Implements lifecycle jobs for ClickHouse TTL enforcement, PostgreSQL archive/prune behavior, and object-store lifecycle posture reporting.</li><li><code>vinted_radar/services/platform_audit.py</code> — Builds the unified audit report that composes reconciliation, lag, lifecycle, and backfill posture.</li><li><code>vinted_radar/platform/clickhouse_ingest.py</code> — Repairs replay-time change-fact derivation so price/state change marts have truthful populated inputs.</li><li><code>vinted_radar/services/full_backfill.py</code> — Carries terminal-page chunk metadata through replay manifests so missing-from-scan transitions are derived safely during backfill.</li><li><code>vinted_radar/query/feature_marts.py</code> — Adds ClickHouse-backed listing-day, segment-day, price-change, state-transition, and evidence-pack exports.</li><li><code>vinted_radar/query/overview_clickhouse.py</code> — Exposes the new feature-mart export contract through the ClickHouse product query adapter.</li><li><code>vinted_radar/cli.py</code> — Adds operator-facing `platform-lifecycle`, `platform-audit`, and `feature-marts` surfaces and wires them into the existing CLI.</li><li><code>vinted_radar/platform/health.py</code> — Mirrors the new audit and lifecycle posture into runtime/health-facing diagnostics.</li><li><code>infra/clickhouse/migrations/V002__serving_warehouse.sql</code> — Defines the stable ClickHouse mart views used by downstream feature-mart exports.</li><li><code>scripts/verify_cutover_stack.py</code> — Extends final acceptance proof to require platform-audit posture, fresh change facts, evidence-pack drill-down, and route parity.</li><li><code>README.md</code> — Documents the richer acceptance proof and operator-facing lifecycle/audit contract.</li><li><code>tests/test_lifecycle_jobs.py</code> — Regression coverage for lifecycle config, CLI rendering, TTL enforcement, archive/prune behavior, and object-store lifecycle rules.</li><li><code>tests/test_platform_audit.py</code> — Regression coverage for audit aggregation, CLI JSON output, and runtime/health payload propagation.</li><li><code>tests/test_clickhouse_ingest.py</code> — Regression coverage for replay-safe primary fact dedupe and derived change-fact insertion.</li><li><code>tests/test_full_backfill.py</code> — Regression coverage for terminal-chunk-aware replay manifests used during historical backfill.</li><li><code>tests/test_feature_marts.py</code> — Regression coverage for mart exports, evidence packs, traceability, and CLI JSON output.</li><li><code>tests/test_cutover_smoke.py</code> — Acceptance coverage for the expanded end-to-end cutover verifier.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S14</span>
+          <span class="cl-title">Historical Backfill + Application Cutover</span>
+          <span class="muted cl-date">Mar 31, 2026, 04:17 PM</span>
+        </div>
+        <p class="cl-liner">Historical SQLite evidence is now backfillable into PostgreSQL, ClickHouse, and the Parquet lake, and the application/runtime stack can cut over to the new platform with explicit shadow and cutover diagnostics plus rollback proof.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>Backfill PostgreSQL mutable truth directly from SQLite state/history, replay only live-compatible discovery/probe batches into ClickHouse, and keep legacy observation/runtime history as Parquet audit evidence.</li><li>Persist full-backfill progress in a local JSON checkpoint so interrupted migrations can resume idempotently without duplicating ClickHouse facts or lake objects.</li><li>Derive one shared cutover snapshot and expose the same mode/read-path/write-target contract across CLI, dashboard runtime payloads, and health diagnostics.</li><li>Keep ClickHouse as the analytics backend while reading runtime/controller truth from PostgreSQL during cutover.</li><li>Honor the published cutover read path in operator reads: `dual-write-shadow` stays on SQLite, while `polyglot-cutover` switches to the platform path.</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">18 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/services/full_backfill.py</code> — Added resumable orchestration for SQLite → PostgreSQL/ClickHouse/object-storage backfill with checkpointed progress.</li><li><code>vinted_radar/cli.py</code> — Added reconciliation/reporting commands, cutover-aware runtime status behavior, and wired the backfill/cutover operator surface.</li><li><code>vinted_radar/platform/health.py</code> — Centralized cutover mode/read-path/write-target summarization and platform-health rendering.</li><li><code>vinted_radar/dashboard.py</code> — Cut dashboard/runtime payload assembly over to the polyglot query path with shared cutover diagnostics.</li><li><code>vinted_radar/query/overview_clickhouse.py</code> — Provided ClickHouse-backed product reads while delegating runtime/control-plane truth to PostgreSQL.</li><li><code>vinted_radar/services/discovery.py</code> — Projected live discovery mutable truth into PostgreSQL during cutover instead of relying on legacy SQLite-only mutation paths.</li><li><code>vinted_radar/services/state_refresh.py</code> — Projected probe refresh results directly into PostgreSQL mutable truth during cutover.</li><li><code>scripts/verify_cutover_stack.py</code> — Added rerunnable live cutover smoke proof across doctor, ingest, PostgreSQL truth, object storage, and served routes.</li><li><code>scripts/verify_vps_serving.py</code> — Extended public-route verification to assert runtime/health cutover state during rollout and rollback.</li><li><code>README.md</code> — Documented the cutover-mode contract plus VPS cutover and rollback runbook.</li><li><code>tests/test_full_backfill.py</code> — Added focused regression coverage for full backfill.</li><li><code>tests/test_reconciliation.py</code> — Added focused regression coverage for reconciliation and cutover diagnostics.</li><li><code>tests/test_dashboard.py</code> — Added dashboard cutover regression coverage.</li><li><code>tests/test_runtime_service.py</code> — Added runtime cutover regression coverage.</li><li><code>tests/test_runtime_cli.py</code> — Added CLI runtime/control-plane cutover regression coverage.</li><li><code>tests/test_cutover_smoke.py</code> — Added cutover smoke acceptance coverage.</li><li><code>.gsd/KNOWLEDGE.md</code> — Recorded the dual-write-shadow read-path gotcha for future agents.</li><li><code>.gsd/PROJECT.md</code> — Refreshed project state to mark S14 complete and describe the new cutover verification baseline.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S13</span>
+          <span class="cl-title">ClickHouse Serving Warehouse + Rollups</span>
+          <span class="muted cl-date">Mar 31, 2026, 01:47 PM</span>
+        </div>
+        <p class="cl-liner">S13 established the ClickHouse serving warehouse, replay-safe serving ingest, and a repository-shaped analytical read path so overview, explorer, and listing detail can move off SQLite full-history scans without changing dashboard contracts.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D047 — use 730-day raw fact TTL, 3650-day serving rollups, and latest-per-listing serving tables fed by materialized views.</li><li>D048 — use deterministic row-level fact ids plus source-event lookups so ClickHouse ingest inserts only missing rows on retries and partial replays.</li><li>D051 — switch dashboard product reads through a repository-shaped ClickHouse adapter so route payload builders stay stable during cutover.</li><li>D052 — normalize probe presentation at the dashboard serialization and route-proof layer instead of forcing every backend to emit the repository’s flat row shape.</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">17 files modified</summary>
+        <ul class="file-list">
+          <li><code>infra/clickhouse/migrations/V002__serving_warehouse.sql</code> — Added the ClickHouse V002 warehouse schema with raw fact tables, serving rollups, latest-per-listing tables, TTL policy, and materialized views.</li><li><code>vinted_radar/platform/clickhouse_schema/__init__.py</code> — Wired the ClickHouse schema contract/versioning so bootstrap and tests treat V002 as the active serving baseline.</li><li><code>vinted_radar/platform/clickhouse_ingest.py</code> — Implemented replay-safe manifested-batch ingestion into ClickHouse facts plus checkpoint/lag/error status reporting.</li><li><code>vinted_radar/cli.py</code> — Added ClickHouse ingest/status operator commands and preserved dashboard/backend entrypoints needed for cutover diagnostics.</li><li><code>vinted_radar/query/overview_clickhouse.py</code> — Added the repository-shaped ClickHouse product adapter and overview-serving assembly over ClickHouse facts/latest tables.</li><li><code>vinted_radar/query/explorer_clickhouse.py</code> — Added ClickHouse-backed explorer snapshot/filter/comparison helpers for the product read path.</li><li><code>vinted_radar/query/detail_clickhouse.py</code> — Added ClickHouse-backed listing state-input, history, and peer-price loaders for detail payloads.</li><li><code>vinted_radar/dashboard.py</code> — Allowed overview/explorer/detail routes to serve through the ClickHouse adapter, exposed `primary_payload_source`, and normalized backend-specific probe presentation.</li><li><code>scripts/verify_clickhouse_routes.py</code> — Added a reusable parity-and-latency verifier for repository-backed versus ClickHouse-backed dashboard/explorer/detail/health routes.</li><li><code>tests/clickhouse_product_test_support.py</code> — Added scripted ClickHouse fixture support for route/query parity tests without requiring a live ClickHouse stack.</li><li><code>tests/test_clickhouse_schema.py</code> — Added schema regression coverage for the V002 serving warehouse objects, retention, and materialized-view wiring.</li><li><code>tests/test_clickhouse_ingest.py</code> — Added ingest replay-safety, failure-state, and CLI status/report regression coverage.</li><li><code>tests/test_clickhouse_queries.py</code> — Added ClickHouse adapter contract coverage for overview, explorer, and detail payload assembly.</li><li><code>tests/test_dashboard.py</code> — Extended dashboard route coverage so ClickHouse-backed payload delivery remains contract-compatible with the existing product shell.</li><li><code>tests/test_clickhouse_parity.py</code> — Added parity coverage and route-verifier proof across representative overview/explorer/detail/health scenarios.</li><li><code>.gsd/KNOWLEDGE.md</code> — Recorded the sink-global manifest replay-safety rule and backend-shape normalization pattern that future platform slices should reuse.</li><li><code>.gsd/PROJECT.md</code> — Updated project state to reflect S13 completion and the new ClickHouse serving-warehouse cutover seam.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S12</span>
+          <span class="cl-title">PostgreSQL Control Plane + Current-State Projection</span>
+          <span class="muted cl-date">Mar 31, 2026, 08:18 AM</span>
+        </div>
+        <p class="cl-liner">S12 moved mutable runtime/control-plane and current listing truth onto PostgreSQL with replay-safe projectors, operator backfill, and a cutover proof that guards against silent SQLite fallback.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D043 — use separate PostgreSQL mutable-truth tables for runtime controller state, runtime cycles, discovery runs, catalogs, listing identity, listing current state, listing presence summaries, mutable manifests, and outbox checkpoints with natural keys and projector provenance fields.</li><li>D044 — project listing identity/presence/current-state from outbox-backed page batches, but never derive follow-up misses from page-scoped listing-seen manifests alone.</li><li>D045 — provide an explicit `postgres-backfill` CLI command and prove runtime cutover with a service-level smoke test that asserts SQLite runtime tables stay untouched when control-plane writes are redirected.</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">14 files modified</summary>
+        <ul class="file-list">
+          <li><code>infra/postgres/migrations/V003__platform_mutable_truth.sql</code> — Added PostgreSQL V003 mutable-truth tables and baseline version wiring for runtime/discovery/catalog/current-state truth.</li><li><code>vinted_radar/platform/postgres_repository.py</code> — Expanded the mutable-truth repository with runtime/discovery/catalog/listing projection and read surfaces for PostgreSQL current-state/control-plane truth.</li><li><code>vinted_radar/services/projectors.py</code> — Added projector orchestration for replay-safe mutable-truth projection from manifested outbox batches.</li><li><code>vinted_radar/services/discovery.py</code> — Mirrored discovery bookkeeping into PostgreSQL mutable truth when the polyglot-read cutover is enabled.</li><li><code>vinted_radar/services/runtime.py</code> — Allowed runtime cycles/controller truth to run through an injected external control-plane repository and added a smoke guard against SQLite fallback.</li><li><code>vinted_radar/services/postgres_backfill.py</code> — Added the explicit SQLite-to-PostgreSQL mutable-truth backfill service and CLI command.</li><li><code>vinted_radar/cli.py</code> — Cut runtime CLI control-plane commands over to PostgreSQL mutable truth and added `postgres-backfill` operator entrypoints.</li><li><code>tests/test_postgres_schema.py</code> — Added schema coverage for the PostgreSQL mutable-truth platform baseline.</li><li><code>tests/test_runtime_cli.py</code> — Added CLI/runtime cutover coverage for PostgreSQL-backed control-plane reads and writes.</li><li><code>tests/test_runtime_service.py</code> — Added external-control-plane runtime smoke coverage and the SQLite-no-fallback assertion.</li><li><code>tests/test_postgres_backfill.py</code> — Added SQLite-to-PostgreSQL mutable-truth backfill and CLI regression coverage.</li><li><code>.gsd/KNOWLEDGE.md</code> — Recorded the external-control-plane no-SQLite-fallback cutover guard as a reusable platform migration pattern.</li><li><code>.gsd/OVERRIDES.md</code> — Pinned future auto-mode execute-task prompts in this project to the inlined templates so stale home-path template guidance does not break recovery again.</li><li><code>.gsd/PROJECT.md</code> — Updated current project state to reflect S12 completion and the PostgreSQL mutable-truth cutover seam.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S11</span>
+          <span class="cl-title">Minimal Evidence Contract + Parquet Lake</span>
+          <span class="muted cl-date">Mar 29, 2026, 11:55 AM</span>
+        </div>
+        <p class="cl-liner">S11 shrank raw collector proof to a minimal versioned evidence contract and moved it onto an immutable, inspectable Parquet/object-store lake with deterministic manifests, collector emission, and legacy SQLite backfill/lookup tooling.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D038 — Persist versioned minimal listing-card evidence envelopes (`schema_version`, `evidence_source`, `fragments`) for both HTML and API cards, while keeping normalization backward-compatible with legacy flat payloads.</li><li>D039 — Anchor each evidence batch on a deterministic batch `EventEnvelope`, upload the batch event JSON plus the partitioned Parquet object under deterministic keys, and reject same-key rewrites when the recorded SHA-256 differs.</li><li>D040 — Auto-wire collector evidence emission from platform cutover flags in the default discovery/state-refresh factories, emit deterministic Parquet/manifests batches when object-storage writes are enabled, and surface emitted batch metadata on service reports.</li><li>D041 — Export legacy SQLite discovery, observation, and probe rows under explicit `vinted.backfill.*` batch event types with `capture_source=sqlite_backfill` metadata instead of pretending they came from live collector invocations.</li><li>D042 — Decode canonical-JSON Parquet cell strings back into navigable nested `row.*`, `event.*`, and `manifest.*` fragments during evidence inspection.</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">18 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/card_payload.py</code> — Introduced the shared minimal listing-card evidence envelope builders and backward-compatible snapshot normalization.</li><li><code>vinted_radar/parsers/api_catalog_page.py</code> — Stopped persisting heavyweight full API card payloads and emitted targeted API evidence fragments instead.</li><li><code>vinted_radar/parsers/catalog_page.py</code> — Aligned HTML card evidence generation with the shared minimal envelope contract.</li><li><code>vinted_radar/platform/object_store.py</code> — Added checksum-aware immutable S3 object operations plus key listing support for manifest/event lookup.</li><li><code>vinted_radar/platform/lake_writer.py</code> — Implemented deterministic manifested Parquet batch writing/reading with ZSTD compression and stable object keys.</li><li><code>vinted_radar/services/discovery.py</code> — Published discovery listing-seen evidence batches and surfaced emitted batch references on service reports.</li><li><code>vinted_radar/services/state_refresh.py</code> — Published probe evidence batches for refresh runs and surfaced emitted batch references.</li><li><code>vinted_radar/services/runtime.py</code> — Updated cleanup behavior so full auto-wired services close their owned platform clients correctly.</li><li><code>vinted_radar/services/evidence_export.py</code> — Streamed legacy SQLite discoveries, observations, and probes into explicit backfill evidence batches.</li><li><code>vinted_radar/services/evidence_lookup.py</code> — Resolved event/manifest references back to decoded row/event/manifest fragments inside the Parquet lake.</li><li><code>vinted_radar/cli.py</code> — Added `evidence-export` and `evidence-inspect` operator commands and updated service-level cleanup paths.</li><li><code>tests/test_card_payload.py</code> — Added focused contract coverage for the minimal envelope and legacy normalization compatibility.</li><li><code>tests/test_lake_writer.py</code> — Added deterministic batch, immutability, and MinIO round-trip coverage for the Parquet lake writer.</li><li><code>tests/test_evidence_batches.py</code> — Added idempotent collector-publisher and manifested batch emission coverage.</li><li><code>tests/test_evidence_export.py</code> — Added historical export, lookup, and CLI round-trip coverage for the new lake tooling.</li><li><code>.gsd/DECISIONS.md</code> — Recorded S11 decisions D038 through D042 for the evidence contract, immutable lake graph, collector emission, backfill typing, and lookup decoding posture.</li><li><code>.gsd/KNOWLEDGE.md</code> — Recorded reusable S11 patterns for explicit backfill event typing and decoded Parquet fragment lookup.</li><li><code>.gsd/PROJECT.md</code> — Updated the project state to reflect S11 completion and the new Parquet/object-store evidence boundary.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S10</span>
+          <span class="cl-title">Polyglot Data Platform Foundation</span>
+          <span class="muted cl-date">Mar 28, 2026, 08:56 PM</span>
+        </div>
+        <p class="cl-liner">S10 established the staged PostgreSQL + ClickHouse + S3-compatible platform backbone—shared config, versioned migrations, bootstrap/doctor tooling, deterministic event/manifests, and a leased PostgreSQL outbox—without yet cutting the live product off SQLite.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D034 — use one dataclass-based `vinted_radar.platform.config` loader for PostgreSQL, ClickHouse, and S3-compatible settings with normalized prefixes, explicit per-provider schema versions, redacted diagnostics, and cutover flags defaulting to false.</li><li>D035 — use versioned `V###__name.sql` migration directories with per-provider ledgers plus persistent object-store prefix markers and write probes so bootstrap and doctor stay idempotent and observable.</li><li>D036 — use canonical-JSON versioned event envelopes with deterministic UUIDv5 IDs, deterministic SHA-256 manifest checksums/IDs, and a PostgreSQL outbox keyed by unique `(event_id, sink)` rows with leased claim/retry state.</li><li>D037 — use env-substituted host ports, unique Docker compose project names, and shared health-rendering helpers so the real smoke stack stays isolated and the CLI/test readiness text cannot drift.</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">23 files modified</summary>
+        <ul class="file-list">
+          <li><code>pyproject.toml</code> — Pinned the polyglot platform dependency set and switched PostgreSQL support to `psycopg[binary]` for reliable local smoke execution.</li><li><code>vinted_radar/platform/config.py</code> — Added the shared platform config loader with env validation, redaction, prefix normalization, per-provider schema versions, and staged cutover flags.</li><li><code>infra/docker-compose.data-platform.yml</code> — Added the local PostgreSQL + ClickHouse + MinIO stack with env-substituted host ports for isolated bootstrap and smoke runs.</li><li><code>infra/postgres/migrations/V001__platform_bootstrap_audit.sql</code> — Added the PostgreSQL bootstrap audit baseline migration.</li><li><code>infra/postgres/migrations/V002__platform_event_outbox.sql</code> — Added the PostgreSQL event / manifest / outbox schema migration.</li><li><code>infra/clickhouse/migrations/V001__platform_bootstrap_audit.sql</code> — Added the ClickHouse bootstrap audit baseline migration.</li><li><code>vinted_radar/platform/migrations.py</code> — Implemented versioned SQL migration loading, checksum tracking, and contiguous-version enforcement.</li><li><code>vinted_radar/platform/bootstrap.py</code> — Implemented cross-provider bootstrap and doctor flows, including migration ledgers, bucket creation, prefix markers, and write probes.</li><li><code>vinted_radar/platform/outbox.py</code> — Implemented deterministic publish / claim / fail / deliver flows for the PostgreSQL leased outbox.</li><li><code>vinted_radar/domain/events.py</code> — Added deterministic versioned event-envelope helpers and listing-observed event construction.</li><li><code>vinted_radar/domain/manifests.py</code> — Added deterministic evidence-manifest entries, checksums, IDs, and object-key helpers.</li><li><code>vinted_radar/platform/health.py</code> — Added shared platform health summarization/rendering used by both CLI output and smoke assertions.</li><li><code>vinted_radar/cli.py</code> — Wired `platform-bootstrap` and `platform-doctor` into the CLI and shared reporting path.</li><li><code>tests/conftest.py</code> — Added isolated Docker-backed smoke fixtures and end-to-end platform smoke coverage.</li><li><code>tests/test_platform_config.py</code> — Added focused config, bootstrap, event-envelope, outbox, and real-stack smoke coverage for the new platform foundation.</li><li><code>tests/test_data_platform_bootstrap.py</code> — Added focused config, bootstrap, event-envelope, outbox, and real-stack smoke coverage for the new platform foundation.</li><li><code>tests/test_event_envelope.py</code> — Added focused config, bootstrap, event-envelope, outbox, and real-stack smoke coverage for the new platform foundation.</li><li><code>tests/test_outbox.py</code> — Added focused config, bootstrap, event-envelope, outbox, and real-stack smoke coverage for the new platform foundation.</li><li><code>tests/test_data_platform_smoke.py</code> — Added focused config, bootstrap, event-envelope, outbox, and real-stack smoke coverage for the new platform foundation.</li><li><code>README.md</code> — Documented the new environment contract, local stack, bootstrap flow, and doctor flow for downstream operators and slices.</li><li><code>.gsd/PROJECT.md</code> — Updated project state after the platform foundation landed.</li><li><code>.gsd/KNOWLEDGE.md</code> — Recorded reusable platform smoke and migration patterns for future slices.</li><li><code>.gsd/DECISIONS.md</code> — Appended the S10 architectural and verification decisions.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S09</span>
+          <span class="cl-title">High-Throughput Proxy Pool + Webshare Acquisition Operator Flow</span>
+          <span class="muted cl-date">Mar 24, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Turned the provided 100-route Webshare pool into a real operator contract and throughput primitive: raw proxy exports now load cleanly, discovery can use multiple warmed routes instead of one-hot failure rotation, `proxy-preflight` proves live route diversity plus Vinted API reachability, and runtime persistence stays credential-safe.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D032 — use a gitignored local proxy-file contract plus route-local sync/async transport state and preflight-backed operator proof instead of retry-only proxy rotation</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">13 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/proxies.py</code> — added raw Webshare parsing, proxy-file loading, masking, and safe metadata helpers.</li><li><code>vinted_radar/http.py</code> — replaced retry-only proxy rotation with route-local sync/async transport state, cooldowns, and masked logs.</li><li><code>vinted_radar/cli.py</code> — added `--proxy-file`, local fallback loading, auto-concurrency with proxy pools, safe transport summaries, and the new `proxy-preflight` command.</li><li><code>vinted_radar/services/runtime.py</code> — persisted safe `transport_mode` / `proxy_pool_size` runtime metadata.</li><li><code>README.md</code> — documented the local Webshare proxy contract, preflight-first workflow, and auto-concurrency behavior.</li><li><code>tests/test_proxy_config.py</code> — covered parsing, local fallback loading, and credential masking.</li><li><code>tests/test_http.py</code> — covered async multi-route spread and retry-on-another-route behavior.</li><li><code>tests/test_cli_discover_smoke.py</code> — covered discover proxy-file loading and auto-concurrency.</li><li><code>tests/test_runtime_cli.py</code> — covered state-refresh transport metadata, proxy-file loading, and preflight-safe route labels.</li><li><code>.gsd/milestones/M002/M002-ROADMAP.md</code> — added and closed S09 in the milestone roadmap.</li><li><code>.gsd/PROJECT.md</code> — updated current state and verified-today proof.</li><li><code>.gsd/KNOWLEDGE.md</code> — recorded the new route-local transport pattern plus the preflight warm-up lesson.</li><li><code>.gsd/DECISIONS.md</code> — appended D032 for the S09 proxy-pool architecture.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S03</span>
+          <span class="cl-title">Responsive French Product Shell + VPS Serving Path</span>
+          <span class="muted cl-date">Mar 23, 2026, 11:04 AM</span>
+        </div>
+        <p class="cl-liner">S03 turned the M002 product into one mounted, French-first, phone/desktop-consultable web shell: overview, explorer, runtime, and HTML listing detail now share the same SSR navigation and can be served cleanly behind a VPS proxy prefix.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D012</li><li>D013</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">11 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/serving.py</code> — shared mounted-route contract for CLI and SSR pages.</li><li><code>vinted_radar/dashboard.py</code> — proxy-aware route handling, shared shell, responsive explorer/runtime/detail layouts, localized visible copy, and route-complete explorer diagnostics.</li><li><code>vinted_radar/cli.py</code> — base-path/public-base-url aware advertised URLs for dashboard-capable commands.</li><li><code>README.md</code> — mounted local/VPS serving contract plus smoke-check guidance.</li><li><code>install_services.sh</code> — service forwarding for mounted dashboard settings and matching smoke output.</li><li><code>scripts/verify_vps_serving.py</code> — mounted route/health verifier aligned with the shared shell.</li><li><code>tests/test_dashboard.py</code> — regressions for the shared shell, prefixed routes, and mobile-safe explorer structure.</li><li><code>tests/test_dashboard_cli.py</code> — dashboard CLI coverage for local and proxy-aware operator URLs.</li><li><code>tests/test_runtime_cli.py</code> — dashboard-capable runtime commands stay aligned with the advertised route set.</li><li><code>tests/test_cli_smoke.py</code> — real prefixed integration smoke for the verifier script.</li><li><code>data/vinted-radar-s03.db</code> — seeded local slice DB used for S03 browser/operator verification.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S02</span>
+          <span class="cl-title">Runtime Truth + Pause/Resume Surface</span>
+          <span class="muted cl-date">Mar 23, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">S02 replaced cycle-only runtime inference with a controller-backed runtime contract: the radar can now truthfully show running, scheduled, paused, failed, elapsed pause time, next resume timing, and recent errors through the CLI, `/runtime`, `/api/runtime`, `/health`, and the overview home on the same SQLite DB.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D011</li><li>D012</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">16 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/repository.py</code> — controller snapshot persistence, controller-aware runtime payloads, request helpers, timing/staleness fields, and config redaction.</li><li><code>vinted_radar/services/runtime.py</code> — cooperative scheduling, heartbeat waiting loop, pause/resume orchestration, and callback-order fix.</li><li><code>vinted_radar/dashboard.py</code> — `/runtime`, controller-backed home/runtime wording, richer `/health`, runtime payload builder, translated runtime labels, and runtime favicon.</li><li><code>vinted_radar/cli.py</code> — `runtime-pause`, `runtime-resume`, richer `runtime-status`, `--now`, and `/runtime` route output.</li><li><code>vinted_radar/db_health.py</code> — `runtime_controller_state` is now a critical table.</li><li><code>tests/test_runtime_repository.py</code> — repository contract coverage for controller truth.</li><li><code>tests/test_runtime_service.py</code> — cooperative scheduler and pause/resume tests.</li><li><code>tests/test_runtime_cli.py</code> — operator CLI coverage for controller-backed status and pause/resume.</li><li><code>tests/test_dashboard.py</code> — runtime route/payload/home wording coverage.</li><li><code>tests/test_dashboard_cli.py</code> — CLI output coverage for `/runtime`.</li><li><code>tests/test_db_recovery.py</code> — recovery coverage for `runtime_controller_state`.</li><li><code>README.md</code> — runtime/operator docs for `/runtime`, pause/resume, and controller semantics.</li><li><code>.gsd/KNOWLEDGE.md</code> — added the controller-vs-cycle runtime pattern and the callback-order drift lesson.</li><li><code>.gsd/PROJECT.md</code> — updated current project state to reflect S02 completion.</li><li><code>.gsd/milestones/M002/M002-ROADMAP.md</code> — marked S02 complete.</li><li><code>.gsd/milestones/M002/slices/S02/S02-UAT.md</code> — recorded live runtime UAT.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S04</span>
+          <span class="cl-title">Full Explorer + Comparative Intelligence</span>
+          <span class="muted cl-date">Mar 23, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Turned `/explorer` into the main SQL-backed browse-and-compare workspace, then closed the overview/explorer/detail loop with preserved analytical context and real-browser proof on a richer demo DB.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D014</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">7 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/repository.py</code> — expanded the SQL explorer snapshot, summaries, filter options, and comparison modules.</li><li><code>vinted_radar/dashboard.py</code> — rebuilt explorer rendering and preserved analytical context across overview, explorer, and detail.</li><li><code>vinted_radar/db.py</code> — moved dependent listing indexes to a post-migration bootstrap step for historical DB compatibility.</li><li><code>README.md</code> — documented the richer explorer workflow and public query contract.</li><li><code>tests/test_explorer_repository.py</code> — added dedicated explorer contract regressions.</li><li><code>tests/test_dashboard.py</code> — added richer explorer and context-preserving navigation coverage.</li><li><code>.gsd/milestones/M002/slices/S04/S04-UAT.md</code> — recorded the browser-backed explorer/detail UAT flow.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S05</span>
+          <span class="cl-title">Listing Detail Narrative + Progressive Proof</span>
+          <span class="muted cl-date">Mar 23, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Turned `/listings/&lt;id&gt;` from a proof-first detail dump into a French narrative reading with explicit provenance/prudence and disclosure-based proof, then re-proved the explorer → detail → return loop on desktop and mobile.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D015</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">6 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/dashboard.py</code> — added narrative/provenance detail payload sections, rebuilt the detail HTML hierarchy, translated visible proof copy, and added disclosure panels.</li><li><code>tests/test_dashboard.py</code> — added/updated detail payload and route assertions for narrative structure, provenance boundaries, and final HTML wording.</li><li><code>README.md</code> — documented the richer listing-detail workflow and JSON contract shape.</li><li><code>.gsd/milestones/M002/slices/S05/S05-UAT.md</code> — recorded the repeatable S05 explorer → detail → proof → return UAT flow.</li><li><code>.gsd/DECISIONS.md</code> — appended D029 for the narrative-layer/progressive-proof detail architecture.</li><li><code>.gsd/KNOWLEDGE.md</code> — added the rule to keep raw proof semantics in JSON and translate only the visible HTML proof layer.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S06</span>
+          <span class="cl-title">Acquisition Hardening + Degraded-Mode Visibility</span>
+          <span class="muted cl-date">Mar 23, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Made the weak item-page acquisition seam proxy-aware and challenge-aware, persisted degraded probe truth on runtime cycles, and surfaced one honest healthy/partial/degraded acquisition contract across the whole product.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D016</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">13 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/parsers/item_page.py</code> — added explicit challenge-aware probe classification.</li><li><code>vinted_radar/services/state_refresh.py</code> — added proxy-aware refresh construction and structured probe summaries.</li><li><code>vinted_radar/services/runtime.py</code> — persisted state-refresh summaries on runtime cycles and forwarded proxy pools into state refresh.</li><li><code>vinted_radar/repository.py</code> — added repository-owned acquisition-health aggregation and threaded it into runtime/overview contracts.</li><li><code>vinted_radar/dashboard.py</code> — surfaced degraded acquisition truth across overview, explorer, detail, runtime, `/api/runtime`, and `/health`.</li><li><code>vinted_radar/cli.py</code> — exposed proxy-aware `state-refresh` and richer runtime/state-refresh CLI output.</li><li><code>README.md</code> — documented degraded acquisition visibility and proxy-aware state refresh.</li><li><code>.gsd/milestones/M002/slices/S06/S06-UAT.md</code> — recorded the repeatable served-browser UAT flow for S06.</li><li><code>.gsd/milestones/M002/M002-ROADMAP.md</code> — marked S06 complete.</li><li><code>.gsd/PROJECT.md</code> — updated the living project state to include the completed degraded-mode slice.</li><li><code>.gsd/KNOWLEDGE.md</code> — appended the degraded-acquisition repository-owned pattern for future slices.</li><li><code>.gsd/REQUIREMENTS.md</code> — refreshed R011 with S06 proof while keeping final live acceptance for S07.</li><li><code>.gsd/DECISIONS.md</code> — recorded the S06 degraded-acquisition honesty architecture and restored the missing S05 detail-route decision.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S07</span>
+          <span class="cl-title">Live VPS End-to-End Acceptance Closure</span>
+          <span class="muted cl-date">Mar 23, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Closed M002 with an honest dual proof: the full product now passes on a realistic large corpus through the mounted shell, and the real public VPS entrypoint has been recovered and re-proven from the internet-facing URL.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>Close S07 with split but explicit proof: keep the realistic large-corpus acceptance on `data/m001-closeout.db`, and separately recover/prove the real public VPS entrypoint on a fresh healthy live DB instead of pretending the corrupted 61 GB DB was acceptable evidence.</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">9 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/repository.py</code> — materialized/reused the classified overview snapshot so realistic-corpus acceptance no longer stalls on repeated heavy CTE rebuilds.</li><li><code>vinted_radar/dashboard.py</code> — reused one generated timestamp per payload and repaired visible HTML mojibake revealed by large-corpus proof.</li><li><code>scripts/verify_vps_serving.py</code> — raised the default timeout to a realistic per-request budget for large-corpus smoke.</li><li><code>README.md</code> — documented Git Bash/MSYS mounted-route path conversion and the mounted/public smoke flow.</li><li><code>.gsd/milestones/M002/slices/S07/S07-UAT.md</code> — records both the realistic mounted proof and the recovered public VPS proof.</li><li><code>.gsd/milestones/M002/M002-ROADMAP.md</code> — marks S07 complete.</li><li><code>.gsd/PROJECT.md</code> — reflects M002 completion and the current public operator URL.</li><li><code>.gsd/REQUIREMENTS.md</code> — now marks R011 validated.</li><li><code>.gsd/KNOWLEDGE.md</code> — records the live-DB recovery lesson from the public VPS closeout.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S08</span>
+          <span class="cl-title">Native API Price Bounds for Discovery</span>
+          <span class="muted cl-date">Mar 23, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Moved price filtering to the Vinted API boundary for discovery/runtime while preserving the local price safety net and the persisted diagnostics that show what was really requested.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D031 — apply configured price bounds at the API boundary while retaining a local safety net before persistence</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">8 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/services/discovery.py</code> — added `max_price`, API-side price bounds, and upper-bound local safety filtering.</li><li><code>vinted_radar/services/runtime.py</code> — forwarded `max_price` into discovery and persisted it in runtime config.</li><li><code>vinted_radar/cli.py</code> — exposed `--max-price` on `batch` and `continuous`.</li><li><code>tests/test_discovery_service.py</code> — updated the stale min-price URL expectation.</li><li><code>.gsd/milestones/M002/M002-ROADMAP.md</code> — added and closed S08 in the milestone roadmap.</li><li><code>.gsd/PROJECT.md</code> — updated current state to include the new discovery/runtime contract.</li><li><code>.gsd/KNOWLEDGE.md</code> — recorded the new acquisition pattern.</li><li><code>.gsd/DECISIONS.md</code> — recorded D031 for API-side price bounds with local safety filtering.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M002/S01</span>
+          <span class="cl-title">SQL-Backed Overview Home + First Comparative Modules</span>
+          <span class="muted cl-date">Mar 22, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">S01 retired the biggest M002 home-path scale risk: `/` is now a French market-overview surface driven by repository-owned SQL aggregates, with explicit honesty/freshness cues and first comparison modules, instead of the old M001 full-corpus proof screen.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D010</li><li>D011</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">12 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/repository.py</code> — added the SQL overview CTE/classification contract, comparison modules, explorer filter options, and SQL-paged explorer retrieval</li><li><code>vinted_radar/dashboard.py</code> — rebuilt `/` around the SQL overview payload, added French-first rendering, honesty notes, featured listing drill-down cards, and preserved JSON diagnostics</li><li><code>vinted_radar/cli.py</code> — updated dashboard command output to print the overview, explorer, runtime, and health routes</li><li><code>tests/test_overview_repository.py</code> — added repository-level coverage for summary counts, lens modules, low-support behavior, and honesty metadata</li><li><code>tests/test_dashboard.py</code> — added WSGI contract coverage for the overview home, explorer route, JSON diagnostics, and route semantics</li><li><code>tests/test_dashboard_cli.py</code> — updated CLI route-output expectations</li><li><code>README.md</code> — refreshed route and entrypoint documentation for the new overview/explorer posture</li><li><code>data/vinted-radar-s01.db</code> — seeded local demo DB used for live slice verification</li><li><code>.gsd/REQUIREMENTS.md</code> — refreshed requirement evidence/notes for R004 and R011</li><li><code>.gsd/DECISIONS.md</code> — captured the S01 overview compatibility decision set through D021 and D022</li><li><code>.gsd/KNOWLEDGE.md</code> — recorded the SQL-first overview-home pattern so later slices do not accidentally reintroduce the scored-home path</li><li><code>.gsd/PROJECT.md</code> — refreshed current project state to reflect M002/S01 completion</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M001/S01</span>
+          <span class="cl-title">Public Discovery + Normalized Ingestion</span>
+          <span class="muted cl-date">Mar 17, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">SQLite-backed batch discovery CLI that syncs the public Homme/Femme catalog tree, ingests SSR listing cards, and reports observed coverage from live runs.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D010</li><li>D011</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">11 files modified</summary>
+        <ul class="file-list">
+          <li><code>pyproject.toml</code> — package metadata and test config.</li><li><code>README.md</code> — current local entrypoints.</li><li><code>vinted_radar/cli.py</code> — discovery and coverage commands.</li><li><code>vinted_radar/db.py</code> — SQLite schema bootstrap.</li><li><code>vinted_radar/parsers/catalog_tree.py</code> — embedded catalog tree extraction.</li><li><code>vinted_radar/parsers/catalog_page.py</code> — SSR listing card parsing.</li><li><code>vinted_radar/repository.py</code> — persistence and coverage queries.</li><li><code>vinted_radar/services/discovery.py</code> — batch orchestration.</li><li><code>tests/test_cli_smoke.py</code> — empty-state CLI proof.</li><li><code>tests/test_parsers.py</code> — parser contract coverage.</li><li><code>tests/test_discovery_service.py</code> — persistence / failure-path integration coverage.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M001/S02</span>
+          <span class="cl-title">Intelligent Revisits + Observation History</span>
+          <span class="muted cl-date">Mar 17, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Per-run listing history, freshness buckets, and revisit planning surfaces built on repeated batch runs against the same SQLite database.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D011</li><li>D012</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">9 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/card_payload.py</code> — reusable normalization fallback for raw card payloads.</li><li><code>vinted_radar/db.py</code> — new history table plus forward migration/backfill logic.</li><li><code>vinted_radar/repository.py</code> — history, freshness, revisit planning, and timeline queries.</li><li><code>vinted_radar/services/discovery.py</code> — per-run observation persistence during discovery.</li><li><code>vinted_radar/cli.py</code> — history/freshness/revisit commands and safe terminal output.</li><li><code>tests/fixtures/catalog-page-women-run2.html</code> — second-run fixture for repeated history tests.</li><li><code>tests/test_history_repository.py</code> — repository and migration coverage.</li><li><code>tests/test_history_cli.py</code> — CLI JSON surface coverage.</li><li><code>README.md</code> — updated local entrypoints.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M001/S03</span>
+          <span class="cl-title">Prudent State Machine + Confidence Surfaces</span>
+          <span class="muted cl-date">Mar 17, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">A cautious state engine that combines observation history plus public item-page probes into current listing states with confidence, basis, and reasons.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D012</li><li>D013</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">10 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/parsers/item_page.py</code> — public item-page outcome parser.</li><li><code>vinted_radar/state_machine.py</code> — cautious current-state evaluation and aggregate summaries.</li><li><code>vinted_radar/services/state_refresh.py</code> — bounded probe refresh workflow.</li><li><code>vinted_radar/repository.py</code> — probe persistence and state input queries.</li><li><code>vinted_radar/db.py</code> — `item_page_probes` schema.</li><li><code>vinted_radar/cli.py</code> — state refresh, summary, and per-listing detail commands.</li><li><code>tests/test_item_page_parser.py</code> — parser coverage.</li><li><code>tests/test_state_machine.py</code> — all state taxonomy branches.</li><li><code>tests/test_state_cli.py</code> — CLI JSON summary/detail proof.</li><li><code>README.md</code> — updated local entrypoints.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M001/S04</span>
+          <span class="cl-title">Market Scores + Lightweight Contextualization</span>
+          <span class="muted cl-date">Mar 17, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">Explainable demand and premium rankings plus segment-level market summaries built directly from the history and state surfaces.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D014</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">5 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/scoring.py</code> — listing scoring, context selection, and segment summary logic.</li><li><code>vinted_radar/cli.py</code> — ranking, score detail, and market-summary commands.</li><li><code>tests/test_scoring.py</code> — score and context behavior coverage.</li><li><code>tests/test_scoring_cli.py</code> — CLI JSON surface coverage.</li><li><code>README.md</code> — updated local entrypoints.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M001/S05</span>
+          <span class="cl-title">Mixed Dashboard + Filters + Listing Detail</span>
+          <span class="muted cl-date">Mar 17, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">A local dashboard now renders the market summary first, keeps ranking proof directly underneath, and drills into listing history, signals, and inference basis without inventing separate client-side logic.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D015</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">14 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/dashboard.py</code> — server-side dashboard payload assembly, WSGI app, HTML renderer, and JSON diagnostic endpoints.</li><li><code>vinted_radar/cli.py</code> — local `dashboard` entrypoint wired to the dashboard server.</li><li><code>README.md</code> — documented the dashboard entrypoint and diagnostics URLs.</li><li><code>tests/test_dashboard.py</code> — payload and WSGI route coverage for the dashboard surface.</li><li><code>tests/test_dashboard_cli.py</code> — CLI wiring coverage for the dashboard command.</li><li><code>tests/conftest.py</code> — removed the dead legacy storage import that broke pytest collection.</li><li><code>tests/test_repository.py</code> — replaced obsolete `src/` storage tests with contracts for the active `RadarRepository`.</li><li><code>tests/test_catalog_tree.py</code> — real parser coverage instead of a placeholder failure.</li><li><code>tests/test_discovery_normalization.py</code> — real card-normalization coverage instead of a placeholder failure.</li><li><code>tests/test_flight_extract.py</code> — real escaped-flight extraction coverage instead of a placeholder failure.</li><li><code>tests/test_cli_discover_smoke.py</code> — real discover CLI smoke coverage instead of a placeholder failure.</li><li><code>.gsd/REQUIREMENTS.md</code> — marked the dashboard-owned product requirements as validated.</li><li><code>.gsd/DECISIONS.md</code> — recorded the dashboard delivery architecture decision.</li><li><code>.gsd/KNOWLEDGE.md</code> — captured the shared HTML/JSON payload pattern.</li>
+        </ul>
+      </details>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-header">
+          <span class="mono muted">M001/S06</span>
+          <span class="cl-title">Local Batch + Continuous End-to-End Loop</span>
+          <span class="muted cl-date">Mar 17, 2026, 01:00 AM</span>
+        </div>
+        <p class="cl-liner">The radar now has a real local operator loop: one command runs a batch cycle, one command keeps it alive continuously, and both modes leave durable runtime truth behind in the same SQLite database the dashboard already reads.</p>
+        
+      <div class="detail-block"><span class="detail-label">Decisions</span>
+        <ul><li>D016</li></ul>
+      </div>
+        
+      <details class="files-detail">
+        <summary class="muted">17 files modified</summary>
+        <ul class="file-list">
+          <li><code>vinted_radar/services/runtime.py</code> — new runtime orchestration service for composed batch cycles and repeated continuous cycles.</li><li><code>vinted_radar/db.py</code> — added SQLite `runtime_cycles` schema and index.</li><li><code>vinted_radar/repository.py</code> — added runtime-cycle persistence, phase updates, and runtime status hydration helpers.</li><li><code>vinted_radar/cli.py</code> — added `batch`, `continuous`, and `runtime-status` operator commands plus runtime-aware dashboard output.</li><li><code>vinted_radar/dashboard.py</code> — added `/api/runtime`, runtime state in `/health`, background dashboard server startup helper, and the runtime card/diagnostic link on the dashboard.</li><li><code>README.md</code> — documented the new operator workflow, runtime API, and runtime-cycle diagnostics.</li><li><code>tests/test_runtime_service.py</code> — covered completed cycles plus continuous failure persistence/continuation.</li><li><code>tests/test_runtime_cli.py</code> — covered CLI wiring for `batch`, `continuous`, and `runtime-status`.</li><li><code>tests/test_dashboard.py</code> — extended dashboard coverage to runtime payloads and runtime-aware health output.</li><li><code>tests/test_dashboard_cli.py</code> — updated dashboard CLI expectations for the runtime API URL.</li><li><code>.gsd/REQUIREMENTS.md</code> — validated R010 and refreshed coverage counts.</li><li><code>.gsd/DECISIONS.md</code> — recorded the S06 runtime observability architecture decision.</li><li><code>.gsd/KNOWLEDGE.md</code> — captured the runtime-cycle persistence pattern and the in-flight dashboard truth lesson.</li><li><code>.gsd/PROJECT.md</code> — updated the project’s current state and architecture to include the operator loop.</li><li><code>.gsd/STATE.md</code> — advanced the global state from S06 planning to completed handoff.</li><li><code>.gsd/milestones/M001/M001-ROADMAP.md</code> — marked S06 complete.</li><li><code>.gsd/milestones/M001/slices/S06/S06-PLAN.md</code> — marked all S06 tasks complete.</li>
+        </ul>
+      </details>
+      </div>
+</section>
+
+<section id="knowledge">
+  <h2>Knowledge <span class="count">67</span></h2>
+  
+    <h3>Rules <span class="count">6</span></h3>
+    <table class="tbl">
+      <thead><tr><th>ID</th><th>Scope</th><th>Rule</th></tr></thead>
+      <tbody><tr><td class="mono">#</td><td>Scope</td><td>Rule</td></tr><tr><td class="mono">1</td><td>acquisition</td><td>Keep raw evidence at the card-fragment level by default (`overlay_title`, visible subtitle/price texts, canonical URL, image alt) rather than archiving full pages.</td></tr><tr><td class="mono">2</td><td>product-ui</td><td>Future dashboard work must default to a French, broad-audience product surface that separates market overview, full listing exploration, listing detail, and runtime administration instead of one compact technical page.</td></tr><tr><td class="mono">3</td><td>operations</td><td>Never promote a synchronized SQLite file straight into `data/vinted-radar.db`; create a remote snapshot, copy to a temporary local path, run DB health checks, then rename atomically.</td></tr><tr><td class="mono">4</td><td>platform-migrations</td><td>Keep provider-specific platform schema-version defaults instead of one shared default constant when PostgreSQL and ClickHouse migrations can advance independently.</td></tr><tr><td class="mono">5</td><td>platform-dev-setup</td><td>On this Windows workstation, pin `psycopg[binary]` instead of bare `psycopg` for local PostgreSQL-backed platform bootstrap/smoke runs.</td></tr></tbody>
+    </table>
+    <h3>Patterns <span class="count">39</span></h3>
+    <table class="tbl">
+      <thead><tr><th>ID</th><th>Pattern</th></tr></thead>
+      <tbody><tr><td class="mono">#</td><td>Pattern</td></tr><tr><td class="mono">1</td><td>The public `/catalog` HTML embeds the full Homme/Femme catalog tree inside `self.__next_f.push(...)`, and listing cards are already server-rendered under `div.new-item-box__container`.</td></tr><tr><td class="mono">2</td><td>Keep per-run listing history in `listing_observations` and retain `listing_discoveries` as the lower-level per-sighting debug layer.</td></tr><tr><td class="mono">3</td><td>Public item pages expose `can_buy`, `is_closed`, `is_hidden`, and `is_reserved` inside escaped script text; normalizing escaped quotes before matching keeps item probes browserless.</td></tr><tr><td class="mono">4</td><td>Keep premium scoring demand-led and only apply a contextual price boost when the selected peer group clears explicit support thresholds.</td></tr><tr><td class="mono">5</td><td>Drive the dashboard HTML and JSON diagnostics from the same server-side payload assembly so the browser view stays debuggable and truthful.</td></tr><tr><td class="mono">6</td><td>Persist operator runtime state in `runtime_cycles` and let both the CLI and dashboard read that table instead of inventing separate scheduler state files.</td></tr><tr><td class="mono">7</td><td>Treat catalog-first acquisition as the preferred scaling posture and use listing detail pages only as a targeted fallback, not as the default per-item path.</td></tr><tr><td class="mono">8</td><td>Treat the primary image URL timestamp as `published_at_estimated`, never as an exact publication timestamp.</td></tr><tr><td class="mono">9</td><td>Treat Cloudflare / Turnstile challenge rate as a first-class acquisition signal rather than assuming that a successful live run means the current HTTP path scales cleanly.</td></tr><tr><td class="mono">10</td><td>Use `https://www.vinted.fr/api/v2/catalog/items` as the primary catalog discovery surface, and keep public item pages as a separate targeted evidence path for state resolution.</td></tr><tr><td class="mono">11</td><td>Keep the market-summary dashboard and the broad listing explorer as separate surfaces; the explorer should page directly from SQL instead of loading the full scored corpus just to browse listings.</td></tr><tr><td class="mono">12</td><td>Keep SQL overview state classification numerically aligned with `state_machine.py` by importing shared thresholds/confidence constants into `repository.py`, and treat `tests/test_overview_repository.py` as the drift alarm when either side changes.</td></tr><tr><td class="mono">13</td><td>Keep the overview home SQL-first by building the summary from `overview_snapshot()` and sourcing featured listing cards from `listing_explorer_page()` rather than the legacy scored-home helpers.</td></tr><tr><td class="mono">14</td><td>Keep current scheduler truth in `runtime_controller_state` and keep `runtime_cycles` as immutable history; dashboard, CLI, and health surfaces should read `runtime_status()` instead of inferring current state from the latest cycle row.</td></tr><tr><td class="mono">15</td><td>Drive shared-shell links and mounted route examples through `RouteContext` / route diagnostics instead of hardcoding `/`, `/explorer`, `/runtime`, or `/listings/&lt;id&gt;` inside page-specific HTML.</td></tr><tr><td class="mono">16</td><td>Keep overview drill-downs, explorer comparison links, and listing-detail back navigation on the same `ExplorerFilters` / query-string contract rather than inventing route-local parameters.</td></tr><tr><td class="mono">17</td><td>Keep listing-detail proof semantics raw in JSON and translate only the visible HTML proof copy in `dashboard.py`, so diagnostics stay literal while the product surface stays readable.</td></tr><tr><td class="mono">18</td><td>Keep degraded acquisition truth repository-owned in `runtime_status().acquisition` and thread its summary into overview/explorer/detail/runtime surfaces from there, while translating only the visible product wording in `dashboard.py`.</td></tr><tr><td class="mono">19</td><td>Push `price_from` / `price_to` into the Vinted catalog API whenever a price window is configured, but keep the client-side price guard before `upsert_listing` as a local safety net.</td></tr><tr><td class="mono">20</td><td>Treat large proxy pools as route-local transport state with per-route warm-up, throttling, and cooldown, and keep the operator contract on a gitignored local pool file (`data/proxies.txt`) or explicit `--proxy-file` input rather than hand-rewriting provider exports at invocation time.</td></tr><tr><td class="mono">21</td><td>Keep ClickHouse migration SQL database-agnostic and bind the migration runner to the configured target database instead of hardcoding `vinted_radar` in migration files.</td></tr><tr><td class="mono">22</td><td>Parameterize the Docker data-platform stack with env-substituted host ports and unique compose project names, then assert health through the shared CLI renderers instead of bespoke smoke-test strings.</td></tr><tr><td class="mono">23</td><td>Evolve listing-card proof via a versioned `schema_version` + `evidence_source` + `fragments` envelope, but keep `normalize_card_snapshot()` compatible with legacy flat HTML/API payloads.</td></tr><tr><td class="mono">24</td><td>Treat object-store lake keys as immutable: stamp every uploaded object with SHA-256 metadata and skip/reject rewrites by comparing `head_object` checksums before uploading again.</td></tr><tr><td class="mono">25</td><td>When collector services auto-wire evidence-lake publishing from platform cutover flags, close the service itself rather than only closing `service.repository`.</td></tr><tr><td class="mono">26</td><td>Backfill legacy SQLite evidence under explicit `vinted.backfill.*` batch event types with `capture_source=sqlite_backfill` metadata instead of reusing live collector event names.</td></tr><tr><td class="mono">27</td><td>Decode JSON-like Parquet cell strings back into nested structures before walking `row.*`, `event.*`, or `manifest.*` field paths in evidence lookup surfaces.</td></tr><tr><td class="mono">28</td><td>Never derive `follow_up_miss_count` from `vinted.discovery.listing-seen.batch` page manifests alone; only catalog-complete projection inputs can safely mark listings as missed.</td></tr><tr><td class="mono">29</td><td>When runtime/control-plane truth is redirected to an external PostgreSQL repository, prove the cutover by asserting SQLite `runtime_cycles` and `runtime_controller_state` remain empty during the smoke run.</td></tr><tr><td class="mono">30</td><td>Preserve incomplete auto-mode recovery handoffs under `*-ASSESSMENT.md` (or another non-canonical artifact name), never under `*-SUMMARY.md`.</td></tr><tr><td class="mono">31</td><td>Treat `platform_mutable_manifests` as manifest-global rather than sink-scoped; multi-sink replay safety should use sink-specific checkpoints or row-level idempotency keys instead of overwriting one manifest status row.</td></tr><tr><td class="mono">32</td><td>When a query backend returns nested `latest_probe` evidence instead of flat `latest_probe_*` columns, derive the explorer/overview presentation fields in `dashboard.py` from either shape rather than assuming one storage layout.</td></tr><tr><td class="mono">33</td><td>Full historical cutover should backfill PostgreSQL mutable truth directly from SQLite, publish live-compatible discovery/probe batches only for ClickHouse replay, and keep legacy observation/runtime exports as Parquet audit evidence rather than forcing them through serving-fact schemas they were never designed for.</td></tr><tr><td class="mono">34</td><td>During `dual-write-shadow`, runtime/operator read surfaces must still resolve from SQLite; only `polyglot-cutover` should switch `runtime-status` and other operator reads onto the platform path.</td></tr><tr><td class="mono">35</td><td>Do not assume `fact_listing_change_events` is live just because ClickHouse V002 defines it; S13/S14 currently ingest only listing-seen and probe batches, so change-oriented marts need either a new projector/ingest path or an explicit derivation plan from existing rollups.</td></tr><tr><td class="mono">36</td><td>When replaying discovery history into ClickHouse, carry page chunk metadata (`page_chunk_index`, `page_chunk_count`, `pagination_current_page`, `pagination_total_pages`, `next_page_url`) and emit follow-up-miss transitions only on the final chunk of a terminal catalog page.</td></tr><tr><td class="mono">37</td><td>Expose AI-ready analytical exports as stable ClickHouse mart views plus grouped evidence packs that carry manifest ids, source event ids, run ids, and concrete `evidence-inspect` examples.</td></tr><tr><td class="mono">38</td><td>Treat `scripts/verify_cutover_stack.py` as the authoritative post-cutover acceptance proof, and require platform-audit posture, fresh change facts, evidence-pack drill-down, and ClickHouse-vs-SQLite route parity in that proof.</td></tr></tbody>
+    </table>
+    <h3>Lessons <span class="count">22</span></h3>
+    <table class="tbl">
+      <thead><tr><th>ID</th><th>Lesson</th></tr></thead>
+      <tbody><tr><td class="mono">#</td><td>What Happened</td></tr><tr><td class="mono">1</td><td>Live discovery needed both broad seed coverage and low request volume for smoke verification.</td></tr><tr><td class="mono">2</td><td>Live CLI output can fail on real titles even when the data pipeline is correct.</td></tr><tr><td class="mono">3</td><td>Narrow fixture-only probe parsing left real 200 item pages unresolved.</td></tr><tr><td class="mono">4</td><td>Premium ranking becomes noisy fast when price context is too sparse.</td></tr><tr><td class="mono">5</td><td>A first-pass live dashboard can look repetitive even when the UI is correct.</td></tr><tr><td class="mono">6</td><td>The live dashboard can truthfully show a `running` runtime cycle with zeroed latest-run scan counts while still displaying useful rankings and history.</td></tr><tr><td class="mono">7</td><td>Healthy long-running runtime logs were being flagged as process errors by the tool harness.</td></tr><tr><td class="mono">8</td><td>A limited `continuous` run can look like broad multi-day evidence when it is actually revisiting the same small subset of catalogs.</td></tr><tr><td class="mono">9</td><td>User feedback made clear that the M001 dashboard reads like an internal proof surface rather than a usable intelligence workspace.</td></tr><tr><td class="mono">10</td><td>A server-side catalog or item fetch that works in one run can degrade into widespread 403 / Turnstile challenges a few hours later.</td></tr><tr><td class="mono">11</td><td>The primary image URL timestamp is useful but not exact.</td></tr><tr><td class="mono">12</td><td>Older SQLite proof databases can become unreadable if schema bootstrap creates indexes for columns that are only added later by migration.</td></tr><tr><td class="mono">13</td><td>Multi-day operator metadata is not enough for milestone sign-off if listing-history tables are unhealthy.</td></tr><tr><td class="mono">14</td><td>The planned S01 browser-demo database path is absent in a fresh local checkout.</td></tr><tr><td class="mono">15</td><td>`/api/runtime` and `/health` can drift briefly if continuous-mode observer callbacks run before the next controller transition is persisted.</td></tr><tr><td class="mono">16</td><td>A live dashboard process can look healthy in `systemctl` and `ss` while the public product is effectively dead if the backing SQLite file has ballooned into a corrupted or operationally unusable giant.</td></tr><tr><td class="mono">17</td><td>A healthy large SQLite corpus can still throw `OperationalError: database or disk is full` during runtime state refresh even when dashboard detail routes are fixed.</td></tr><tr><td class="mono">18</td><td>Proxy preflight can look falsely degraded if it probes Vinted directly without reproducing the collector&#39;s homepage warm-up first.</td></tr><tr><td class="mono">19</td><td>The first proxy-pool auto-cap that feels “safe” can still leave a lot of throughput on the table.</td></tr><tr><td class="mono">20</td><td>Milestone code-diff verification can look falsely empty when closeout runs on the branch that is itself `main`.</td></tr><tr><td class="mono">21</td><td>A storage-migration milestone is not fully proved by route checks alone or by platform checks alone.</td></tr></tbody>
+    </table>
+</section>
+
+<section id="captures">
+  <h2>Captures</h2>
+  <p class="empty">No captures recorded.</p>
+</section>
+
+<section id="stats">
+  <h2>Artifacts</h2>
+  
+    <h3>Recently completed <span class="count">6</span></h3>
+    <table class="tbl">
+      <thead><tr><th>Milestone</th><th>Slice</th><th>Title</th><th>Completed</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">M002</td><td class="mono">S15</td><td>Retention, Reconciliation, and AI-Ready Feature Marts</td><td class="muted">Mar 31, 2026, 06:18 PM</td></tr>
+        <tr><td class="mono">M002</td><td class="mono">S14</td><td>Historical Backfill + Application Cutover</td><td class="muted">Mar 31, 2026, 04:17 PM</td></tr>
+        <tr><td class="mono">M002</td><td class="mono">S13</td><td>ClickHouse Serving Warehouse + Rollups</td><td class="muted">Mar 31, 2026, 01:47 PM</td></tr>
+        <tr><td class="mono">M002</td><td class="mono">S12</td><td>PostgreSQL Control Plane + Current-State Projection</td><td class="muted">Mar 31, 2026, 08:18 AM</td></tr>
+        <tr><td class="mono">M002</td><td class="mono">S11</td><td>Minimal Evidence Contract + Parquet Lake</td><td class="muted">Mar 29, 2026, 11:55 AM</td></tr>
+      </tbody>
+    </table>
+</section>
+
+<section id="discussion">
+  <h2>Planning</h2>
+  
+    <table class="tbl">
+      <thead><tr><th>ID</th><th>Milestone</th><th>State</th><th>Context</th><th>Draft</th><th>Updated</th></tr></thead>
+      <tbody>
+    <tr>
+      <td class="mono">M001</td>
+      <td>M001: Listing-Level Market Radar</td>
+      <td class="mono">discussed</td>
+      <td>yes</td>
+      <td></td>
+      <td class="muted">Mar 30, 2026, 08:22 PM</td>
+    </tr>
+    <tr>
+      <td class="mono">M002</td>
+      <td>Enriched Market Intelligence Experience</td>
+      <td class="mono">discussed</td>
+      <td>yes</td>
+      <td>draft</td>
+      <td class="muted">Mar 30, 2026, 08:22 PM</td>
+    </tr>
+    <tr>
+      <td class="mono">M003</td>
+      <td>Product-Level Intelligence + Grounded AI Layer</td>
+      <td class="mono">discussed</td>
+      <td>yes</td>
+      <td></td>
+      <td class="muted">Mar 30, 2026, 08:22 PM</td>
+    </tr>
+    <tr>
+      <td class="mono">M004</td>
+      <td>SaaS Hardening and Commercialization — Context Draft</td>
+      <td class="mono">draft</td>
+      <td></td>
+      <td>draft</td>
+      <td class="muted">Mar 30, 2026, 08:22 PM</td>
+    </tr></tbody>
+    </table>
+</section>
+</main>
+<footer>
+  <div class="footer-inner">
+    <span>GSD v2.58.0</span>
+    <span class="sep">/</span>
+    <span>Vinted</span>
+    <span class="sep">/</span><span class="mono">M002</span>
+    <span class="sep">/</span>
+    <span>Tue, Mar 31, 2026, 06:37 PM GMT+2</span>
+  </div>
+</footer>
+<script>
+(function(){
+  const sections=document.querySelectorAll('section[id]');
+  const links=document.querySelectorAll('.toc a');
+  if(!sections.length||!links.length)return;
+  const obs=new IntersectionObserver(entries=>{
+    for(const e of entries){
+      if(!e.isIntersecting)continue;
+      for(const l of links)l.classList.remove('active');
+      const a=document.querySelector('.toc a[href="#'+e.target.id+'"]');
+      if(a)a.classList.add('active');
+    }
+  },{rootMargin:'-10% 0px -80% 0px',threshold:0});
+  for(const s of sections)obs.observe(s);
+})();
+(function(){
+  var tl=document.getElementById('timeline');
+  if(!tl)return;
+  var table=tl.querySelector('.tbl');
+  if(!table)return;
+  var input=document.createElement('input');
+  input.className='tl-filter';
+  input.placeholder='Filter timeline\u2026';
+  input.type='text';
+  table.parentNode.insertBefore(input,table);
+  var rows=table.querySelectorAll('tbody tr');
+  input.addEventListener('input',function(){
+    var q=this.value.toLowerCase();
+    for(var i=0;i<rows.length;i++){
+      rows[i].style.display=rows[i].textContent.toLowerCase().indexOf(q)>-1?'':'none';
+    }
+  });
+})();
+(function(){
+  var saved=JSON.parse(localStorage.getItem('gsd-collapsed')||'{}');
+  document.querySelectorAll('section[id]').forEach(function(sec){
+    var h2=sec.querySelector('h2');
+    if(!h2)return;
+    var btn=document.createElement('button');
+    btn.className='sec-toggle';
+    btn.textContent=saved[sec.id]?'+':'-';
+    btn.setAttribute('aria-label','Toggle section');
+    h2.prepend(btn);
+    if(saved[sec.id])toggleSection(sec,true);
+    btn.addEventListener('click',function(e){
+      e.preventDefault();
+      var collapsed=btn.textContent==='-';
+      toggleSection(sec,collapsed);
+      btn.textContent=collapsed?'+':'-';
+      saved[sec.id]=collapsed;
+      localStorage.setItem('gsd-collapsed',JSON.stringify(saved));
+    });
+  });
+  function toggleSection(sec,hide){
+    var children=sec.children;
+    for(var i=0;i<children.length;i++){
+      if(children[i].tagName!=='H2')children[i].style.display=hide?'none':'';
+    }
+  }
+})();
+(function(){
+  var hr=document.querySelector('.header-right');
+  if(!hr)return;
+  var btn=document.createElement('button');
+  btn.className='theme-toggle';
+  btn.textContent=localStorage.getItem('gsd-theme')==='light'?'Dark':'Light';
+  if(localStorage.getItem('gsd-theme')==='light')document.documentElement.classList.add('light-theme');
+  btn.addEventListener('click',function(){
+    document.documentElement.classList.toggle('light-theme');
+    var isLight=document.documentElement.classList.contains('light-theme');
+    btn.textContent=isLight?'Dark':'Light';
+    localStorage.setItem('gsd-theme',isLight?'light':'dark');
+  });
+  hr.prepend(btn);
+})();
+</script>
+</body>
+</html>

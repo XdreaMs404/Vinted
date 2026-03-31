@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "projectName": "VintedScrap2",
-  "projectPath": "C:\\Users\\Alexis\\Documents\\VintedScrap2",
-  "gsdVersion": "2.41.0",
+  "projectName": "Vinted",
+  "projectPath": "/home/utilisateur/Vinted",
+  "gsdVersion": "2.58.0",
   "entries": [
     {
       "filename": "M001-2026-03-22T15-32-21.html",
@@ -19,6 +19,22 @@
       "doneMilestones": 1,
       "totalMilestones": 4,
       "phase": "needs-discussion"
+    },
+    {
+      "filename": "M002-2026-03-31T16-37-03.html",
+      "generatedAt": "2026-03-31T16:37:03.508Z",
+      "milestoneId": "M002",
+      "milestoneTitle": "Enriched Market Intelligence Experience",
+      "label": "M002: Enriched Market Intelligence Experience",
+      "kind": "milestone",
+      "totalCost": 76.4843445,
+      "totalTokens": 131290893,
+      "totalDuration": 25598156,
+      "doneSlices": 21,
+      "totalSlices": 21,
+      "doneMilestones": 2,
+      "totalMilestones": 4,
+      "phase": "pre-planning"
     }
   ]
 }

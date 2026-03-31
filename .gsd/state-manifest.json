@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T16:35:14.533Z",
+  "exported_at": "2026-03-31T16:54:03.156Z",
   "milestones": [
     {
       "id": "M001",
@@ -173,17 +173,68 @@
       "depends_on": [],
       "created_at": "2026-03-28T12:13:33.647Z",
       "completed_at": null,
-      "vision": "",
-      "success_criteria": [],
-      "key_risks": [],
-      "proof_strategy": [],
-      "verification_contract": "",
-      "verification_integration": "",
-      "verification_operational": "",
-      "verification_uat": "",
-      "definition_of_done": [],
-      "requirement_coverage": "",
-      "boundary_map_markdown": ""
+      "vision": "Turn the radar from a listing-level reader into a grounded product-intelligence layer by introducing cautious product grouping, evidence-backed AI interpretation, periodic synthesis, and an analytical copilote that always shows what was observed, what was inferred, what was interpreted, and where support is insufficient.",
+      "success_criteria": [
+        "Users can inspect real grouped-product views that surface meaningful market objects, confidence bands, provenance, and deliberate non-merges without obvious false-merge contamination.",
+        "Grouped product reads remain stable, traceable, and parity-checked across Postgres mutable truth and ClickHouse analytical serving paths.",
+        "Inline insights and weekly syntheses add higher-order analytical value beyond listing tops while citing evidence, time windows, and confidence or abstaining when support is weak.",
+        "The analytical copilote answers concrete market questions from grouped/listing radar data with drill-down support and explicit observation / inference / interpretation / hypothesis separation.",
+        "Existing honesty and degradation signals continue to propagate through grouped and AI surfaces so unsupported fluency never displaces the radar as source of truth."
+      ],
+      "key_risks": [
+        {
+          "risk": "False merges across similar but distinct products could contaminate the market read more severely than missing some valid groups.",
+          "whyItMatters": "Once a bad merge becomes the substrate for dashboards, syntheses, or copilote answers, every downstream interpretation becomes less trustworthy."
+        },
+        {
+          "risk": "Grouped reads could drift between repository and ClickHouse paths or become too expensive if grouping stays on the request path.",
+          "whyItMatters": "M003 adds new entity boundaries; if grouped truth is not durable and parity-checked, the product can split into inconsistent realities."
+        },
+        {
+          "risk": "AI outputs could sound useful while drifting away from evidence, time windows, or degraded runtime truth.",
+          "whyItMatters": "Unsupported fluency would erode trust quickly and violate the milestone’s required fact / inference / interpretation / hypothesis boundary."
+        },
+        {
+          "risk": "Weekly syntheses and copilote answers could become decorative restatements or oracle-like speculation instead of grounded analysis.",
+          "whyItMatters": "The milestone only succeeds if the new narrative layer adds real analytical value while remaining obviously grounded and able to abstain."
+        }
+      ],
+      "proof_strategy": [
+        {
+          "riskOrUnknown": "Can cautious grouping create real product-level value without unacceptable false merges?",
+          "retireIn": "S01",
+          "whatWillBeProven": "A real grouped-products surface on live radar data shows strong merges, probable groups, and explicit non-merges with provenance and member-conflict visibility."
+        },
+        {
+          "riskOrUnknown": "Can grouped truth remain stable, fast, and parity-safe across serving boundaries?",
+          "retireIn": "S02",
+          "whatWillBeProven": "Persisted Postgres group projection and ClickHouse group marts back user-facing grouped reads with refresh survival and repository/warehouse parity evidence."
+        },
+        {
+          "riskOrUnknown": "Can AI interpretation stay grounded instead of fluent and unsupported?",
+          "retireIn": "S03 and S04",
+          "whatWillBeProven": "Inline insights, weekly syntheses, and change briefs use structured outputs with citations, time windows, confidence, honesty propagation, and abstention behavior."
+        },
+        {
+          "riskOrUnknown": "Can the assembled system answer real market questions without behaving like an oracle?",
+          "retireIn": "S05",
+          "whatWillBeProven": "The copilote answers supported questions through the real UI with drill-down evidence and degrades gracefully on unsupported or low-confidence prompts."
+        }
+      ],
+      "verification_contract": "Each slice must prove the real user-facing capability through its production interface: grouped product browsing on live data, parity-checked grouped reads, inline cited insights, generated weekly synthesis/meaningful briefs, and copilote answers with explicit attribution. Contract verification must include deterministic tests for grouping confidence bands, provenance surfaces, answer/insight schema enforcement, abstention behavior, and repository↔ClickHouse parity where applicable.",
+      "verification_integration": "Integration verification must exercise the full data path from existing listing truth and evidence packs into group projection, warehouse/group marts, dashboard surfaces, synthesis generation, and copilote retrieval. The integrated milestone must show that grouped entities, AI outputs, and drill-down links all resolve back to the same observed evidence and time windows.",
+      "verification_operational": "Operational verification must cover refresh survival, projection drift, degraded/partial signal propagation, generation failures, unsupported-question handling, and telemetry for grouping quality and AI grounding. The milestone is not operationally complete unless operators can detect low-confidence merges, citation gaps, stale syntheses, and answer failures without reading raw logs.",
+      "verification_uat": "UAT must demonstrate that a user can: inspect grouped products and understand why listings were or were not merged; open grouped detail and trace member conflicts back to source evidence; read inline insights and weekly synthesis with cited support; and ask the copilote concrete market questions, then drill back to the groups/listings that justify the answer or see explicit abstention when support is insufficient.",
+      "definition_of_done": [
+        "A cautious product-group entity and membership contract exists in the product, with confidence bands, provenance, conflict visibility, and deliberate non-merge behavior exposed to the user.",
+        "Grouped views, grouped detail, and grouped analytical reads operate on persisted projected truth and preserve repository/ClickHouse parity expectations.",
+        "Inline insights, weekly synthesis, and meaningful-change briefs are grounded in grouped/listing evidence, carry time windows and confidence, and can abstain when support is insufficient.",
+        "The copilote answers real market questions through its real interface, cites support, separates observation / inference / interpretation / hypothesis, and never presents unsupported speculation as radar fact.",
+        "Existing honesty/provenance language from M001/M002 is extended rather than bypassed, including degraded acquisition and thin-signal visibility.",
+        "Relevant active requirements for grouping, interpretation, drill-down, and continuity are explicitly mapped to slices with no orphaned milestone-relevant requirement."
+      ],
+      "requirement_coverage": "| Requirement | Plan status | Primary owner | Supporting slices | Coverage note |\n| --- | --- | --- | --- | --- |\n| R013 | mapped | S01 | S02,S03,S04,S05 | Cautious product grouping, confidence bands, provenance, explicit non-merge handling, and grouped drill-down begin in S01 and harden downstream. |\n| R014 | mapped | S04 | S03,S05 | Inline grounded insights land in S03; weekly synthesis and eventful briefs complete the requirement in S04 and are reused by S05. |\n| R015 | mapped | S05 | S01,S02,S03,S04 | The copilote depends on grouped truth, warehouse retrieval, grounded insight contracts, and narrative evidence surfaces before the UI ships in S05. |\n| R007 | mapped | S01 | S03,S05 | The cautious support-threshold posture is reused for grouping confidence, analytical confidence, and abstention behavior. |\n| R008 | mapped | S04 | S02,S03,S05 | Segment-level summary is upgraded into grouped higher-order interpretation, periodic synthesis, and meaningful market-pattern narratives. |\n| R009 | mapped | S02 | S01,S03,S05 | Grouped detail, evidence-linked justification, and reversible drill-down from interpretation back to source listings become first-class surfaces. |\n| R011 | mapped | S02 | S03,S04,S05 | Existing product continuity/failure-visibility expectations are preserved as grouped and AI surfaces inherit parity, degradation honesty, and durable reads. |\n\nNo milestone-relevant active requirement is left orphaned. Candidate future requirement formalization should be considered for group-conflict visibility, AI abstention/attribution, synthesis traceability, and operator grouping-quality audit if those behaviors are not already captured elsewhere.",
+      "boundary_map_markdown": "- **Observed source truth (existing, M001/M002):** listing observations, evidence packs, manifests, state timelines, and honesty notes remain the source of truth. Every M003 slice consumes this layer; none may replace it with AI-generated fact.\n- **Grouped projected truth (new, S01 → S02):** Postgres-backed `product_group` / `group_membership` style projection introduces cautious grouped entities, confidence, provenance, and conflict visibility. S01 establishes the contract; S02 hardens persistence and serving.\n- **Analytical warehouse extension (new, S02):** ClickHouse group marts and grouped query adapters power fast grouped rankings, comparisons, and detail while preserving repository-shaped parity.\n- **Dashboard grouped UX (S01 → S03):** grouped cards, detail drill-down, provenance, honesty notes, and inline insight panels live in the existing dashboard/explorer interaction layer rather than a parallel UI system.\n- **Grounded interpretation layer (new, S03 → S04):** provider-agnostic structured AI outputs operate over grouped facts, feature marts, and evidence packs with citations, confidence, and abstention.\n- **Narrative artifact layer (new, S04):** weekly synthesis and eventful briefs are durable generated artifacts with source windows, evidence scope, and trace metadata.\n- **Analytical copilote loop (new, S05):** user question → grounded retrieval over grouped/listing evidence → structured answer with observation / inference / interpretation / hypothesis sections → drill-down back to source evidence.\n- **Cross-cutting product law:** existing honesty/provenance vocabulary and repository↔ClickHouse parity expectations apply to grouped and AI surfaces from the first slice onward."
     },
     {
       "id": "M004",
@@ -548,6 +599,119 @@
       "proof_level": "Lifecycle job tests, reconciliation proofs across all stores, and feature-mart verification against real migrated data.",
       "integration_closure": "Retention jobs, ClickHouse TTL, object-store lifecycle policy, PostgreSQL pruning, feature marts, and audit tooling all operate on the cut-over live platform and expose one coherent view of freshness, lag, continuity, and bounded storage.",
       "observability_impact": "Adds bounded-storage reporting, cross-store reconciliation surfaces, lifecycle job status, and AI-readiness diagnostics so future slices can tell whether the platform is healthy enough for grounded product and model work.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M003",
+      "id": "S01",
+      "title": "Conservative product grouping with confidence + provenance",
+      "status": "pending",
+      "risk": "high",
+      "depends": [],
+      "demo": "A user opens a real grouped-products surface in the dashboard/explorer and can inspect strong product merges, probable groups, and deliberate non-merges on live radar data, with provenance explaining why listings were grouped and links back to member listings.",
+      "created_at": "2026-03-31T16:54:03.147Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Introduce the first real product-group entity surface by shipping cautious grouping, explicit confidence bands, provenance, and member-conflict visibility through a usable grouped-products UI on top of the existing listing truth.",
+      "success_criteria": "- Grouped product cards/detail are available on real radar data for a bounded but meaningful set of strong matches.\n- Matching prefers false splits over false merges and emits `high-confidence`, `probable`, and `uncertain/not-merged` outcomes.\n- Group provenance explains the merge basis and surfaces member disagreements instead of flattening them away.\n- Users can drill from a group to member listings and underlying evidence without losing the original listing-level truth.",
+      "proof_level": "Real user-facing proof through the existing dashboard/explorer on project data, backed by deterministic tests that strong cases merge while ambiguous cases remain split.",
+      "integration_closure": "Establishes the grouped entity, membership, confidence, and provenance contract that every later warehouse and AI slice will consume.",
+      "observability_impact": "Adds grouping audit surfaces, low-confidence counters, merge-reason telemetry, and operator visibility into conflicts and deliberate non-merges.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M003",
+      "id": "S02",
+      "title": "Stable grouped reads via Postgres + ClickHouse parity",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S01"
+      ],
+      "demo": "After refreshes and backend cutover, a user can still browse grouped leaders/comparisons/detail and see the same grouped truth, with grouped reads powered by persisted projection and parity-checked analytical marts rather than request-time fuzzy grouping.",
+      "created_at": "2026-03-31T16:54:03.147Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Make grouped product truth durable, fast, and parity-safe by persisting group projection, extending ClickHouse with group-aware marts, and shipping grouped analytical reads that survive refreshes without splitting product truth across backends.",
+      "success_criteria": "- Group memberships survive refresh/cutover and remain traceable to source listings and evidence.\n- ClickHouse-backed grouped rankings/comparisons/detail exist with repository parity tests for user-visible payloads.\n- Grouped detail preserves survivorship/conflict visibility and propagates degraded/partial-signal honesty.\n- User-facing grouped reads no longer depend on ad-hoc request-time fuzzy grouping.",
+      "proof_level": "Contract and integration proof through refresh survival runs, repository↔ClickHouse grouped parity tests, and real grouped dashboard/explorer/detail reads.",
+      "integration_closure": "Closes the persistence/query boundary by treating group state as projected truth in Postgres and analytical grouped reads as warehouse projections in ClickHouse.",
+      "observability_impact": "Adds projection health metrics, parity drift visibility, group refresh diagnostics, and alerts/counters for stale or failed group projections.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M003",
+      "id": "S03",
+      "title": "Grounded inline insights on grouped markets",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S01",
+        "S02"
+      ],
+      "demo": "A user viewing grouped market surfaces sees inline AI insight blocks that highlight non-trivial grouped patterns, show evidence links, time windows, and confidence, and explicitly abstain when support is too weak.",
+      "created_at": "2026-03-31T16:54:03.147Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Add inline AI interpretation to grouped product and market surfaces using only grouped/listing radar evidence, with explicit citation, time windows, confidence, and abstention instead of unsupported fluency.",
+      "success_criteria": "- Dashboard grouped surfaces show inline insight blocks tied to grouped entities or grouped market changes.\n- Every insight distinguishes observation, calculated inference, and AI interpretation while linking to supporting evidence/time windows.\n- Insufficient-support cases render abstention or narrowed interpretation rather than decorative filler.\n- AI outputs inherit degraded-signal honesty and never outrun the grouped substrate.",
+      "proof_level": "Real UI proof on project data plus structured-output contract tests showing citation coverage, confidence labeling, and abstention behavior.",
+      "integration_closure": "Establishes the provider-agnostic structured insight contract and retrieval seam over feature marts, grouped facts, and evidence packs for downstream synthesis and copilote use.",
+      "observability_impact": "Adds AI invocation traces, citation coverage metrics, abstention counts, structured-output validation failures, and safe error surfacing.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M003",
+      "id": "S04",
+      "title": "Weekly synthesis + eventful change briefs",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S02",
+        "S03"
+      ],
+      "demo": "A user can open a weekly grouped-market synthesis that surfaces higher-order winners, shifts, and conflicts with explicit evidence windows and confidence, and can also read shorter briefs only when meaningful changes trigger them.",
+      "created_at": "2026-03-31T16:54:03.147Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Turn grouped evidence and inline interpretation into durable narrative artifacts: weekly synthesis as the primary cadence and shorter briefs only when material grouped market changes justify them.",
+      "success_criteria": "- A weekly synthesis artifact is generated from grouped market evidence with explicit window, scope, confidence, and citations.\n- Shorter briefs fire only for meaningful grouped market changes and remain distinct from the weekly synthesis cadence.\n- Users can inspect synthesis provenance/version metadata and drill into supporting groups/listings.\n- Generated narratives add higher-order value instead of paraphrasing existing tops.",
+      "proof_level": "Real generated weekly synthesis and at least one meaningful-change brief on project data, verified against citations, windows, and trigger thresholds.",
+      "integration_closure": "Closes the narrative-output boundary by turning grouped retrieval and structured insight contracts into durable periodic artifacts consumable in the dashboard.",
+      "observability_impact": "Adds generation run tracking, trigger-threshold diagnostics, artifact provenance/version metadata, and stale/missed-synthesis alerts.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M003",
+      "id": "S05",
+      "title": "Grounded analytical copilote",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S01",
+        "S02",
+        "S03",
+        "S04"
+      ],
+      "demo": "Through a real copilote UI, a user asks concrete market questions and receives answers grounded in grouped/listing evidence with cited support windows, explicit observation/inference/interpretation/hypothesis sections, and graceful abstention when support is insufficient.",
+      "created_at": "2026-03-31T16:54:03.147Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Ship a user-facing analytical copilote that answers concrete market questions from radar data and grouped evidence while clearly separating observed fact, calculated inference, AI interpretation, and broader labeled hypothesis.",
+      "success_criteria": "- Users can ask real market questions through the copilote interface and receive answers grounded in grouped/listing evidence with cited support windows.\n- Answers degrade gracefully for unsupported or low-confidence questions through abstention, downscoping, or explicit uncertainty.\n- Follow-up drill-down paths lead back to the groups, member listings, and source evidence used in the answer.\n- The copilote does not behave like an oracle and preserves the product’s source-of-truth boundary.",
+      "proof_level": "Live end-to-end proof through the real copilote interface with representative supported and unsupported questions, backed by answer-contract tests.",
+      "integration_closure": "Proves the full assembled system by composing grouped truth, warehouse retrieval, structured insight generation, narrative evidence surfaces, and UI drill-down into one analytical user loop.",
+      "observability_impact": "Adds answer audit trails, unsupported-question telemetry, grounding-quality feedback, and latency/error monitoring for the copilote path.",
       "sequence": 0,
       "replan_triggered_at": null
     }
