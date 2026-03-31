@@ -5,6 +5,20 @@ from vinted_radar.platform.bootstrap import (
     bootstrap_data_platform,
     doctor_data_platform,
 )
+from vinted_radar.platform.clickhouse_schema import (
+    CLICKHOUSE_ALL_TABLES,
+    CLICKHOUSE_FACT_TABLE_CONTRACTS,
+    CLICKHOUSE_FACT_TABLES,
+    CLICKHOUSE_MATERIALIZED_VIEW_CONTRACTS,
+    CLICKHOUSE_MATERIALIZED_VIEWS,
+    CLICKHOUSE_ROLLUP_TABLE_CONTRACTS,
+    CLICKHOUSE_ROLLUP_TABLES,
+    CLICKHOUSE_SERVING_SCHEMA_VERSION,
+    CLICKHOUSE_SERVING_TABLE_CONTRACTS,
+    CLICKHOUSE_SERVING_TABLES,
+    ClickHouseMaterializedViewContract,
+    ClickHouseTableContract,
+)
 from vinted_radar.platform.config import (
     CLICKHOUSE_DATABASE_ENV,
     CLICKHOUSE_PASSWORD_ENV,
@@ -27,8 +41,8 @@ from vinted_radar.platform.config import (
     PARQUET_PREFIX_ENV,
     POSTGRES_DSN_ENV,
     POSTGRES_SCHEMA_VERSION_ENV,
-    RAW_EVENTS_PREFIX_ENV,
     PlatformConfig,
+    RAW_EVENTS_PREFIX_ENV,
     load_platform_config,
 )
 from vinted_radar.platform.health import (
@@ -52,6 +66,7 @@ from vinted_radar.platform.object_store import (
     S3ObjectStore,
     create_s3_client,
 )
+from vinted_radar.platform.outbox import ClaimedOutboxRecord, OutboxPublishResult, PostgresOutbox
 from vinted_radar.platform.postgres_schema import (
     POSTGRES_MUTABLE_INDEXES,
     POSTGRES_MUTABLE_SCHEMA_VERSION,
@@ -60,21 +75,36 @@ from vinted_radar.platform.postgres_schema import (
     POSTGRES_MUTABLE_TABLES,
     PostgresTableContract,
 )
-from vinted_radar.platform.outbox import ClaimedOutboxRecord, OutboxPublishResult, PostgresOutbox
 
 __all__ = [
+    "CLICKHOUSE_ALL_TABLES",
     "CLICKHOUSE_DATABASE_ENV",
+    "CLICKHOUSE_FACT_TABLE_CONTRACTS",
+    "CLICKHOUSE_FACT_TABLES",
+    "CLICKHOUSE_MATERIALIZED_VIEW_CONTRACTS",
+    "CLICKHOUSE_MATERIALIZED_VIEWS",
     "CLICKHOUSE_PASSWORD_ENV",
+    "CLICKHOUSE_ROLLUP_TABLE_CONTRACTS",
+    "CLICKHOUSE_ROLLUP_TABLES",
     "CLICKHOUSE_SCHEMA_VERSION_ENV",
+    "CLICKHOUSE_SERVING_SCHEMA_VERSION",
+    "CLICKHOUSE_SERVING_TABLE_CONTRACTS",
+    "CLICKHOUSE_SERVING_TABLES",
     "CLICKHOUSE_URL_ENV",
     "CLICKHOUSE_USERNAME_ENV",
+    "ClaimedOutboxRecord",
+    "ClickHouseMaterializedViewContract",
+    "ClickHouseTableContract",
+    "CollectorEvidencePublisher",
     "ENABLE_CLICKHOUSE_WRITES_ENV",
     "ENABLE_OBJECT_STORAGE_WRITES_ENV",
     "ENABLE_POLYGLOT_READS_ENV",
     "ENABLE_POSTGRES_WRITES_ENV",
     "EVENT_SCHEMA_VERSION_ENV",
-    "MANIFEST_SCHEMA_VERSION_ENV",
+    "EvidenceBatchEmissionResult",
+    "LakeWriteResult",
     "MANIFESTS_PREFIX_ENV",
+    "MANIFEST_SCHEMA_VERSION_ENV",
     "OBJECT_STORE_ACCESS_KEY_ENV",
     "OBJECT_STORE_BUCKET_ENV",
     "OBJECT_STORE_ENDPOINT_ENV",
@@ -96,6 +126,7 @@ __all__ = [
     "POSTGRES_MUTABLE_TABLE_CONTRACTS_BY_NAME",
     "POSTGRES_MUTABLE_TABLES",
     "POSTGRES_SCHEMA_VERSION_ENV",
+    "ParquetLakeWriter",
     "PlatformBootstrapReport",
     "PlatformConfig",
     "PlatformHealthSnapshot",
@@ -104,11 +135,6 @@ __all__ = [
     "RAW_EVENTS_PREFIX_ENV",
     "S3ObjectStore",
     "SchemaSystemStatus",
-    "CollectorEvidencePublisher",
-    "ClaimedOutboxRecord",
-    "EvidenceBatchEmissionResult",
-    "LakeWriteResult",
-    "ParquetLakeWriter",
     "bootstrap_data_platform",
     "create_s3_client",
     "doctor_data_platform",

@@ -16,7 +16,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/cli.py, vinted_radar/services/runtime.py, vinted_radar/platform/postgres_repository.py, tests/test_runtime_cli.py
   - Verify: python3 -m pytest tests/test_runtime_cli.py -q
-- [ ] **T04: Started a PostgreSQL mutable-truth backfill service and runtime control-plane repository APIs, but CLI wiring, tests, and the PostgreSQL smoke proof remain unfinished.** — Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQLite-to-PostgreSQL backfill for runtime/discovery/catalog/current-state data, then run a narrow batch/continuous smoke against PostgreSQL-backed mutable truth and assert that runtime-status and bookkeeping stay correct without SQLite mutation writes.
+- [x] **T04: Added a PostgreSQL mutable-truth backfill CLI and external control-plane smoke proof.** — Backfill and prove one real control-plane run on PostgreSQL. Add a controlled SQLite-to-PostgreSQL backfill for runtime/discovery/catalog/current-state data, then run a narrow batch/continuous smoke against PostgreSQL-backed mutable truth and assert that runtime-status and bookkeeping stay correct without SQLite mutation writes.
   - Estimate: 1-2 sessions
   - Files: vinted_radar/services/postgres_backfill.py, vinted_radar/cli.py, tests/test_runtime_service.py
   - Verify: python3 -m py_compile vinted_radar/platform/postgres_repository.py vinted_radar/services/postgres_backfill.py vinted_radar/services/runtime.py

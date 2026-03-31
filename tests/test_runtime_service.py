@@ -274,6 +274,153 @@ class FakeClock:
         return self.current.replace(microsecond=0).isoformat()
 
 
+class InMemoryControlPlaneRepository:
+    def __init__(self) -> None:
+        self.cycles: dict[str, dict[str, object]] = {}
+        self.controller: dict[str, object] | None = None
+        self._cycle_sequence = 0
+
+    def start_runtime_cycle(
+        self,
+        *,
+        mode: str,
+        phase: str,
+        interval_seconds: float | None,
+        state_probe_limit: int,
+        config: dict[str, object],
+    ) -> str:
+        self._cycle_sequence += 1
+        cycle_id = f"pg-cycle-{self._cycle_sequence}"
+        started_at = f"2026-03-20T10:0{self._cycle_sequence}:00+00:00"
+        self.cycles[cycle_id] = {
+            "cycle_id": cycle_id,
+            "started_at": started_at,
+            "finished_at": None,
+            "mode": mode,
+            "status": "running",
+            "phase": phase,
+            "interval_seconds": interval_seconds,
+            "state_probe_limit": state_probe_limit,
+            "discovery_run_id": None,
+            "state_probed_count": 0,
+            "tracked_listings": 0,
+            "freshness_counts": {
+                "first-pass-only": 0,
+                "fresh-followup": 0,
+                "aging-followup": 0,
+                "stale-followup": 0,
+            },
+            "last_error": None,
+            "state_refresh_summary": {},
+            "config": dict(config),
+        }
+        self.set_runtime_controller_state(
+            status="running",
+            phase=phase,
+            mode=mode,
+            active_cycle_id=cycle_id,
+            latest_cycle_id=cycle_id,
+            interval_seconds=interval_seconds,
+            updated_at=started_at,
+            paused_at=None,
+            next_resume_at=None,
+            last_error=None,
+            last_error_at=None,
+            requested_action="none",
+            requested_at=None,
+            config=dict(config),
+        )
+        return cycle_id
+
+    def runtime_cycle(self, cycle_id: str) -> dict[str, object] | None:
+        cycle = self.cycles.get(cycle_id)
+        return None if cycle is None else dict(cycle)
+
+    def update_runtime_cycle_phase(self, cycle_id: str, *, phase: str) -> None:
+        cycle = self.cycles.get(cycle_id)
+        if cycle is None:
+            return
+        cycle["phase"] = phase
+        if self.controller is not None and self.controller.get("active_cycle_id") == cycle_id:
+            self.controller["phase"] = phase
+            self.controller["updated_at"] = cycle["started_at"]
+
+    def complete_runtime_cycle(
+        self,
+        cycle_id: str,
+        *,
+        status: str,
+        phase: str,
+        discovery_run_id: str | None = None,
+        state_probed_count: int = 0,
+        tracked_listings: int = 0,
+        freshness_counts: dict[str, object] | None = None,
+        last_error: str | None = None,
+        state_refresh_summary: dict[str, object] | None = None,
+    ) -> None:
+        cycle = self.cycles[cycle_id]
+        finished_at = "2026-03-20T10:09:00+00:00"
+        cycle.update(
+            {
+                "finished_at": finished_at,
+                "status": status,
+                "phase": phase,
+                "discovery_run_id": discovery_run_id,
+                "state_probed_count": state_probed_count,
+                "tracked_listings": tracked_listings,
+                "freshness_counts": dict(freshness_counts or {}),
+                "last_error": last_error,
+                "state_refresh_summary": dict(state_refresh_summary or {}),
+            }
+        )
+        self.set_runtime_controller_state(
+            status="idle" if status != "failed" else "failed",
+            phase="idle" if status != "failed" else phase,
+            mode=cycle["mode"],
+            active_cycle_id=None,
+            latest_cycle_id=cycle_id,
+            interval_seconds=cycle.get("interval_seconds"),
+            updated_at=finished_at,
+            paused_at=None,
+            next_resume_at=None,
+            last_error=last_error,
+            last_error_at=None if last_error is None else finished_at,
+            requested_action="none",
+            requested_at=None,
+            config=dict(cycle.get("config") or {}),
+        )
+
+    def set_runtime_controller_state(self, **kwargs) -> dict[str, object]:
+        payload = dict(self.controller or {
+            "status": "idle",
+            "phase": "idle",
+            "mode": None,
+            "active_cycle_id": None,
+            "latest_cycle_id": None,
+            "interval_seconds": None,
+            "updated_at": None,
+            "paused_at": None,
+            "next_resume_at": None,
+            "last_error": None,
+            "last_error_at": None,
+            "requested_action": "none",
+            "requested_at": None,
+            "config": {},
+        })
+        payload.update(kwargs)
+        self.controller = payload
+        return dict(payload)
+
+    def runtime_controller_state(self, *, now: str | None = None) -> dict[str, object] | None:
+        if self.controller is None:
+            return None
+        payload = dict(self.controller)
+        if payload.get("next_resume_in_seconds") is None:
+            payload["next_resume_in_seconds"] = 0.0
+        return payload
+
+
+
 def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     runtime = RadarRuntimeService(
@@ -321,6 +468,52 @@ def test_runtime_service_persists_completed_cycle_and_runtime_status(tmp_path: P
     assert status["controller"]["latest_cycle_id"] == report.cycle_id
     assert status["totals"]["completed_cycles"] == 1
     assert status["latest_failure"] is None
+
+
+
+def test_runtime_service_can_run_with_external_control_plane_repository_without_sqlite_runtime_mutation(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    control_plane_repository = InMemoryControlPlaneRepository()
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=lambda **kwargs: PersistingDiscoveryService(db_path),
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+        control_plane_repository=control_plane_repository,
+    )
+
+    report = runtime.run_cycle(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=3,
+        ),
+        mode="batch",
+    )
+
+    assert report.status == "completed"
+    assert report.cycle_id == "pg-cycle-1"
+    assert report.discovery_run_id is not None
+    assert report.tracked_listings == 1
+    assert report.state_probed_count == 1
+    assert report.state_refresh_summary is not None
+    assert control_plane_repository.controller is not None
+    assert control_plane_repository.controller["status"] == "idle"
+    assert control_plane_repository.controller["latest_cycle_id"] == report.cycle_id
+    assert control_plane_repository.cycles[report.cycle_id]["status"] == "completed"
+    assert control_plane_repository.cycles[report.cycle_id]["discovery_run_id"] == report.discovery_run_id
+
+    with RadarRepository(db_path) as repository:
+        sqlite_runtime_cycles = repository.connection.execute("SELECT COUNT(*) FROM runtime_cycles").fetchone()[0]
+        sqlite_runtime_controller_rows = repository.connection.execute(
+            "SELECT COUNT(*) FROM runtime_controller_state"
+        ).fetchone()[0]
+
+    assert sqlite_runtime_cycles == 0
+    assert sqlite_runtime_controller_rows == 0
+
 
 
 def test_runtime_service_passes_proxy_pool_to_discovery_and_state_refresh_factories(tmp_path: Path) -> None:

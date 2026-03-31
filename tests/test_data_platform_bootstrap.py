@@ -161,6 +161,10 @@ def _write_migration_fixture(root: Path) -> tuple[Path, Path]:
         "CREATE TABLE IF NOT EXISTS platform_bootstrap_audit (component String) ENGINE = MergeTree ORDER BY component;",
         encoding="utf-8",
     )
+    (clickhouse_dir / "V002__serving_warehouse.sql").write_text(
+        "CREATE TABLE IF NOT EXISTS fact_listing_seen_events (event_id String) ENGINE = ReplacingMergeTree ORDER BY event_id;",
+        encoding="utf-8",
+    )
     return postgres_dir, clickhouse_dir
 
 
@@ -195,8 +199,8 @@ def test_bootstrap_data_platform_applies_pending_migrations_and_bootstraps_objec
     assert report.postgres.applied_this_run == (1, 2, 3)
     assert report.postgres.current_version == 3
     assert report.clickhouse.ok is True
-    assert report.clickhouse.applied_this_run == (1,)
-    assert report.clickhouse.current_version == 1
+    assert report.clickhouse.applied_this_run == (1, 2)
+    assert report.clickhouse.current_version == 2
     assert report.object_storage.ok is True
     assert report.object_storage.bucket_created is True
     assert sorted(report.object_storage.write_checked_prefixes) == ["manifests", "parquet", "raw_events"]
@@ -224,7 +228,7 @@ def test_doctor_data_platform_flags_missing_schema_and_bucket(monkeypatch, tmp_p
     assert report.postgres.ok is False
     assert report.postgres.pending_versions == (1, 2, 3)
     assert report.clickhouse.ok is False
-    assert report.clickhouse.pending_versions == (1,)
+    assert report.clickhouse.pending_versions == (1, 2)
     assert report.object_storage.ok is False
     assert report.object_storage.error == "bucket-missing"
 
@@ -255,15 +259,15 @@ def test_platform_bootstrap_cli_renders_table_output(monkeypatch) -> None:
             ok=True,
             endpoint="http://127.0.0.1:8123 / vinted_radar",
             migration_dir="infra/clickhouse/migrations",
-            expected_version=1,
-            available_version=1,
-            current_version=1,
-            applied_versions=(1,),
+            expected_version=2,
+            available_version=2,
+            current_version=2,
+            applied_versions=(1, 2),
             pending_versions=(),
-            applied_this_run=(1,),
+            applied_this_run=(1, 2),
             unexpected_versions=(),
             mismatched_checksums=(),
-            detail="ClickHouse reachable; schema v1/1; applied V001",
+            detail="ClickHouse reachable; schema v2/2; applied V001, V002",
         ),
         object_storage=ObjectStorageStatus(
             ok=True,
@@ -324,15 +328,15 @@ def test_platform_doctor_cli_exits_non_zero_when_checks_fail(monkeypatch) -> Non
             ok=False,
             endpoint="http://127.0.0.1:8123 / vinted_radar",
             migration_dir="infra/clickhouse/migrations",
-            expected_version=1,
-            available_version=1,
+            expected_version=2,
+            available_version=2,
             current_version=0,
             applied_versions=(),
-            pending_versions=(1,),
+            pending_versions=(1, 2),
             applied_this_run=(),
             unexpected_versions=(),
             mismatched_checksums=(),
-            detail="ClickHouse reachable but unhealthy: pending migrations V001",
+            detail="ClickHouse reachable but unhealthy: pending migrations V001, V002",
             error="pending",
         ),
         object_storage=ObjectStorageStatus(

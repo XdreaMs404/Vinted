@@ -16,7 +16,7 @@ M002 product slices S01 through S09 are complete, and the original product close
 
 The post-S09 VPS storage incident materially changed the project state: the cleaned live SQLite database remained healthy yet still grew by roughly 1.5 GB during a single successful cycle, and the schema still duplicates heavyweight card payload JSON across mutable and historical tables. M002 has therefore been reopened with S10 through S15 planned to replace the monolithic SQLite boundary with PostgreSQL for mutable control-plane/current-state truth, ClickHouse for analytical serving and rollups, and S3-compatible Parquet object storage for immutable raw evidence. SQLite now remains the legacy live path only until that cutover lands, plus a migration/backfill source for historical continuity.
 
-M002/S10 and M002/S11 are now complete. The repo has the staged polyglot platform foundation from S10 plus the first real immutable-evidence path from S11: a shared minimal listing-card evidence envelope, checksum-aware S3-compatible object-store writes, deterministic manifested Parquet batch publishing, collector-side discovery/state-refresh evidence emission, and CLI/services for historical SQLite backfill plus event/manifest evidence lookup. The foundation is still staged safely: the current product continues reading from SQLite, while raw proof can now leave the hot mutable path and land in Parquet/object storage under deterministic manifests and batch events.
+M002/S10, M002/S11, and M002/S12 are now complete. The repo has the staged polyglot platform foundation from S10, the immutable-evidence path from S11, and the first real PostgreSQL mutable-truth path from S12: a shared mutable-truth schema, replay-safe projectors for discovery/listing/runtime state, PostgreSQL-backed runtime control-plane persistence under the polyglot-read cutover, and an explicit SQLite-to-PostgreSQL `postgres-backfill` operator command with regression coverage proving runtime control can run through an external control-plane repository without silently mutating SQLite runtime tables. The foundation is still staged safely: overview/explorer/detail serving remains on SQLite for now, while runtime/control-plane and current-state cutover seams are now in place for the downstream ClickHouse/backfill/application-read slices.
 
 What is verified today:
 - `python -m pytest tests/test_platform_config.py -q`, `python -m pytest tests/test_data_platform_bootstrap.py -q`, `python -m pytest tests/test_event_envelope.py tests/test_outbox.py -q`, and `python -m pytest tests/test_data_platform_smoke.py -q` all pass, proving the S10 platform foundation: shared config/env validation, idempotent bootstrap + doctor flows, deterministic event/manifest contracts, leased PostgreSQL outbox semantics, and a real Docker-backed PostgreSQL + ClickHouse + MinIO smoke path
@@ -24,6 +24,8 @@ What is verified today:
 - `python -m pytest tests/test_lake_writer.py -q` passes with **2 passed, 1 skipped** in this workstation session, proving deterministic manifest/parquet writing and immutable-key checksum protection while the MinIO integration case remains gated on Docker daemon availability
 - `python -m pytest tests/test_evidence_batches.py tests/test_discovery_service.py tests/test_runtime_service.py -q` passes with **20 passed**, proving collector evidence publishing idempotence plus discovery/state-refresh emission of deterministic manifested Parquet batches
 - `python -m pytest tests/test_evidence_export.py -q` passes with **3 passed**, proving SQLite evidence backfill plus event/manifest lookup back down to concrete decoded evidence fragments
+- `python3 -m pytest tests/test_postgres_schema.py tests/test_platform_config.py tests/test_data_platform_bootstrap.py tests/test_runtime_cli.py tests/test_runtime_service.py tests/test_postgres_backfill.py -q` passes with **36 passed**, proving the S12 PostgreSQL mutable-truth schema/cutover path: schema v3 expectations, runtime CLI polyglot control-plane reads/writes, external-control-plane runtime smoke without SQLite runtime mutation, and explicit SQLite-to-PostgreSQL mutable-truth backfill coverage
+- a direct Node smoke against the project auto-prompt renderer confirmed future `execute-task` prompts inline the Task Summary and Decisions templates, and the standing execution rule is to treat any stale user-home template-path guidance as non-normative
 - `python -m pytest -q` passes
 - `python -m pytest tests/test_proxy_config.py tests/test_http.py tests/test_discovery_service.py tests/test_runtime_service.py tests/test_runtime_cli.py tests/test_cli_discover_smoke.py -q` passes with **37 passed** after the concurrency-cap tuning
 - `MSYS_NO_PATHCONV=1 python -m vinted_radar.cli dashboard --db data/m001-closeout.db --host 127.0.0.1 --port 8790 --base-path /radar --public-base-url http://127.0.0.1:8790/radar` plus `MSYS_NO_PATHCONV=1 python scripts/verify_vps_serving.py --base-url http://127.0.0.1:8790/radar --listing-id 64882428` re-proved overview, explorer, runtime, detail HTML, detail JSON, and health on the realistic 49,759-listing corpus
@@ -38,7 +40,7 @@ What is verified today:
 
 What is still pending on the roadmap:
 - M001 still needs trustworthy multi-day closeout evidence from healthy historical databases
-- M002/S12 through S15 now need implementation to move mutable control-plane/current-state truth into PostgreSQL, analytical serving into ClickHouse, complete historical backfill/cutover, and add retention plus AI-ready marts on top of the new Parquet/object-store evidence boundary
+- M002 still needs S13 through S15 to move analytical serving into ClickHouse, complete historical backfill/cutover off the legacy SQLite boundary, and add retention plus AI-ready marts on top of the new Parquet/object-store evidence boundary
 
 ## Architecture / Key Patterns
 
@@ -58,6 +60,8 @@ The target platform decision recorded after the VPS growth incident is to move m
 
 M002/S10 now provides the shared config, migration, bootstrap/doctor, event/manifest, and leased outbox seams for that platform, but all cutover flags still default to false so user-facing reads remain on SQLite until the later slices land.
 
+Project automation is prompt-self-contained: future auto-mode `execute-task` units use the inlined Task Summary and Decisions templates from the prompt itself, and any instruction that points to a user-home template path is treated as stale guidance rather than part of the execution contract.
+
 The dashboard is server-rendered and shares one repository-backed payload with its JSON diagnostics so the browser surface and debug surface stay truthful.
 
 M002/S01 begins retiring request-time Python recomputation on primary user paths by moving the overview home and explorer browse path onto repository-owned SQL aggregates/pages, while `/api/dashboard` remains the brownfield compatibility seam for diagnostics and existing callers.
@@ -73,6 +77,6 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 ## Milestone Sequence
 
 - [x] M001: Listing-Level Market Radar — implementation complete; closeout summary written, verification result `needs-attention` pending healthy multi-day runtime proof.
-- [ ] M002: Enriched Market Intelligence Experience — product slices S01 through S11 are complete. The milestone remains open for S12 through S15 to move mutable control-plane/current-state truth into PostgreSQL, analytical serving into ClickHouse, historical backfill/cutover off the legacy SQLite boundary, and retention plus AI-ready marts on top of the new Parquet/object-store evidence layer.
+- [ ] M002: Enriched Market Intelligence Experience — product slices S01 through S12 are complete. The milestone remains open for S13 through S15 to move analytical serving into ClickHouse, complete historical backfill/application cutover off the legacy SQLite boundary, and add retention plus AI-ready marts on top of the new Parquet/object-store evidence layer.
 - [ ] M003: Product-Level Intelligence + Grounded AI Layer — group listings into product-level signals and add grounded AI insights, summaries, and analytical exploration.
 - [ ] M004: SaaS Hardening and Commercialization — industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.

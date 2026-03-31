@@ -26,6 +26,7 @@ from vinted_radar.scoring import build_listing_score_detail, build_market_summar
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
 from vinted_radar.services.evidence_export import HistoricalEvidenceExportReport, HistoricalEvidenceExporter
 from vinted_radar.services.evidence_lookup import EvidenceLookupResult, EvidenceLookupService
+from vinted_radar.services.postgres_backfill import PostgresBackfillReport, backfill_postgres_mutable_truth
 from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
 from vinted_radar.services.state_refresh import build_default_state_refresh_service
 from vinted_radar.serving import build_dashboard_urls
@@ -364,6 +365,39 @@ def platform_doctor(
     _emit_platform_report(report=report, output_format=output_format)
     if not report.ok:
         raise typer.Exit(code=1)
+
+
+@app.command("postgres-backfill")
+def postgres_backfill(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    sync_runtime_control: bool = typer.Option(True, "--sync-runtime-control/--skip-runtime-control", help="Also backfill runtime cycles and controller state into PostgreSQL mutable truth."),
+    reference_now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp used as the projection time for derived mutable-truth rows."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        report = backfill_postgres_mutable_truth(
+            db,
+            config=config,
+            reference_now=reference_now,
+            sync_runtime_control=sync_runtime_control,
+        )
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"PostgreSQL mutable-truth backfill failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_postgres_backfill_report(report=report)
 
 
 @app.command("evidence-export")
@@ -1613,6 +1647,23 @@ def _render_platform_object_storage_status(status: object) -> None:
     typer.echo(f"- detail: {getattr(status, 'detail', 'n/a')}")
     if getattr(status, 'error', None):
         typer.echo(f"- error: {getattr(status, 'error')}")
+
+
+
+def _render_postgres_backfill_report(*, report: PostgresBackfillReport) -> None:
+    payload = report.as_dict()
+    typer.echo(f"SQLite source: {payload['sqlite_db_path']}")
+    typer.echo(f"Target PostgreSQL: {payload['postgres_dsn']}")
+    typer.echo(f"Reference time: {payload['reference_now']}")
+    typer.echo("Backfilled rows:")
+    typer.echo(f"- discovery runs: {payload['discovery_runs']}")
+    typer.echo(f"- catalogs: {payload['catalogs']}")
+    typer.echo(f"- listing identities: {payload['listing_identities']}")
+    typer.echo(f"- listing presence summaries: {payload['listing_presence_summaries']}")
+    typer.echo(f"- listing current states: {payload['listing_current_states']}")
+    typer.echo(f"- runtime cycles: {payload['runtime_cycles']}")
+    typer.echo(f"- runtime controller rows: {payload['runtime_controller_rows']}")
+
 
 
 def _render_evidence_export_report(*, report: HistoricalEvidenceExportReport, db: Path, bucket: str) -> None:

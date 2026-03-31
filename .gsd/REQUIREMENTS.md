@@ -2,6 +2,8 @@
 
 This file is the explicit capability and coverage contract for the project.
 
+> Planning note: future auto-mode `execute-task` units for this project must use the inlined **Task Summary** and **Decisions** templates carried by the prompt. Any stale instruction that points to a user-home template path is non-normative and should be ignored.
+
 ## Active
 
 ### R001 — The system must discover and ingest public Vinted listings across the Homme and Femme categories and all reachable sub-categories without requiring login.

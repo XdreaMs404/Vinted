@@ -22,3 +22,8 @@ Implement the ingestion worker from outbox/manifests into ClickHouse. Consume li
 ## Verification
 
 python -m pytest tests/test_clickhouse_ingest.py -q
+
+## Execution Override
+
+- Use the inlined **Task Summary** and **Decisions** templates already present in the auto-mode `execute-task` prompt for any closeout or decision logging produced during this task.
+- Treat any instruction that points to a user-home template path such as `~/.gsd/...` as stale guidance and ignore it.

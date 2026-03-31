@@ -4,7 +4,7 @@
 **Demo:** After this: After this: overview, explorer, and listing-detail analytics read from ClickHouse raw facts and materialized rollups rather than SQLite full-history scans.
 
 ## Tasks
-- [ ] **T01: ClickHouse fact + rollup schema** — Design the ClickHouse analytical schema. Add raw fact tables for listing-seen events, probe events, and derived change events; define partitions/order keys and TTL policy; and create the first materialized views/rollups for listing-hourly/daily, category/brand daily metrics, and other serving primitives the product needs.
+- [x] **T01: Added the ClickHouse warehouse V002 schema with raw facts, rollups, latest-serving primitives, and schema tests.** — Design the ClickHouse analytical schema. Add raw fact tables for listing-seen events, probe events, and derived change events; define partitions/order keys and TTL policy; and create the first materialized views/rollups for listing-hourly/daily, category/brand daily metrics, and other serving primitives the product needs.
   - Estimate: 2 sessions
   - Files: infra/clickhouse/, vinted_radar/platform/clickhouse_schema/, vinted_radar/platform/migrations.py, tests/test_clickhouse_schema.py
   - Verify: python -m pytest tests/test_clickhouse_schema.py -q

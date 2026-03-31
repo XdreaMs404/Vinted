@@ -38,7 +38,7 @@ def test_load_platform_config_uses_local_platform_defaults() -> None:
     assert config.storage.parquet == "vinted-radar/parquet"
     assert config.schema_versions.as_dict() == {
         "postgres": 3,
-        "clickhouse": 1,
+        "clickhouse": 2,
         "events": 1,
         "manifests": 1,
     }

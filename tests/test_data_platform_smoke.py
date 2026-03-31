@@ -142,7 +142,7 @@ def test_data_platform_smoke(
     assert health_snapshot.clickhouse_ok is True
     assert health_snapshot.object_storage_ok is True
     assert doctor_report.postgres.current_version == 3
-    assert doctor_report.clickhouse.current_version == 1
+    assert doctor_report.clickhouse.current_version == 2
     assert sorted(doctor_report.object_storage.write_checked_prefixes) == [
         "manifests",
         "parquet",
@@ -209,3 +209,4 @@ def _format_process_failure(command: str, stdout: str, stderr: str, compose_ps: 
         f"stderr:\n{stderr}\n\n"
         f"docker compose ps:\n{compose_ps}"
     )
+ )
