@@ -21,6 +21,7 @@ from vinted_radar.platform import (
     load_clickhouse_ingest_status,
     load_platform_config,
     render_platform_report_lines,
+    summarize_cutover_state,
 )
 from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
@@ -29,6 +30,7 @@ from vinted_radar.scoring import build_listing_score_detail, build_market_summar
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
 from vinted_radar.services.evidence_export import HistoricalEvidenceExportReport, HistoricalEvidenceExporter
 from vinted_radar.services.evidence_lookup import EvidenceLookupResult, EvidenceLookupService
+from vinted_radar.services.full_backfill import FullBackfillReport, run_full_backfill
 from vinted_radar.services.postgres_backfill import PostgresBackfillReport, backfill_postgres_mutable_truth
 from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
 from vinted_radar.services.state_refresh import build_default_state_refresh_service
@@ -401,6 +403,53 @@ def postgres_backfill(
         raise typer.BadParameter("--format must be either 'table' or 'json'.")
 
     _render_postgres_backfill_report(report=report)
+
+
+@app.command("full-backfill")
+def full_backfill(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    batch_size: int = typer.Option(500, "--batch-size", min=1, help="Maximum rows per emitted parquet batch inside each natural source group."),
+    sync_runtime_control: bool = typer.Option(True, "--sync-runtime-control/--skip-runtime-control", help="Also backfill runtime cycles/controller rows and export runtime evidence batches."),
+    reference_now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp used for PostgreSQL mutable-truth derivations and persisted into the resume checkpoint."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Inspect the SQLite corpus and existing checkpoint without writing PostgreSQL, ClickHouse, or object-storage rows."),
+    checkpoint: Path | None = typer.Option(None, "--checkpoint", help="Optional resume checkpoint JSON path. Defaults next to the SQLite file."),
+    reset_checkpoint: bool = typer.Option(False, "--reset-checkpoint", help="Ignore and overwrite any existing checkpoint instead of resuming it."),
+    clickhouse_lease_seconds: int = typer.Option(60, "--lease-seconds", min=1, help="How long the historical ClickHouse ingest worker should lease each published outbox row."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    resolved_checkpoint = checkpoint or _default_full_backfill_checkpoint_path(db)
+
+    try:
+        report = run_full_backfill(
+            db,
+            config=config,
+            reference_now=reference_now,
+            batch_size=batch_size,
+            dry_run=dry_run,
+            sync_runtime_control=sync_runtime_control,
+            checkpoint_path=resolved_checkpoint,
+            reset_checkpoint=reset_checkpoint,
+            clickhouse_lease_seconds=clickhouse_lease_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Full backfill failed: {type(exc).__name__}: {exc}", err=True)
+        if resolved_checkpoint is not None:
+            typer.echo(f"Resume checkpoint: {resolved_checkpoint}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    _render_full_backfill_report(report=report, checkpoint_path=resolved_checkpoint)
 
 
 @app.command("clickhouse-ingest")
@@ -1741,6 +1790,49 @@ def _render_postgres_backfill_report(*, report: PostgresBackfillReport) -> None:
 
 
 
+def _render_full_backfill_report(*, report: FullBackfillReport, checkpoint_path: Path | None) -> None:
+    payload = report.as_dict()
+    postgres_payload = dict(payload["postgres_backfill"])
+    typer.echo(f"SQLite source: {payload['sqlite_db_path']}")
+    typer.echo(f"Target PostgreSQL: {payload['postgres_dsn']}")
+    typer.echo(f"Target ClickHouse: {payload['clickhouse_url']} / {payload['clickhouse_database']}")
+    typer.echo(f"Target object-store bucket: {payload['object_store_bucket']}")
+    typer.echo(f"Reference time: {payload['reference_now']}")
+    typer.echo(f"Mode: {'dry-run' if payload['dry_run'] else 'execute'}")
+    typer.echo(f"Resume checkpoint: {checkpoint_path or payload.get('checkpoint_path') or 'disabled'}")
+    typer.echo(
+        "Checkpoint state: {state} | resumed {resumed}".format(
+            state="complete" if payload["checkpoint_completed"] else "in-progress",
+            resumed="yes" if payload["resumed_from_checkpoint"] else "no",
+        )
+    )
+    typer.echo("PostgreSQL mutable truth:")
+    typer.echo(f"- discovery runs: {postgres_payload['discovery_runs']}")
+    typer.echo(f"- catalogs: {postgres_payload['catalogs']}")
+    typer.echo(f"- listing identities: {postgres_payload['listing_identities']}")
+    typer.echo(f"- listing presence summaries: {postgres_payload['listing_presence_summaries']}")
+    typer.echo(f"- listing current states: {postgres_payload['listing_current_states']}")
+    typer.echo(f"- runtime cycles: {postgres_payload['runtime_cycles']}")
+    typer.echo(f"- runtime controller rows: {postgres_payload['runtime_controller_rows']}")
+    typer.echo("Evidence datasets:")
+    for dataset in payload["datasets"]:
+        typer.echo(
+            "- {dataset}: completed {completed_batches} batches / {completed_rows} rows | skipped {skipped_batches} batches / {skipped_rows} rows | last manifest {last_manifest_id}".format(
+                dataset=dataset["dataset"],
+                completed_batches=dataset["completed_batches"],
+                completed_rows=dataset["completed_rows"],
+                skipped_batches=dataset["skipped_batches"],
+                skipped_rows=dataset["skipped_rows"],
+                last_manifest_id=dataset.get("last_manifest_id") or "n/a",
+            )
+        )
+    typer.echo("ClickHouse worker:")
+    typer.echo(f"- claimed rows: {payload['clickhouse_claimed_count']}")
+    typer.echo(f"- processed rows: {payload['clickhouse_processed_count']}")
+    typer.echo(f"- skipped rows: {payload['clickhouse_skipped_count']}")
+
+
+
 def _render_clickhouse_ingest_report(report) -> None:
     typer.echo(f"ClickHouse ingest consumer: {report.consumer_name}")
     typer.echo(f"Sink: {report.sink}")
@@ -1827,6 +1919,14 @@ def _render_evidence_lookup_result(result: EvidenceLookupResult) -> None:
     typer.echo(f"Fragment root: {result.fragment_root}")
     typer.echo(f"Fragment path: {result.fragment_path or '(whole row)'}")
     _echo(json.dumps(result.fragment, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _default_full_backfill_checkpoint_path(db: Path) -> Path:
+    suffix = "".join(db.suffixes)
+    if suffix:
+        return db.with_name(f"{db.name}.full-backfill-checkpoint.json")
+    return db.with_name(f"{db.name}.full-backfill-checkpoint.json")
+
 
 
 def _format_money(amount_cents: object, currency: object) -> str:

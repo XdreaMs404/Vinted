@@ -56,9 +56,11 @@ from vinted_radar.platform.config import (
     load_platform_config,
 )
 from vinted_radar.platform.health import (
+    CutoverStatusSnapshot,
     PlatformHealthSnapshot,
     render_platform_report_lines,
     render_platform_report_text,
+    summarize_cutover_state,
     summarize_platform_health,
 )
 from vinted_radar.platform.lake_writer import (
@@ -113,6 +115,7 @@ __all__ = [
     "ClickHouseMaterializedViewContract",
     "ClickHouseTableContract",
     "CollectorEvidencePublisher",
+    "CutoverStatusSnapshot",
     "ENABLE_CLICKHOUSE_WRITES_ENV",
     "ENABLE_OBJECT_STORAGE_WRITES_ENV",
     "ENABLE_POLYGLOT_READS_ENV",
@@ -159,5 +162,6 @@ __all__ = [
     "load_platform_config",
     "render_platform_report_lines",
     "render_platform_report_text",
+    "summarize_cutover_state",
     "summarize_platform_health",
 ]

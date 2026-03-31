@@ -77,6 +77,27 @@ class FakeS3Client:
             "ETag": record["ETag"],
         }
 
+    def list_objects_v2(
+        self,
+        *,
+        Bucket: str,
+        Prefix: str,
+        ContinuationToken: str | None = None,
+    ) -> dict[str, Any]:
+        keys = sorted(
+            key
+            for (bucket, key) in self.objects
+            if bucket == Bucket and key.startswith(Prefix)
+        )
+        start_index = 0 if ContinuationToken is None else int(ContinuationToken)
+        page = keys[start_index : start_index + 1000]
+        next_index = start_index + len(page)
+        return {
+            "Contents": [{"Key": key} for key in page],
+            "IsTruncated": next_index < len(keys),
+            "NextContinuationToken": None if next_index >= len(keys) else str(next_index),
+        }
+
     def delete_object(self, *, Bucket: str, Key: str) -> None:
         self.objects.pop((Bucket, Key), None)
 

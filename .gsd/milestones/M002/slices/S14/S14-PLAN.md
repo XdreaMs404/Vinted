@@ -4,7 +4,7 @@
 **Demo:** After this: After this: historical SQLite evidence is backfilled into PostgreSQL, ClickHouse, and the Parquet lake, the product reads the new platform end to end, and the live collector no longer depends on heavyweight SQLite history tables.
 
 ## Tasks
-- [ ] **T01: Historical backfill pipeline** — Build the full historical backfill pipeline. Add commands/workers that migrate legacy SQLite discovery, observation, probe, and runtime history into PostgreSQL current-state/control-plane rows, ClickHouse facts/rollups, and Parquet evidence manifests, with resumable checkpoints and dry-run support for large corpora.
+- [x] **T01: Added a resumable full backfill command that migrates SQLite history into PostgreSQL mutable truth, ClickHouse facts, and Parquet audit manifests.** — Build the full historical backfill pipeline. Add commands/workers that migrate legacy SQLite discovery, observation, probe, and runtime history into PostgreSQL current-state/control-plane rows, ClickHouse facts/rollups, and Parquet evidence manifests, with resumable checkpoints and dry-run support for large corpora.
   - Estimate: 2-3 sessions
   - Files: vinted_radar/services/full_backfill.py, vinted_radar/cli.py, tests/test_full_backfill.py
   - Verify: python -m pytest tests/test_full_backfill.py -q

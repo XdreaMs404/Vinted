@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 import json
+import re
 from typing import Any
 import uuid
 
@@ -13,6 +14,7 @@ from vinted_radar.state_machine import evaluate_listing_state
 POSTGRES_CURRENT_STATE_SINK = "postgres-current-state"
 POSTGRES_CURRENT_STATE_CONSUMER = "postgres-current-state-projector"
 _RUNTIME_CONTROLLER_SINGLETON_ID = 1
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _UNSET = object()
 
 
@@ -1132,6 +1134,28 @@ class PostgresMutableTruthRepository:
         hydrated["metadata"] = _decode_json_object(hydrated.pop("metadata_json", "{}"))
         return hydrated
 
+    def reconciliation_table_snapshot(
+        self,
+        *,
+        table_name: str,
+        start_column: str | None = None,
+        end_column: str | None = None,
+    ) -> dict[str, object]:
+        safe_table = _safe_identifier(table_name, field_name="table")
+        safe_start = None if start_column is None else _safe_identifier(start_column, field_name="start column")
+        safe_end = None if end_column is None else _safe_identifier(end_column, field_name="end column")
+        select_clauses = ["COUNT(*) AS row_count"]
+        select_clauses.append("NULL AS window_start" if safe_start is None else f"MIN({safe_start}) AS window_start")
+        select_clauses.append("NULL AS window_end" if safe_end is None else f"MAX({safe_end}) AS window_end")
+        row = _fetchone(self.connection.execute(f"SELECT {', '.join(select_clauses)} FROM {safe_table}"))
+        if row is None:
+            return {"row_count": 0, "window_start": None, "window_end": None}
+        return {
+            "row_count": int(_row_get(row, "row_count", 0) or 0),
+            "window_start": _optional_str(_row_get(row, "window_start", 1)),
+            "window_end": _optional_str(_row_get(row, "window_end", 2)),
+        }
+
     def mutable_manifest(self, manifest_id: str) -> dict[str, object] | None:
         row = _fetchone(
             self.connection.execute(
@@ -2048,6 +2072,14 @@ def _row_get(row: object, key: str, index: int) -> Any:
     if isinstance(row, Sequence):
         return row[index]
     raise TypeError(f"Unsupported row type: {type(row).__name__}")
+
+
+
+def _safe_identifier(value: str, *, field_name: str) -> str:
+    candidate = str(value).strip()
+    if not _SAFE_IDENTIFIER_RE.fullmatch(candidate):
+        raise ValueError(f"{field_name} must contain only letters, digits, and underscores")
+    return candidate
 
 
 

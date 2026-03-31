@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -29,6 +30,36 @@ class PlatformHealthSnapshot:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class CutoverStatusSnapshot:
+    mode: str
+    dual_write_active: bool
+    platform_writes_enabled: bool
+    polyglot_reads_enabled: bool
+    read_path: str
+    write_targets: tuple[str, ...]
+    platform_write_targets: tuple[str, ...]
+    postgres_writes_enabled: bool
+    clickhouse_writes_enabled: bool
+    object_storage_writes_enabled: bool
+    warnings: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "mode": self.mode,
+            "dual_write_active": self.dual_write_active,
+            "platform_writes_enabled": self.platform_writes_enabled,
+            "polyglot_reads_enabled": self.polyglot_reads_enabled,
+            "read_path": self.read_path,
+            "write_targets": list(self.write_targets),
+            "platform_write_targets": list(self.platform_write_targets),
+            "postgres_writes_enabled": self.postgres_writes_enabled,
+            "clickhouse_writes_enabled": self.clickhouse_writes_enabled,
+            "object_storage_writes_enabled": self.object_storage_writes_enabled,
+            "warnings": list(self.warnings),
+        }
+
+
 def summarize_platform_health(report: object) -> PlatformHealthSnapshot:
     postgres = getattr(report, "postgres")
     clickhouse = getattr(report, "clickhouse")
@@ -46,12 +77,75 @@ def summarize_platform_health(report: object) -> PlatformHealthSnapshot:
     )
 
 
+def summarize_cutover_state(config: object | None, *, config_error: str | None = None) -> CutoverStatusSnapshot:
+    postgres_writes = _cutover_flag(config, "enable_postgres_writes")
+    clickhouse_writes = _cutover_flag(config, "enable_clickhouse_writes")
+    object_storage_writes = _cutover_flag(config, "enable_object_storage_writes")
+    polyglot_reads = _cutover_flag(config, "enable_polyglot_reads")
+
+    platform_write_targets = tuple(
+        target
+        for target, enabled in (
+            ("postgres", postgres_writes),
+            ("clickhouse", clickhouse_writes),
+            ("object-storage", object_storage_writes),
+        )
+        if enabled
+    )
+    platform_writes_enabled = bool(platform_write_targets)
+    dual_write_active = platform_writes_enabled
+    write_targets = ("sqlite",) + platform_write_targets
+    read_path = "polyglot-platform" if polyglot_reads else "sqlite"
+
+    warnings: list[str] = []
+    if config_error:
+        warnings.append(f"Platform config error: {config_error}")
+    if clickhouse_writes and not postgres_writes:
+        warnings.append(
+            "ClickHouse writes are enabled without PostgreSQL writes; the collector publisher only emits ClickHouse sink traffic when PostgreSQL outbox writes are enabled."
+        )
+    if polyglot_reads and not platform_writes_enabled:
+        warnings.append(
+            "Polyglot reads are enabled while platform writes are disabled; platform-backed reads may observe stale or empty data."
+        )
+    if platform_writes_enabled and not object_storage_writes:
+        warnings.append(
+            "Platform writes are enabled without object-storage evidence; new batches will not emit replay/audit manifests."
+        )
+
+    if config_error:
+        mode = "config-error"
+    elif not platform_writes_enabled and not polyglot_reads:
+        mode = "sqlite-primary"
+    elif platform_writes_enabled and not polyglot_reads:
+        mode = "dual-write-shadow"
+    elif platform_writes_enabled and polyglot_reads:
+        mode = "polyglot-cutover"
+    else:
+        mode = "read-cutover-without-platform-writes"
+
+    return CutoverStatusSnapshot(
+        mode=mode,
+        dual_write_active=dual_write_active,
+        platform_writes_enabled=platform_writes_enabled,
+        polyglot_reads_enabled=polyglot_reads,
+        read_path=read_path,
+        write_targets=write_targets,
+        platform_write_targets=platform_write_targets,
+        postgres_writes_enabled=postgres_writes,
+        clickhouse_writes_enabled=clickhouse_writes,
+        object_storage_writes_enabled=object_storage_writes,
+        warnings=tuple(warnings),
+    )
+
+
 def render_platform_report_text(report: object) -> str:
     return "\n".join(render_platform_report_lines(report))
 
 
 def render_platform_report_lines(report: object) -> tuple[str, ...]:
     config = dict(getattr(report, "config") or {})
+    cutover = summarize_cutover_state(config)
     lines: list[str] = []
     lines.append(f"Mode: {getattr(report, 'mode', 'unknown')}")
     lines.append("Config snapshot:")
@@ -69,11 +163,23 @@ def render_platform_report_lines(report: object) -> tuple[str, ...]:
         )
     )
     lines.append(f"- Check writes: {'yes' if getattr(report, 'check_writes', False) else 'no'}")
+    lines.extend(_render_cutover_lines(cutover))
     lines.extend(_render_platform_system_lines("PostgreSQL", getattr(report, "postgres", None)))
     lines.extend(_render_platform_system_lines("ClickHouse", getattr(report, "clickhouse", None)))
     lines.extend(_render_platform_object_storage_lines(getattr(report, "object_storage", None)))
     lines.append(f"Healthy: {'yes' if getattr(report, 'ok', False) else 'no'}")
     return tuple(lines)
+
+
+def _render_cutover_lines(snapshot: CutoverStatusSnapshot) -> list[str]:
+    lines = ["Cutover state:"]
+    lines.append(f"- mode: {snapshot.mode}")
+    lines.append(f"- read path: {snapshot.read_path}")
+    lines.append(f"- dual-write active: {'yes' if snapshot.dual_write_active else 'no'}")
+    lines.append(f"- write targets: {', '.join(snapshot.write_targets) or 'n/a'}")
+    if snapshot.warnings:
+        lines.append("- warnings: " + " | ".join(snapshot.warnings))
+    return lines
 
 
 def _render_platform_system_lines(label: str, status: object | None) -> list[str]:
@@ -143,9 +249,25 @@ def _render_platform_object_storage_lines(status: object | None) -> list[str]:
     return lines
 
 
+def _cutover_flag(config: object | None, name: str) -> bool:
+    if config is None:
+        return False
+    if isinstance(config, Mapping):
+        cutover = config.get("cutover")
+        if isinstance(cutover, Mapping):
+            return bool(cutover.get(name, False))
+        return False
+    cutover = getattr(config, "cutover", None)
+    if isinstance(cutover, Mapping):
+        return bool(cutover.get(name, False))
+    return bool(getattr(cutover, name, False))
+
+
 __all__ = [
+    "CutoverStatusSnapshot",
     "PlatformHealthSnapshot",
     "render_platform_report_lines",
     "render_platform_report_text",
+    "summarize_cutover_state",
     "summarize_platform_health",
 ]
