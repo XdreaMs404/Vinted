@@ -62,7 +62,24 @@ def _expect_json(body: str, *, label: str, url: str) -> dict[str, Any]:
         raise VerificationError(f"{label} did not return valid JSON at {url}: {exc}") from exc
 
 
-def verify(base_url: str, *, listing_id: int, timeout: float) -> list[CheckResult]:
+def _expect_cutover_mode(payload: dict[str, Any], *, label: str, url: str, expected_cutover_mode: str | None) -> None:
+    if expected_cutover_mode is None:
+        return
+    cutover = payload.get("cutover") or {}
+    observed_mode = cutover.get("mode")
+    if observed_mode != expected_cutover_mode:
+        raise VerificationError(
+            f"{label} reported cutover mode {observed_mode!r} instead of {expected_cutover_mode!r} at {url}"
+        )
+
+
+def verify(
+    base_url: str,
+    *,
+    listing_id: int,
+    timeout: float,
+    expected_cutover_mode: str | None = None,
+) -> list[CheckResult]:
     prefix = urlsplit(base_url).path.rstrip("/")
     results: list[CheckResult] = []
 
@@ -114,6 +131,21 @@ def verify(base_url: str, *, listing_id: int, timeout: float) -> list[CheckResul
             _expect_contains(body, marker, label=label, url=url)
         results.append(CheckResult(label=label, url=url, status=status, details="html ok"))
 
+    runtime_api_url = _route_url(base_url, "/api/runtime")
+    runtime_api_status, runtime_api_type, runtime_api_body = _fetch(runtime_api_url, timeout=timeout)
+    if "application/json" not in runtime_api_type:
+        raise VerificationError(f"runtime API did not return JSON at {runtime_api_url}: {runtime_api_type}")
+    runtime_payload = _expect_json(runtime_api_body, label="runtime-api", url=runtime_api_url)
+    if runtime_payload.get("status") is None:
+        raise VerificationError(f"runtime API did not expose a runtime status at {runtime_api_url}")
+    _expect_cutover_mode(
+        runtime_payload,
+        label="runtime-api",
+        url=runtime_api_url,
+        expected_cutover_mode=expected_cutover_mode,
+    )
+    results.append(CheckResult(label="runtime-api", url=runtime_api_url, status=runtime_api_status, details="json ok"))
+
     detail_api_url = _route_url(base_url, f"/api/listings/{listing_id}")
     detail_api_status, detail_api_type, detail_api_body = _fetch(detail_api_url, timeout=timeout)
     if "application/json" not in detail_api_type:
@@ -130,6 +162,12 @@ def verify(base_url: str, *, listing_id: int, timeout: float) -> list[CheckResul
     health_payload = _expect_json(health_body, label="health", url=health_url)
     if health_payload.get("status") != "ok":
         raise VerificationError(f"health payload is not ok at {health_url}: {health_payload}")
+    _expect_cutover_mode(
+        health_payload,
+        label="health",
+        url=health_url,
+        expected_cutover_mode=expected_cutover_mode,
+    )
     serving = health_payload.get("serving") or {}
     expected_home = f"{prefix}/" if prefix else "/"
     if serving.get("home") != expected_home:
@@ -143,13 +181,31 @@ def verify(base_url: str, *, listing_id: int, timeout: float) -> list[CheckResul
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify the proxy-aware Vinted Radar serving contract.")
-    parser.add_argument("--base-url", required=True, help="Base URL prefix for the served product, e.g. http://127.0.0.1:8782 or https://radar.example.com/radar")
-    parser.add_argument("--listing-id", required=True, type=int, help="Listing ID to verify through the HTML and JSON detail routes.")
+    parser.add_argument(
+        "--base-url",
+        required=True,
+        help="Base URL prefix for the served product, e.g. http://127.0.0.1:8782 or https://radar.example.com/radar",
+    )
+    parser.add_argument(
+        "--listing-id",
+        required=True,
+        type=int,
+        help="Listing ID to verify through the HTML and JSON detail routes.",
+    )
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds per request.")
+    parser.add_argument(
+        "--expected-cutover-mode",
+        help="Optional cutover mode that /api/runtime and /health must both report, e.g. polyglot-cutover.",
+    )
     args = parser.parse_args()
 
     try:
-        results = verify(_normalize_base_url(args.base_url), listing_id=args.listing_id, timeout=args.timeout)
+        results = verify(
+            _normalize_base_url(args.base_url),
+            listing_id=args.listing_id,
+            timeout=args.timeout,
+            expected_cutover_mode=args.expected_cutover_mode,
+        )
     except VerificationError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1

@@ -12,9 +12,16 @@ The repo now carries the shared configuration contract for the long-term Postgre
 
 Current posture:
 
-- SQLite still remains the live product read path for the existing dashboard and CLI surfaces.
-- The new platform settings define the future durable boundary for bootstrap, migrations, outbox/event delivery, and object-storage manifests.
-- All cutover flags default to `false`, so simply adding these variables does not switch reads or writes automatically.
+- The platform contract now has three explicit operating modes instead of one vague migration state:
+  - `sqlite-primary` — reads stay on SQLite and platform writes stay off.
+  - `dual-write-shadow` — SQLite remains the operator/product read path while PostgreSQL + ClickHouse + object storage are written in parallel for shadow validation.
+  - `polyglot-cutover` — product reads switch to ClickHouse + PostgreSQL while collector writes continue landing in PostgreSQL + ClickHouse + object storage.
+- The platform settings define the durable boundary for bootstrap, migrations, outbox/event delivery, object-storage manifests, and cutover observability.
+- All four cutover flags still default to `false`, so adding platform credentials alone does not switch the product. The live mode is determined by these flags:
+  - `VINTED_RADAR_PLATFORM_ENABLE_POSTGRES_WRITES`
+  - `VINTED_RADAR_PLATFORM_ENABLE_CLICKHOUSE_WRITES`
+  - `VINTED_RADAR_PLATFORM_ENABLE_OBJECT_STORAGE_WRITES`
+  - `VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS`
 
 Install/base dependency additions in `pyproject.toml`:
 
@@ -122,6 +129,61 @@ python -m vinted_radar.cli continuous \
 ```
 
 This keeps the radar alive locally and serves the French market overview home from the same DB while cycles continue in the background process.
+
+## Live cutover smoke proof
+
+Use this sequence when you want a real acceptance check of the cut-over stack instead of only unit tests.
+
+1. Bootstrap the platform services and verify their health:
+
+```bash
+python -m vinted_radar.cli platform-bootstrap
+python -m vinted_radar.cli platform-doctor
+```
+
+2. Before switching reads, reconcile or backfill the historical corpus so PostgreSQL mutable truth, ClickHouse facts, and object-storage evidence are not empty:
+
+```bash
+python -m vinted_radar.cli platform-reconcile --db data/vinted-radar.db
+```
+
+3. Enable the four live cutover flags in the operator environment:
+
+```bash
+export VINTED_RADAR_PLATFORM_ENABLE_POSTGRES_WRITES=true
+export VINTED_RADAR_PLATFORM_ENABLE_CLICKHOUSE_WRITES=true
+export VINTED_RADAR_PLATFORM_ENABLE_OBJECT_STORAGE_WRITES=true
+export VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS=true
+```
+
+4. Run one narrow but real collector cycle:
+
+```bash
+python -m vinted_radar.cli batch \
+  --db data/vinted-radar.db \
+  --page-limit 1 \
+  --max-leaf-categories 1 \
+  --state-refresh-limit 2
+```
+
+5. Prove the end-to-end cutover surfaces, including PostgreSQL mutable truth, ClickHouse ingest, object-storage evidence, and the served product routes:
+
+```bash
+python scripts/verify_cutover_stack.py \
+  --db-path data/vinted-radar.db \
+  --listing-id <id> \
+  --json
+```
+
+What `verify_cutover_stack.py` proves:
+
+- cutover mode is really `polyglot-cutover`
+- `platform-doctor` is healthy across PostgreSQL, ClickHouse, and object storage
+- the ClickHouse ingest consumer can drain pending outbox work without ending in `failed`
+- PostgreSQL mutable truth exposes a latest discovery run, listing current state, runtime controller state, and runtime cycle
+- object storage contains non-marker raw-event, manifest, and parquet objects
+- `/`, `/explorer`, `/runtime`, `/api/runtime`, `/listings/<id>`, `/api/listings/<id>`, and `/health` all work on the cut-over stack
+- `/api/dashboard` is really serving `clickhouse.overview_snapshot`
 
 ## Current entrypoints
 
@@ -288,6 +350,7 @@ Once the server is up, verify the real product routes through the same base URL 
 python scripts/verify_vps_serving.py \
   --base-url https://radar.example.com/radar \
   --listing-id <id> \
+  --expected-cutover-mode polyglot-cutover \
   --timeout 30
 ```
 
@@ -296,6 +359,7 @@ What this contract guarantees:
 - generated links point to the mounted product shell instead of assuming `/`
 - `/`, `/explorer`, `/runtime`, `/listings/<id>`, and `/health` stay reachable through the advertised base URL
 - JSON diagnostics remain available at `/api/dashboard`, `/api/explorer`, `/api/runtime`, and `/api/listings/<id>` behind the same prefix
+- `/api/runtime` and `/health` can both prove the expected cutover mode during production smoke checks
 
 If you install the dashboard as a systemd service on the VPS, pass the same values through `install_services.sh` so the service and the CLI advertise the same mounted product shell:
 
@@ -308,6 +372,36 @@ sudo DASHBOARD_HOST=127.0.0.1 \
 ```
 
 Then run the same smoke check against the public URL prefix before treating the deployment as usable.
+
+### Production cutover + rollback runbook
+
+`install_services.sh` does **not** inject the platform DSNs, object-store credentials, or the four cutover flags by itself. On the VPS, keep those values in a shared systemd drop-in (or an equivalent environment file) that is loaded by the collector and dashboard services.
+
+Recommended cutover sequence:
+
+1. Confirm the current SQLite-backed service is healthy and take a fresh remote SQLite snapshot.
+2. Bootstrap the platform services and run `platform-doctor` until PostgreSQL, ClickHouse, and object storage are all healthy.
+3. Run the historical backfill / reconciliation steps while reads still remain on SQLite.
+4. Install or update the shared service environment with platform credentials plus:
+   - `VINTED_RADAR_PLATFORM_ENABLE_POSTGRES_WRITES=true`
+   - `VINTED_RADAR_PLATFORM_ENABLE_CLICKHOUSE_WRITES=true`
+   - `VINTED_RADAR_PLATFORM_ENABLE_OBJECT_STORAGE_WRITES=true`
+   - `VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS=false`
+5. Restart the collector first and run one narrow shadow cycle.
+6. Run `python scripts/verify_cutover_stack.py --base-url https://radar.example.com/radar --listing-id <id> --json` from the same environment contract or from an operator shell with the same platform variables loaded.
+7. Only after the shadow proof looks healthy, flip `VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS=true` and restart the dashboard / public-serving process.
+8. Re-run both:
+   - `python scripts/verify_cutover_stack.py --base-url https://radar.example.com/radar --listing-id <id> --json`
+   - `python scripts/verify_vps_serving.py --base-url https://radar.example.com/radar --listing-id <id> --expected-cutover-mode polyglot-cutover`
+
+Rollback sequence:
+
+1. Set `VINTED_RADAR_PLATFORM_ENABLE_POLYGLOT_READS=false`.
+2. If the platform itself is unhealthy, also set the three platform-write flags back to `false` so the collector returns to `sqlite-primary`.
+3. Restart the dashboard first so public reads fall back to SQLite immediately.
+4. Restart the collector/runtime service.
+5. Re-run `python scripts/verify_vps_serving.py --base-url https://radar.example.com/radar --listing-id <id>` to confirm the public shell is still healthy on the fallback path.
+6. Keep the failing PostgreSQL / ClickHouse / object-store evidence for diagnosis; do not overwrite the last healthy SQLite snapshot while investigating.
 
 ## Runtime diagnostics
 

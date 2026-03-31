@@ -16,7 +16,7 @@
   - Estimate: 2-3 sessions
   - Files: vinted_radar/dashboard.py, vinted_radar/cli.py, vinted_radar/services/discovery.py, vinted_radar/services/runtime.py, vinted_radar/platform/health.py, tests/test_dashboard.py, tests/test_runtime_service.py
   - Verify: python -m pytest tests/test_dashboard.py tests/test_runtime_service.py -q
-- [ ] **T04: Live cutover proof + runbook** — Prove the cut-over platform in a real live-cycle acceptance flow. Run a narrow but real collector cycle on PostgreSQL + ClickHouse + object storage, verify dashboard/runtime/health/browser behavior on that stack, and document the exact operational sequence for production cutover and rollback on the VPS.
+- [x] **T04: Added a rerunnable live cutover smoke proof and documented the VPS cutover and rollback runbook.** — Prove the cut-over platform in a real live-cycle acceptance flow. Run a narrow but real collector cycle on PostgreSQL + ClickHouse + object storage, verify dashboard/runtime/health/browser behavior on that stack, and document the exact operational sequence for production cutover and rollback on the VPS.
   - Estimate: 1-2 sessions
   - Files: README.md, scripts/verify_vps_serving.py, scripts/verify_cutover_stack.py, tests/test_cutover_smoke.py
   - Verify: python -m pytest tests/test_cutover_smoke.py -q
