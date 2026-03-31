@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from wsgiref.util import setup_testing_defaults
 
+from tests.clickhouse_product_test_support import make_clickhouse_product_client
 from vinted_radar.dashboard import (
     DashboardApplication,
     DashboardFilters,
@@ -595,6 +596,48 @@ def test_dashboard_application_serves_html_and_json_views(tmp_path: Path) -> Non
     assert health_payload["acquisition"]["latest_state_refresh_summary"]["anti_bot_challenge_count"] == 1
     assert health_payload["serving"]["home"] == "/"
     assert health_payload["serving"]["detail_example"] == "/listings/1"
+
+
+def test_dashboard_application_serves_clickhouse_backed_product_routes(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+    app = DashboardApplication(
+        db_path,
+        now="2026-03-19T12:00:00+00:00",
+        clickhouse_client=make_clickhouse_product_client(),
+        clickhouse_database="vinted_radar",
+    )
+
+    dashboard_status, dashboard_body, dashboard_headers = _call_app(app, "/api/dashboard", "state=active")
+    explorer_status, explorer_body, explorer_headers = _call_app(app, "/api/explorer", "q=robe&page_size=2")
+    detail_status, detail_body, detail_headers = _call_app(app, "/api/listings/9002")
+    health_status, health_body, _ = _call_app(app, "/health")
+
+    assert dashboard_status == "200 OK"
+    assert dashboard_headers["Content-Type"].startswith("application/json")
+    dashboard_payload = json.loads(dashboard_body)
+    assert dashboard_payload["request"]["primary_payload_source"] == "clickhouse.overview_snapshot"
+    assert dashboard_payload["summary"]["inventory"]["tracked_listings"] == 4
+    assert dashboard_payload["featured_listings"][0]["detail_api"] == "/api/listings/9003"
+
+    assert explorer_status == "200 OK"
+    assert explorer_headers["Content-Type"].startswith("application/json")
+    explorer_payload = json.loads(explorer_body)
+    assert explorer_payload["results"]["total_listings"] == 4
+    assert [item["listing_id"] for item in explorer_payload["items"]] == [9003, 9001]
+
+    assert detail_status == "200 OK"
+    assert detail_headers["Content-Type"].startswith("application/json")
+    detail_payload = json.loads(detail_body)
+    assert detail_payload["listing_id"] == 9002
+    assert detail_payload["state_code"] == "sold_probable"
+    assert detail_payload["provenance"]["state_signal"]["source"] == "historique radar après probe dégradée"
+
+    assert health_status == "200 OK"
+    health_payload = json.loads(health_body)
+    assert health_payload["tracked_listings"] == 4
+    assert health_payload["acquisition"]["status"] == "degraded"
+
 
 
 def test_dashboard_application_supports_base_path_links_and_prefixed_routes(tmp_path: Path) -> None:

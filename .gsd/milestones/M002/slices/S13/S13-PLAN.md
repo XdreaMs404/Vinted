@@ -12,7 +12,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/platform/clickhouse_ingest.py, vinted_radar/platform/outbox.py, vinted_radar/cli.py, tests/test_clickhouse_ingest.py
   - Verify: python -m pytest tests/test_clickhouse_ingest.py -q
-- [ ] **T03: Product query adapters on ClickHouse** — Build ClickHouse-backed analytical query adapters for overview, explorer, and detail. Move the heavy read paths out of the SQLite-oriented repository by introducing dedicated ClickHouse query modules and product-facing adapters that preserve existing payload/drill-down contracts while sourcing their aggregates and listing sets from ClickHouse.
+- [x] **T03: Added a repository-shaped ClickHouse query adapter so overview, explorer, and listing detail can read analytical state from ClickHouse while preserving the existing dashboard route contracts.** — Build ClickHouse-backed analytical query adapters for overview, explorer, and detail. Move the heavy read paths out of the SQLite-oriented repository by introducing dedicated ClickHouse query modules and product-facing adapters that preserve existing payload/drill-down contracts while sourcing their aggregates and listing sets from ClickHouse.
   - Estimate: 2-3 sessions
   - Files: vinted_radar/query/overview_clickhouse.py, vinted_radar/query/explorer_clickhouse.py, vinted_radar/query/detail_clickhouse.py, vinted_radar/dashboard.py, vinted_radar/cli.py, tests/test_clickhouse_queries.py, tests/test_dashboard.py
   - Verify: python -m pytest tests/test_clickhouse_queries.py tests/test_dashboard.py -q

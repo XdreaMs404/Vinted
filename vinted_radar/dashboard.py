@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import html
@@ -8,9 +9,11 @@ from pathlib import Path
 import re
 from threading import Thread
 from typing import Any
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 
+from vinted_radar.platform import load_platform_config
+from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import load_listing_score_detail
 from vinted_radar.serving import RouteContext, normalize_base_path
@@ -142,10 +145,18 @@ class DashboardApplication:
         now: str | None = None,
         base_path: str | None = None,
         public_base_url: str | None = None,
+        query_backend_factory=None,
+        clickhouse_client: object | None = None,
+        clickhouse_database: str | None = None,
+        enable_polyglot_reads: bool | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.now = now
         self.route_context = RouteContext.from_options(base_path=base_path, public_base_url=public_base_url)
+        self.query_backend_factory = query_backend_factory
+        self.clickhouse_client = clickhouse_client
+        self.clickhouse_database = clickhouse_database
+        self.enable_polyglot_reads = enable_polyglot_reads
 
     def __call__(self, environ: dict[str, Any], start_response) -> list[bytes]:
         route_context = self._request_route_context(environ)
@@ -154,41 +165,41 @@ class DashboardApplication:
 
         if path in {"", "/"}:
             filters = DashboardFilters.from_query_params(params)
-            with RadarRepository(self.db_path) as repository:
-                payload = build_dashboard_payload(repository, filters=filters, now=self.now, route_context=route_context)
+            with self._open_query_backend() as query_backend:
+                payload = build_dashboard_payload(query_backend, filters=filters, now=self.now, route_context=route_context)
             body = render_dashboard_html(payload)
             return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
 
         if path == "/api/dashboard":
             filters = DashboardFilters.from_query_params(params)
-            with RadarRepository(self.db_path) as repository:
-                payload = build_dashboard_payload(repository, filters=filters, now=self.now, route_context=route_context)
+            with self._open_query_backend() as query_backend:
+                payload = build_dashboard_payload(query_backend, filters=filters, now=self.now, route_context=route_context)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
         if path == "/explorer":
             filters = ExplorerFilters.from_query_params(params)
-            with RadarRepository(self.db_path) as repository:
-                payload = build_explorer_payload(repository, filters=filters, now=self.now, route_context=route_context)
+            with self._open_query_backend() as query_backend:
+                payload = build_explorer_payload(query_backend, filters=filters, now=self.now, route_context=route_context)
             body = render_explorer_html(payload)
             return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
 
         if path == "/api/explorer":
             filters = ExplorerFilters.from_query_params(params)
-            with RadarRepository(self.db_path) as repository:
-                payload = build_explorer_payload(repository, filters=filters, now=self.now, route_context=route_context)
+            with self._open_query_backend() as query_backend:
+                payload = build_explorer_payload(query_backend, filters=filters, now=self.now, route_context=route_context)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
         if path == "/runtime":
-            with RadarRepository(self.db_path) as repository:
-                payload = build_runtime_payload(repository, now=self.now, route_context=route_context)
+            with self._open_query_backend() as query_backend:
+                payload = build_runtime_payload(query_backend, now=self.now, route_context=route_context)
             body = render_runtime_html(payload)
             return _respond(start_response, "200 OK", body, content_type="text/html; charset=utf-8")
 
         if path == "/api/runtime":
-            with RadarRepository(self.db_path) as repository:
-                payload = repository.runtime_status(limit=8, now=self.now)
+            with self._open_query_backend() as query_backend:
+                payload = query_backend.runtime_status(limit=8, now=self.now)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
@@ -197,9 +208,9 @@ class DashboardApplication:
             if listing_id is None:
                 return _respond(start_response, "404 Not Found", "Not Found", content_type="text/plain; charset=utf-8")
             explorer_filters = ExplorerFilters.from_query_params(params)
-            with RadarRepository(self.db_path) as repository:
+            with self._open_query_backend() as query_backend:
                 detail = build_listing_detail_payload(
-                    repository,
+                    query_backend,
                     listing_id=listing_id,
                     now=self.now,
                     route_context=route_context,
@@ -215,9 +226,9 @@ class DashboardApplication:
             if listing_id is None:
                 return _respond(start_response, "404 Not Found", json.dumps({"error": "listing_not_found"}), content_type="application/json; charset=utf-8")
             explorer_filters = ExplorerFilters.from_query_params(params)
-            with RadarRepository(self.db_path) as repository:
+            with self._open_query_backend() as query_backend:
                 detail = build_listing_detail_payload(
-                    repository,
+                    query_backend,
                     listing_id=listing_id,
                     now=self.now,
                     route_context=route_context,
@@ -229,16 +240,16 @@ class DashboardApplication:
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
         if path == "/health":
-            with RadarRepository(self.db_path) as repository:
-                coverage = repository.coverage_summary()
-                freshness = repository.freshness_summary(now=self.now)
-                runtime_status = repository.runtime_status(limit=1, now=self.now)
+            with self._open_query_backend() as query_backend:
+                coverage = query_backend.coverage_summary()
+                freshness = query_backend.overview_snapshot(now=self.now)["summary"]["inventory"]
+                runtime_status = query_backend.runtime_status(limit=1, now=self.now)
             body = json.dumps(
                 {
                     "status": "ok",
                     "db_path": str(self.db_path),
                     "has_run": coverage is not None,
-                    "tracked_listings": int(freshness["overall"].get("tracked_listings") or 0),
+                    "tracked_listings": int(freshness.get("tracked_listings") or 0),
                     "current_runtime_status": runtime_status.get("status"),
                     "runtime_controller": runtime_status.get("controller"),
                     "latest_runtime_cycle": runtime_status["latest_cycle"],
@@ -261,6 +272,41 @@ class DashboardApplication:
 
         return _respond(start_response, "404 Not Found", "Not Found", content_type="text/plain; charset=utf-8")
 
+    @contextmanager
+    def _open_query_backend(self):
+        with RadarRepository(self.db_path) as repository:
+            if self.query_backend_factory is not None:
+                yield self.query_backend_factory(repository)
+                return
+
+            if self.clickhouse_client is not None:
+                database = self.clickhouse_database or load_platform_config().clickhouse.database
+                yield ClickHouseProductQueryAdapter(
+                    repository=repository,
+                    clickhouse_client=self.clickhouse_client,
+                    database=database,
+                )
+                return
+
+            config = load_platform_config()
+            use_polyglot_reads = config.cutover.enable_polyglot_reads if self.enable_polyglot_reads is None else self.enable_polyglot_reads
+            if not use_polyglot_reads:
+                yield repository
+                return
+
+            database = self.clickhouse_database or config.clickhouse.database
+            client = _get_clickhouse_client(config, database=database)
+            try:
+                yield ClickHouseProductQueryAdapter(
+                    repository=repository,
+                    clickhouse_client=client,
+                    database=database,
+                )
+            finally:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
+
     def _request_route_context(self, environ: dict[str, Any]) -> RouteContext:
         if self.route_context.base_path or self.route_context.public_base_url:
             return self.route_context
@@ -281,6 +327,21 @@ class DashboardApplication:
                 stripped = path[len(prefix) :]
                 return stripped or "/"
         return path
+
+
+def _get_clickhouse_client(config, *, database: str):
+    import clickhouse_connect
+
+    parts = urlsplit(config.clickhouse.url)
+    return clickhouse_connect.get_client(
+        host=parts.hostname or "127.0.0.1",
+        port=parts.port or (8443 if parts.scheme == "https" else 8123),
+        username=config.clickhouse.username,
+        password=config.clickhouse.password,
+        database=database,
+        secure=parts.scheme == "https",
+    )
+
 
 
 def serve_dashboard(
@@ -336,7 +397,7 @@ def build_dashboard_payload(
         "runtime": overview["runtime"],
         "request": {
             "comparison_limit": comparison_limit,
-            "primary_payload_source": "repository.overview_snapshot",
+            "primary_payload_source": getattr(repository, "overview_snapshot_source", "repository.overview_snapshot"),
             "legacy_query_filters": {
                 "root": filters.root,
                 "state": filters.state,

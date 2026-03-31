@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 import json
 import re
 
 from vinted_radar.card_payload import normalize_card_snapshot
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_FRESH_FOLLOWUP_HOURS = 24.0
+_STALE_FOLLOWUP_HOURS = 72.0
 
 
 def fetch_clickhouse_state_inputs(
@@ -29,7 +31,7 @@ def fetch_clickhouse_state_inputs(
             count() AS sighting_count
         FROM {safe_database}.fact_listing_seen_events
         {filter_sql}
-        GROUP BY listing_id, observation_key
+        GROUP BY listing_id, ifNull(run_id, event_id)
     ),
     summary AS (
         SELECT
@@ -38,11 +40,75 @@ def fetch_clickhouse_state_inputs(
             sum(sighting_count) AS total_sightings,
             min(observed_at) AS first_seen_at,
             max(observed_at) AS last_seen_at,
-            argMax(observation_key, observed_at) AS last_observed_run_id,
-            arraySort(groupUniqArray(observation_key)) AS seen_run_ids,
-            arraySort(groupArray(observed_at)) AS observed_points
+            if(
+                count() < 2,
+                CAST(NULL AS Nullable(Float64)),
+                round(
+                    arrayAvg(
+                        arrayMap(
+                            (current_point, previous_point) -> dateDiff('second', previous_point, current_point) / 3600.0,
+                            arrayPopFront(arraySort(groupArray(observed_at))),
+                            arrayPopBack(arraySort(groupArray(observed_at)))
+                        )
+                    ),
+                    2
+                )
+            ) AS average_revisit_hours,
+            argMax(observation_key, observed_at) AS last_observed_run_id
         FROM observation_rows
         GROUP BY listing_id
+    ),
+    catalog_scan_runs AS (
+        SELECT
+            primary_catalog_id,
+            ifNull(run_id, event_id) AS scan_run_id,
+            max(observed_at) AS scan_observed_at
+        FROM {safe_database}.fact_listing_seen_events
+        GROUP BY primary_catalog_id, ifNull(run_id, event_id)
+    ),
+    catalog_run_listing_presence AS (
+        SELECT
+            primary_catalog_id,
+            ifNull(run_id, event_id) AS scan_run_id,
+            listing_id
+        FROM {safe_database}.fact_listing_seen_events
+        GROUP BY primary_catalog_id, ifNull(run_id, event_id), listing_id
+    ),
+    latest_primary_scan AS (
+        SELECT
+            primary_catalog_id,
+            scan_run_id AS latest_primary_scan_run_id,
+            scan_observed_at AS latest_primary_scan_at
+        FROM (
+            SELECT
+                primary_catalog_id,
+                scan_run_id,
+                scan_observed_at,
+                row_number() OVER (
+                    PARTITION BY primary_catalog_id
+                    ORDER BY scan_observed_at DESC, scan_run_id DESC
+                ) AS scan_rank
+            FROM catalog_scan_runs
+        )
+        WHERE scan_rank = 1
+    ),
+    follow_up_miss AS (
+        SELECT
+            summary.listing_id AS listing_id,
+            count() AS follow_up_miss_count,
+            max(catalog_scan_runs.scan_observed_at) AS latest_follow_up_miss_at
+        FROM summary
+        INNER JOIN {safe_database}.serving_listing_latest_seen FINAL AS latest_seen
+            ON latest_seen.listing_id = summary.listing_id
+        INNER JOIN catalog_scan_runs
+            ON catalog_scan_runs.primary_catalog_id = latest_seen.primary_catalog_id
+           AND catalog_scan_runs.scan_observed_at > summary.last_seen_at
+        LEFT JOIN catalog_run_listing_presence
+            ON catalog_run_listing_presence.primary_catalog_id = catalog_scan_runs.primary_catalog_id
+           AND catalog_run_listing_presence.scan_run_id = catalog_scan_runs.scan_run_id
+           AND catalog_run_listing_presence.listing_id = summary.listing_id
+        WHERE catalog_run_listing_presence.listing_id IS NULL
+        GROUP BY summary.listing_id
     )
     SELECT
         summary.listing_id,
@@ -50,22 +116,8 @@ def fetch_clickhouse_state_inputs(
         summary.total_sightings,
         summary.first_seen_at,
         summary.last_seen_at,
-        if(
-            length(summary.observed_points) < 2,
-            CAST(NULL AS Nullable(Float64)),
-            round(
-                arrayAvg(
-                    arrayMap(
-                        (current_point, previous_point) -> dateDiff('second', previous_point, current_point) / 3600.0,
-                        arrayPopFront(summary.observed_points),
-                        arrayPopBack(summary.observed_points)
-                    )
-                ),
-                2
-            )
-        ) AS average_revisit_hours,
+        summary.average_revisit_hours,
         summary.last_observed_run_id,
-        summary.seen_run_ids,
         latest_seen.canonical_url,
         latest_seen.source_url,
         latest_seen.title,
@@ -87,6 +139,10 @@ def fetch_clickhouse_state_inputs(
         latest_seen.primary_catalog_id,
         latest_seen.primary_root_catalog_id,
         latest_seen.category_path AS primary_catalog_path,
+        latest_primary_scan.latest_primary_scan_run_id,
+        latest_primary_scan.latest_primary_scan_at,
+        ifNull(follow_up_miss.follow_up_miss_count, 0) AS follow_up_miss_count,
+        follow_up_miss.latest_follow_up_miss_at,
         latest_probe.probed_at AS latest_probe_probed_at,
         latest_probe.requested_url AS latest_probe_requested_url,
         latest_probe.final_url AS latest_probe_final_url,
@@ -97,11 +153,58 @@ def fetch_clickhouse_state_inputs(
     FROM summary
     INNER JOIN {safe_database}.serving_listing_latest_seen FINAL AS latest_seen
         ON latest_seen.listing_id = summary.listing_id
+    LEFT JOIN latest_primary_scan
+        ON latest_primary_scan.primary_catalog_id = latest_seen.primary_catalog_id
+    LEFT JOIN follow_up_miss
+        ON follow_up_miss.listing_id = summary.listing_id
     LEFT JOIN {safe_database}.serving_listing_latest_probe FINAL AS latest_probe
         ON latest_probe.listing_id = summary.listing_id
     ORDER BY summary.last_seen_at DESC, summary.listing_id DESC
     """
     return _query_rows(clickhouse_client, sql)
+
+
+
+def load_clickhouse_state_inputs(
+    clickhouse_client: object,
+    *,
+    database: str,
+    now: str | None = None,
+    listing_id: int | None = None,
+) -> list[dict[str, object]]:
+    now_dt = _coerce_now(now)
+    rows = fetch_clickhouse_state_inputs(
+        clickhouse_client,
+        database=database,
+        listing_id=listing_id,
+    )
+    inputs: list[dict[str, object]] = []
+    for row in rows:
+        enriched = dict(row)
+        age_hours = _hours_between(str(enriched["last_seen_at"]), now_dt)
+        enriched["last_seen_age_hours"] = round(age_hours, 2)
+        enriched["freshness_bucket"] = _freshness_bucket(int(enriched.get("observation_count") or 0), age_hours)
+        enriched["signal_completeness"] = _signal_completeness(enriched)
+        enriched["average_revisit_hours"] = None if enriched.get("average_revisit_hours") is None else round(float(enriched["average_revisit_hours"]), 2)
+        latest_probe = _hydrate_latest_probe(enriched)
+        enriched["latest_probe"] = latest_probe
+        enriched["seen_in_latest_primary_scan"] = (
+            enriched.get("latest_primary_scan_run_id") is not None
+            and enriched.get("latest_primary_scan_run_id") == enriched.get("last_observed_run_id")
+        )
+        for transient_field in (
+            "latest_probe_probed_at",
+            "latest_probe_requested_url",
+            "latest_probe_final_url",
+            "latest_probe_response_status",
+            "latest_probe_outcome",
+            "latest_probe_detail_json",
+            "latest_probe_error_message",
+        ):
+            enriched.pop(transient_field, None)
+        inputs.append(enriched)
+    return inputs
+
 
 
 def fetch_clickhouse_listing_timeline(
@@ -124,7 +227,7 @@ def fetch_clickhouse_listing_timeline(
         argMax(source_url, observed_at) AS source_url,
         argMax(source_catalog_id, observed_at) AS source_catalog_id,
         argMax(source_page_number, observed_at) AS source_page_number,
-        argMax(card_position, observed_at) AS first_card_position,
+        min(card_position) AS first_card_position,
         count() AS sighting_count,
         argMax(title, observed_at) AS title,
         argMax(brand, observed_at) AS brand,
@@ -146,6 +249,56 @@ def fetch_clickhouse_listing_timeline(
     """
     rows = _query_rows(clickhouse_client, sql)
     return [_hydrate_observation_row(row) for row in rows]
+
+
+
+def load_clickhouse_listing_history(
+    clickhouse_client: object,
+    *,
+    database: str,
+    listing_id: int,
+    now: str | None = None,
+    limit: int = 20,
+) -> dict[str, object] | None:
+    inputs = load_clickhouse_state_inputs(
+        clickhouse_client,
+        database=database,
+        now=now,
+        listing_id=listing_id,
+    )
+    if not inputs:
+        return None
+    summary_input = inputs[0]
+    summary = {
+        "listing_id": summary_input["listing_id"],
+        "observation_count": int(summary_input.get("observation_count") or 0),
+        "total_sightings": int(summary_input.get("total_sightings") or 0),
+        "first_seen_at": summary_input.get("first_seen_at"),
+        "last_seen_at": summary_input.get("last_seen_at"),
+        "average_revisit_hours": summary_input.get("average_revisit_hours"),
+        "canonical_url": summary_input.get("canonical_url"),
+        "title": summary_input.get("title"),
+        "brand": summary_input.get("brand"),
+        "size_label": summary_input.get("size_label"),
+        "condition_label": summary_input.get("condition_label"),
+        "price_amount_cents": summary_input.get("price_amount_cents"),
+        "price_currency": summary_input.get("price_currency"),
+        "total_price_amount_cents": summary_input.get("total_price_amount_cents"),
+        "total_price_currency": summary_input.get("total_price_currency"),
+        "image_url": summary_input.get("image_url"),
+        "root_title": summary_input.get("root_title"),
+        "last_seen_age_hours": summary_input.get("last_seen_age_hours"),
+        "freshness_bucket": summary_input.get("freshness_bucket"),
+        "signal_completeness": summary_input.get("signal_completeness"),
+    }
+    timeline = fetch_clickhouse_listing_timeline(
+        clickhouse_client,
+        database=database,
+        listing_id=listing_id,
+        limit=limit,
+    )
+    return {"summary": summary, "timeline": timeline}
+
 
 
 def fetch_clickhouse_price_context_peer_prices(
@@ -202,6 +355,34 @@ def fetch_clickhouse_price_context_peer_prices(
     return [int(row["price_amount_cents"]) for row in rows if row.get("price_amount_cents") is not None]
 
 
+
+def _hydrate_latest_probe(row: dict[str, object]) -> dict[str, object] | None:
+    if all(
+        row.get(field) in {None, ""}
+        for field in (
+            "latest_probe_probed_at",
+            "latest_probe_requested_url",
+            "latest_probe_final_url",
+            "latest_probe_response_status",
+            "latest_probe_outcome",
+            "latest_probe_detail_json",
+            "latest_probe_error_message",
+        )
+    ):
+        return None
+    return {
+        "listing_id": row.get("listing_id"),
+        "probed_at": row.get("latest_probe_probed_at"),
+        "requested_url": row.get("latest_probe_requested_url"),
+        "final_url": row.get("latest_probe_final_url"),
+        "response_status": row.get("latest_probe_response_status"),
+        "probe_outcome": row.get("latest_probe_outcome"),
+        "detail": _load_json_object(row.get("latest_probe_detail_json")),
+        "error_message": row.get("latest_probe_error_message"),
+    }
+
+
+
 def _hydrate_observation_row(row: Mapping[str, object]) -> dict[str, object]:
     raw_payload = _load_json_object(row.get("raw_card_payload_json"))
     fallback = normalize_card_snapshot(
@@ -229,6 +410,7 @@ def _hydrate_observation_row(row: Mapping[str, object]) -> dict[str, object]:
     return hydrated
 
 
+
 def _query_rows(clickhouse_client: object, sql: str) -> list[dict[str, object]]:
     result = clickhouse_client.query(sql)
     rows = getattr(result, "result_rows", ()) or ()
@@ -249,6 +431,7 @@ def _query_rows(clickhouse_client: object, sql: str) -> list[dict[str, object]]:
     ]
 
 
+
 def _normalize_value(value: object) -> object:
     if isinstance(value, datetime):
         return value.isoformat()
@@ -261,6 +444,48 @@ def _normalize_value(value: object) -> object:
     return value
 
 
+
+def _coerce_now(now: str | None) -> datetime:
+    if now is None:
+        return datetime.now(UTC)
+    return datetime.fromisoformat(now)
+
+
+
+def _hours_between(timestamp: str, now: datetime) -> float:
+    observed_at = datetime.fromisoformat(timestamp)
+    return max((now - observed_at).total_seconds() / 3600.0, 0.0)
+
+
+
+def _freshness_bucket(observation_count: int, age_hours: float) -> str:
+    if observation_count <= 1:
+        return "first-pass-only"
+    if age_hours <= _FRESH_FOLLOWUP_HOURS:
+        return "fresh-followup"
+    if age_hours <= _STALE_FOLLOWUP_HOURS:
+        return "aging-followup"
+    return "stale-followup"
+
+
+
+def _signal_completeness(row: dict[str, object]) -> int:
+    return sum(
+        1
+        for field in (
+            "title",
+            "brand",
+            "size_label",
+            "condition_label",
+            "price_amount_cents",
+            "total_price_amount_cents",
+            "image_url",
+        )
+        if row.get(field) is not None
+    )
+
+
+
 def _safe_identifier(value: str, *, field_name: str) -> str:
     cleaned = str(value).strip()
     if not cleaned or _IDENTIFIER_RE.fullmatch(cleaned) is None:
@@ -268,8 +493,10 @@ def _safe_identifier(value: str, *, field_name: str) -> str:
     return cleaned
 
 
+
 def _sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
 
 
 def _load_json_object(value: object) -> dict[str, object]:
@@ -282,11 +509,13 @@ def _load_json_object(value: object) -> dict[str, object]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+
 def _optional_str(value: object) -> str | None:
     if value is None:
         return None
     text = str(value)
     return text if text else None
+
 
 
 def _norm_text(value: object) -> str | None:
@@ -300,4 +529,6 @@ __all__ = [
     "fetch_clickhouse_listing_timeline",
     "fetch_clickhouse_price_context_peer_prices",
     "fetch_clickhouse_state_inputs",
+    "load_clickhouse_listing_history",
+    "load_clickhouse_state_inputs",
 ]

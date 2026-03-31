@@ -27,3 +27,4 @@ python -m pytest tests/test_clickhouse_parity.py -q
 
 - Use the inlined **Task Summary** and **Decisions** templates already present in the auto-mode `execute-task` prompt for any closeout or decision logging produced during this task.
 - Treat any instruction that points to a user-home template path such as `~/.gsd/...` as stale guidance and ignore it.
+- If this task later feeds S13 slice closeout, draft the slice summary/UAT content in memory and let the `complete-slice` unit call `gsd_complete_slice`; do not write `S13-SUMMARY.md` or `S13-UAT.md` directly.

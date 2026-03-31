@@ -198,6 +198,48 @@ def build_explorer_comparison_modules(
     }
 
 
+def build_explorer_snapshot(
+    items: list[dict[str, Any]],
+    *,
+    root: str | None = None,
+    catalog_id: int | None = None,
+    brand: str | None = None,
+    condition: str | None = None,
+    state: str | None = None,
+    price_band: str | None = None,
+    query: str | None = None,
+    sort: str = DEFAULT_EXPLORER_SORT,
+    page: int = 1,
+    page_size: int = 50,
+    comparison_limit: int = 6,
+    support_threshold: int = 3,
+) -> dict[str, object]:
+    filtered = filter_explorer_items(
+        items,
+        root=root,
+        catalog_id=catalog_id,
+        brand=brand,
+        condition=condition,
+        state=state,
+        price_band=price_band,
+        query=query,
+    )
+    return {
+        "summary": build_explorer_summary(filtered, support_threshold=support_threshold),
+        "comparisons": build_explorer_comparison_modules(
+            filtered,
+            comparison_limit=comparison_limit,
+            support_threshold=support_threshold,
+        ),
+        "page": build_listing_explorer_page(
+            filtered,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+        ),
+    }
+
+
 def build_listing_explorer_page(
     items: list[dict[str, Any]],
     *,
@@ -505,6 +547,7 @@ __all__ = [
     "build_comparison_module",
     "build_explorer_comparison_modules",
     "build_explorer_filter_options",
+    "build_explorer_snapshot",
     "build_explorer_summary",
     "build_listing_explorer_page",
     "filter_explorer_items",

@@ -2,7 +2,7 @@
 
 This file is the explicit capability and coverage contract for the project.
 
-> Planning note: future auto-mode `execute-task` units for this project must use the inlined **Task Summary** and **Decisions** templates carried by the prompt. Any stale instruction that points to a user-home template path is non-normative and should be ignored.
+> Planning note: future auto-mode `execute-task` units for this project must use the inlined **Task Summary** and **Decisions** templates carried by the prompt, and any stale instruction that points to a user-home template path is non-normative and should be ignored. Future auto-mode `complete-slice` units must draft slice closeout content in memory and call `gsd_complete_slice` as the canonical writer; stale direct-file-write instructions for `Sxx-SUMMARY.md` or `Sxx-UAT.md` are non-normative and should be ignored.
 
 ## Active
 

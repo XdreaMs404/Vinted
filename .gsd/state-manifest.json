@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T07:04:16.628Z",
+  "exported_at": "2026-03-31T11:27:22.108Z",
   "milestones": [
     {
       "id": "M001",
@@ -1274,19 +1274,30 @@
       "milestone_id": "M002",
       "slice_id": "S13",
       "id": "T03",
-      "title": "Product query adapters on ClickHouse",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added a repository-shaped ClickHouse query adapter so overview, explorer, and listing detail can read analytical state from ClickHouse while preserving the existing dashboard route contracts.",
+      "status": "complete",
+      "one_liner": "Added a repository-shaped ClickHouse query adapter so overview, explorer, and listing detail can read analytical state from ClickHouse while preserving the existing dashboard route contracts.",
+      "narrative": "Added vinted_radar.query.overview_clickhouse.ClickHouseProductQueryAdapter, a repository-shaped backend that exposes overview_snapshot, explorer_snapshot, listing_explorer_page, listing_state_inputs, listing_history, and peer-price context lookups over ClickHouse facts and latest-serving tables. Extended vinted_radar.query.detail_clickhouse with repository-shaped state-input and history loaders, added an explorer snapshot helper in vinted_radar.query.explorer_clickhouse, and wired DashboardApplication so routes can serve the same overview/explorer/detail payloads from ClickHouse either by explicit injection or by polyglot-read configuration. Kept runtime and coverage delegation on the existing repository boundary and surfaced the active backend through request.primary_payload_source in the dashboard API for operator-visible diagnostics.",
+      "verification_result": "Verified the touched Python modules compile with python3 -m py_compile, then ran python3 -m pytest tests/test_clickhouse_queries.py tests/test_dashboard.py -q. The new tests cover the ClickHouse adapter overview/explorer/detail contracts, same-now cache reuse, and dashboard route delivery over the ClickHouse-backed product adapter.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T11:27:22.081Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Used python3 instead of python because this shell does not expose a python alias. No slice-plan invalidation.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/dashboard.py",
+        "vinted_radar/query/overview_clickhouse.py",
+        "vinted_radar/query/detail_clickhouse.py",
+        "vinted_radar/query/explorer_clickhouse.py",
+        "tests/clickhouse_product_test_support.py",
+        "tests/test_clickhouse_queries.py",
+        "tests/test_dashboard.py",
+        ".gsd/milestones/M002/slices/S13/tasks/T03-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "D051: switch dashboard product reads through a repository-shaped ClickHouse adapter so route payload builders stay stable during cutover."
+      ],
+      "full_summary_md": "---\nid: T03\nparent: S13\nmilestone: M002\nkey_files:\n  - vinted_radar/dashboard.py\n  - vinted_radar/query/overview_clickhouse.py\n  - vinted_radar/query/detail_clickhouse.py\n  - vinted_radar/query/explorer_clickhouse.py\n  - tests/clickhouse_product_test_support.py\n  - tests/test_clickhouse_queries.py\n  - tests/test_dashboard.py\n  - .gsd/milestones/M002/slices/S13/tasks/T03-SUMMARY.md\nkey_decisions:\n  - D051: switch dashboard product reads through a repository-shaped ClickHouse adapter so route payload builders stay stable during cutover.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T11:27:22.081Z\nblocker_discovered: false\n---\n\n# T03: Added a repository-shaped ClickHouse query adapter so overview, explorer, and listing detail can read analytical state from ClickHouse while preserving the existing dashboard route contracts.\n\n**Added a repository-shaped ClickHouse query adapter so overview, explorer, and listing detail can read analytical state from ClickHouse while preserving the existing dashboard route contracts.**\n\n## What Happened\n\nAdded vinted_radar.query.overview_clickhouse.ClickHouseProductQueryAdapter, a repository-shaped backend that exposes overview_snapshot, explorer_snapshot, listing_explorer_page, listing_state_inputs, listing_history, and peer-price context lookups over ClickHouse facts and latest-serving tables. Extended vinted_radar.query.detail_clickhouse with repository-shaped state-input and history loaders, added an explorer snapshot helper in vinted_radar.query.explorer_clickhouse, and wired DashboardApplication so routes can serve the same overview/explorer/detail payloads from ClickHouse either by explicit injection or by polyglot-read configuration. Kept runtime and coverage delegation on the existing repository boundary and surfaced the active backend through request.primary_payload_source in the dashboard API for operator-visible diagnostics.\n\n## Verification\n\nVerified the touched Python modules compile with python3 -m py_compile, then ran python3 -m pytest tests/test_clickhouse_queries.py tests/test_dashboard.py -q. The new tests cover the ClickHouse adapter overview/explorer/detail contracts, same-now cache reuse, and dashboard route delivery over the ClickHouse-backed product adapter.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m py_compile vinted_radar/dashboard.py vinted_radar/query/detail_clickhouse.py vinted_radar/query/explorer_clickhouse.py vinted_radar/query/overview_clickhouse.py tests/clickhouse_product_test_support.py tests/test_clickhouse_queries.py tests/test_dashboard.py` | 0 | ✅ pass | 90ms |\n| 2 | `python3 -m pytest tests/test_clickhouse_queries.py tests/test_dashboard.py -q` | 0 | ✅ pass | 850ms |\n\n\n## Deviations\n\nUsed python3 instead of python because this shell does not expose a python alias. No slice-plan invalidation.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/dashboard.py`\n- `vinted_radar/query/overview_clickhouse.py`\n- `vinted_radar/query/detail_clickhouse.py`\n- `vinted_radar/query/explorer_clickhouse.py`\n- `tests/clickhouse_product_test_support.py`\n- `tests/test_clickhouse_queries.py`\n- `tests/test_dashboard.py`\n- `.gsd/milestones/M002/slices/S13/tasks/T03-SUMMARY.md`\n",
       "description": "Build ClickHouse-backed analytical query adapters for overview, explorer, and detail. Move the heavy read paths out of the SQLite-oriented repository by introducing dedicated ClickHouse query modules and product-facing adapters that preserve existing payload/drill-down contracts while sourcing their aggregates and listing sets from ClickHouse.",
       "estimate": "2-3 sessions",
       "files": [
@@ -2251,6 +2262,42 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 170,
+      "id": "D049",
+      "when_context": "Cross-device GSD 2 setup for the Vinted project",
+      "scope": "tooling",
+      "decision": "How the llm-credential-failover extension is distributed across machines for this project",
+      "choice": "Version the extension as a project-local GSD extension under .gsd/extensions/llm-credential-failover and keep credentials/backoff state local in ~/.gsd/agent/",
+      "rationale": "The extension was previously installed only as a global per-machine GSD extension, so cloning the GitHub repository on another machine did not reproduce the setup. Moving the code into the repository makes the behavior portable with git pull while avoiding committing auth.json, OAuth tokens, or other per-machine secret state.",
+      "revisable": "Yes",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 171,
+      "id": "D050",
+      "when_context": "2026-03-31 override propagation for M002/S13 auto-mode stabilization",
+      "scope": "automation",
+      "decision": "Canonical writer for future auto-mode complete-slice closeout artifacts (supersedes stale direct file-write guidance)",
+      "choice": "Draft slice closeout content in memory and call `gsd_complete_slice`; do not write `Sxx-SUMMARY.md` or `Sxx-UAT.md` directly even if stale prompt text still instructs it.",
+      "rationale": "The user issued a project-wide override during M002/S13 auto-mode stabilization so slice closeout artifacts are written through the canonical GSD tool path instead of ad-hoc direct file writes. Using `gsd_complete_slice` keeps database state, rendered artifacts, and roadmap checkbox updates synchronized.",
+      "revisable": "Yes — if the GSD slice-closeout contract is intentionally changed later.",
+      "made_by": "human",
+      "superseded_by": null
+    },
+    {
+      "seq": 172,
+      "id": "D051",
+      "when_context": "M002/S13/T03",
+      "scope": "architecture",
+      "decision": "How dashboard overview/explorer/detail should switch from SQLite reads to ClickHouse reads without rewriting payload builders",
+      "choice": "Introduce a repository-shaped ClickHouse product query adapter and let DashboardApplication select it per request",
+      "rationale": "This preserves the existing dashboard/explorer/detail payload and rendering contracts while moving the heavy analytical read paths to ClickHouse raw facts and latest-serving tables. It also keeps runtime/coverage delegation on the existing repository boundary and allows controlled cutover via explicit injection or polyglot-read configuration.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -2550,6 +2597,28 @@
       "verdict": "✅ pass",
       "duration_ms": 540,
       "created_at": "2026-03-31T07:04:16.603Z"
+    },
+    {
+      "id": 50,
+      "task_id": "T03",
+      "slice_id": "S13",
+      "milestone_id": "M002",
+      "command": "python3 -m py_compile vinted_radar/dashboard.py vinted_radar/query/detail_clickhouse.py vinted_radar/query/explorer_clickhouse.py vinted_radar/query/overview_clickhouse.py tests/clickhouse_product_test_support.py tests/test_clickhouse_queries.py tests/test_dashboard.py",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 90,
+      "created_at": "2026-03-31T11:27:22.081Z"
+    },
+    {
+      "id": 51,
+      "task_id": "T03",
+      "slice_id": "S13",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_clickhouse_queries.py tests/test_dashboard.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 850,
+      "created_at": "2026-03-31T11:27:22.081Z"
     }
   ]
 }
