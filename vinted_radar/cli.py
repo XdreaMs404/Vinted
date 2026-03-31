@@ -24,7 +24,10 @@ from vinted_radar.platform import (
     render_platform_report_lines,
     summarize_cutover_state,
 )
-from vinted_radar.platform.health import render_lifecycle_report_lines
+from vinted_radar.platform.health import (
+    render_lifecycle_report_lines,
+    render_platform_audit_lines,
+)
 from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
@@ -35,6 +38,7 @@ from vinted_radar.services.evidence_export import HistoricalEvidenceExportReport
 from vinted_radar.services.evidence_lookup import EvidenceLookupResult, EvidenceLookupService
 from vinted_radar.services.full_backfill import FullBackfillReport, run_full_backfill
 from vinted_radar.services.lifecycle import LifecycleReport, run_lifecycle_jobs
+from vinted_radar.services.platform_audit import load_platform_audit_snapshot, run_platform_audit
 from vinted_radar.services.postgres_backfill import PostgresBackfillReport, backfill_postgres_mutable_truth
 from vinted_radar.services.reconciliation import ReconciliationReport, run_reconciliation
 from vinted_radar.services.runtime import RadarRuntimeCycleReport, RadarRuntimeOptions, RadarRuntimeService
@@ -586,6 +590,44 @@ def platform_reconcile(
         raise typer.Exit(code=1)
 
 
+@app.command("platform-audit")
+def platform_audit(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    reference_now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic audit windows."),
+    checkpoint: Path | None = typer.Option(None, "--checkpoint", help="Optional full-backfill checkpoint path. Defaults next to the SQLite database."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    try:
+        config = load_platform_config()
+    except ValueError as exc:
+        typer.echo(f"Platform config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        report = run_platform_audit(
+            db,
+            config=config,
+            reference_now=reference_now,
+            checkpoint_path=checkpoint,
+        )
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Platform audit failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        if not report.ok:
+            raise typer.Exit(code=1)
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    for line in render_platform_audit_lines(report):
+        typer.echo(line)
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
 @app.command("clickhouse-ingest")
 def clickhouse_ingest(
     limit: int = typer.Option(100, "--limit", min=1, help="Maximum outbox rows to claim in one ingest pass."),
@@ -782,6 +824,8 @@ def runtime_status(
             status = repository.runtime_status(limit=limit, now=now)
 
     status = {**status, "cutover": cutover.as_dict()}
+    platform_audit = load_platform_audit_snapshot(db, reference_now=now)
+    status["platform_audit"] = platform_audit
 
     if status["latest_cycle"] is None and status.get("controller") is None:
         typer.echo(f"Database: {db}")
@@ -807,6 +851,17 @@ def runtime_status(
     typer.echo(f"Cutover write targets: {', '.join(cutover.write_targets) or 'n/a'}")
     if cutover.warnings:
         typer.echo("Cutover warnings: " + " | ".join(cutover.warnings))
+    audit_summary = dict(platform_audit.get("summary") or {})
+    typer.echo(
+        "Platform audit: {overall} | reconcile {reconcile} | current-state {current_state} | analytical {analytical} | lifecycle {lifecycle} | backfill {backfill}".format(
+            overall=platform_audit.get("overall_status") or "unknown",
+            reconcile=audit_summary.get("reconciliation_status") or "unknown",
+            current_state=audit_summary.get("current_state_status") or "unknown",
+            analytical=audit_summary.get("analytical_status") or "unknown",
+            lifecycle=audit_summary.get("lifecycle_status") or "unknown",
+            backfill=audit_summary.get("backfill_status") or "unknown",
+        )
+    )
     heartbeat = status.get("heartbeat") or {}
     if heartbeat:
         typer.echo(

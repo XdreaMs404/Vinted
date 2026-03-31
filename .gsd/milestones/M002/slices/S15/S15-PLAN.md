@@ -8,7 +8,7 @@
   - Estimate: 2 sessions
   - Files: vinted_radar/services/lifecycle.py, vinted_radar/platform/health.py, vinted_radar/cli.py, infra/clickhouse/, README.md, tests/test_lifecycle_jobs.py
   - Verify: python -m pytest tests/test_lifecycle_jobs.py -q
-- [ ] **T02: Reconciliation + lag audit surfaces** — Add durable reconciliation and lag audit surfaces. Build commands and health payloads that compare PostgreSQL current-state windows, ClickHouse analytical windows, and Parquet manifest coverage, then expose lag/failure state for ingestion, lifecycle, and backfill paths so operators can trust the platform day to day.
+- [x] **T02: Added a unified `platform-audit` surface that wraps reconciliation, ingest lag, lifecycle drift, and backfill posture into CLI and runtime/health payloads.** — Add durable reconciliation and lag audit surfaces. Build commands and health payloads that compare PostgreSQL current-state windows, ClickHouse analytical windows, and Parquet manifest coverage, then expose lag/failure state for ingestion, lifecycle, and backfill paths so operators can trust the platform day to day.
   - Estimate: 1-2 sessions
   - Files: vinted_radar/services/platform_audit.py, vinted_radar/platform/health.py, vinted_radar/cli.py, tests/test_platform_audit.py
   - Verify: python -m pytest tests/test_platform_audit.py -q

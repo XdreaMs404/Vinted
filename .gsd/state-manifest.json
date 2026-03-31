@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-31T14:42:39.070Z",
+  "exported_at": "2026-03-31T15:02:27.846Z",
   "milestones": [
     {
       "id": "M001",
@@ -1628,19 +1628,27 @@
       "milestone_id": "M002",
       "slice_id": "S15",
       "id": "T02",
-      "title": "Reconciliation + lag audit surfaces",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added a unified `platform-audit` surface that wraps reconciliation, ingest lag, lifecycle drift, and backfill posture into CLI and runtime/health payloads.",
+      "status": "complete",
+      "one_liner": "Added a unified `platform-audit` surface that wraps reconciliation, ingest lag, lifecycle drift, and backfill posture into CLI and runtime/health payloads.",
+      "narrative": "Implemented a dedicated platform-audit service that reuses the existing reconciliation contract and adds operator-readable status for PostgreSQL current-state checkpoints, ClickHouse analytical ingest checkpoints, lifecycle dry-run posture, and full-backfill checkpoint progress. Exposed that contract through a new `platform-audit` CLI command, surfaced the summary in `runtime-status`, and mirrored the same `platform_audit` payload into `/api/runtime`, `build_runtime_payload()`, and `/health` so runtime-facing diagnostics and health checks read one bounded audit surface. Added focused tests covering the new service, CLI JSON output, and runtime/health payload wiring.",
+      "verification_result": "Verified the new audit contract with targeted pytest coverage. `python3 -m pytest tests/test_platform_audit.py -q` passed, covering service aggregation, the new `platform-audit` CLI JSON output, and the runtime/health payload exposure of the `platform_audit` surface.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-31T15:02:27.816Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Used a new `vinted_radar/services/platform_audit.py` aggregation seam and wrapped the existing reconciliation implementation instead of renaming the already-present `vinted_radar/services/reconciliation.py` service from the planner snapshot. Local verification used `python3 -m pytest ...` because this workstation does not expose a `python` binary in PATH.",
+      "known_issues": "None.",
+      "key_files": [
+        "vinted_radar/services/platform_audit.py",
+        "vinted_radar/platform/health.py",
+        "vinted_radar/cli.py",
+        "vinted_radar/dashboard.py",
+        "tests/test_platform_audit.py"
+      ],
+      "key_decisions": [
+        "Consolidated day-to-day migration trust on one `platform-audit` contract instead of forcing operators to correlate reconciliation, checkpoint, lifecycle, and backfill state manually (recorded as D061)."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S15\nmilestone: M002\nkey_files:\n  - vinted_radar/services/platform_audit.py\n  - vinted_radar/platform/health.py\n  - vinted_radar/cli.py\n  - vinted_radar/dashboard.py\n  - tests/test_platform_audit.py\nkey_decisions:\n  - Consolidated day-to-day migration trust on one `platform-audit` contract instead of forcing operators to correlate reconciliation, checkpoint, lifecycle, and backfill state manually (recorded as D061).\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-31T15:02:27.816Z\nblocker_discovered: false\n---\n\n# T02: Added a unified `platform-audit` surface that wraps reconciliation, ingest lag, lifecycle drift, and backfill posture into CLI and runtime/health payloads.\n\n**Added a unified `platform-audit` surface that wraps reconciliation, ingest lag, lifecycle drift, and backfill posture into CLI and runtime/health payloads.**\n\n## What Happened\n\nImplemented a dedicated platform-audit service that reuses the existing reconciliation contract and adds operator-readable status for PostgreSQL current-state checkpoints, ClickHouse analytical ingest checkpoints, lifecycle dry-run posture, and full-backfill checkpoint progress. Exposed that contract through a new `platform-audit` CLI command, surfaced the summary in `runtime-status`, and mirrored the same `platform_audit` payload into `/api/runtime`, `build_runtime_payload()`, and `/health` so runtime-facing diagnostics and health checks read one bounded audit surface. Added focused tests covering the new service, CLI JSON output, and runtime/health payload wiring.\n\n## Verification\n\nVerified the new audit contract with targeted pytest coverage. `python3 -m pytest tests/test_platform_audit.py -q` passed, covering service aggregation, the new `platform-audit` CLI JSON output, and the runtime/health payload exposure of the `platform_audit` surface.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `python3 -m pytest tests/test_platform_audit.py -q` | 0 | ✅ pass | 460ms |\n\n\n## Deviations\n\nUsed a new `vinted_radar/services/platform_audit.py` aggregation seam and wrapped the existing reconciliation implementation instead of renaming the already-present `vinted_radar/services/reconciliation.py` service from the planner snapshot. Local verification used `python3 -m pytest ...` because this workstation does not expose a `python` binary in PATH.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `vinted_radar/services/platform_audit.py`\n- `vinted_radar/platform/health.py`\n- `vinted_radar/cli.py`\n- `vinted_radar/dashboard.py`\n- `tests/test_platform_audit.py`\n",
       "description": "Add durable reconciliation and lag audit surfaces. Build commands and health payloads that compare PostgreSQL current-state windows, ClickHouse analytical windows, and Parquet manifest coverage, then expose lag/failure state for ingestion, lifecycle, and backfill paths so operators can trust the platform day to day.",
       "estimate": "1-2 sessions",
       "files": [
@@ -2465,6 +2473,18 @@
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
+    },
+    {
+      "seq": 182,
+      "id": "D061",
+      "when_context": "M002/S15/T02",
+      "scope": "observability",
+      "decision": "Operator-facing data-platform audit contract",
+      "choice": "Expose one `platform-audit` surface that wraps cross-store reconciliation plus current-state/analytical checkpoint status, lifecycle dry-run posture, and backfill checkpoint status, then mirror that summary into runtime/health payloads.",
+      "rationale": "Operators need one bounded place to judge whether PostgreSQL, ClickHouse, and Parquet coverage still agree and whether the migration paths are lagging or broken. Reusing the existing reconciliation, checkpoint, lifecycle, and backfill contracts avoids duplicate logic while making day-to-day trust inspectable.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
     }
   ],
   "verification_evidence": [
@@ -2896,6 +2916,17 @@
       "verdict": "✅ pass",
       "duration_ms": 602,
       "created_at": "2026-03-31T14:42:39.042Z"
+    },
+    {
+      "id": 62,
+      "task_id": "T02",
+      "slice_id": "S15",
+      "milestone_id": "M002",
+      "command": "python3 -m pytest tests/test_platform_audit.py -q",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 460,
+      "created_at": "2026-03-31T15:02:27.816Z"
     }
   ]
 }

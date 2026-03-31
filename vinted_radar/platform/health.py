@@ -253,6 +253,36 @@ def render_lifecycle_report_text(report: object) -> str:
     return "\n".join(render_lifecycle_report_lines(report))
 
 
+def render_platform_audit_text(report: object) -> str:
+    return "\n".join(render_platform_audit_lines(report))
+
+
+def render_platform_audit_lines(report: object) -> tuple[str, ...]:
+    as_dict = getattr(report, "as_dict", None)
+    payload = as_dict() if callable(as_dict) else dict(report or {})
+    summary = dict(payload.get("summary") or {})
+    paths = dict(payload.get("paths") or {})
+    lines: list[str] = []
+    lines.append(f"Generated at: {payload.get('generated_at') or 'unknown'}")
+    lines.append(f"Overall status: {payload.get('overall_status') or 'unknown'}")
+    lines.append(f"Reconciliation: {summary.get('reconciliation_status') or 'unknown'}")
+    for key in ("current_state", "analytical", "lifecycle", "backfill"):
+        path_payload = dict(paths.get(key) or {})
+        if not path_payload:
+            continue
+        lines.append(
+            "- {path}: {status} | {detail}".format(
+                path=path_payload.get("path") or key,
+                status=path_payload.get("status") or "unknown",
+                detail=path_payload.get("detail") or "n/a",
+            )
+        )
+    error = payload.get("error")
+    if error:
+        lines.append(f"Error: {error}")
+    return tuple(lines)
+
+
 def render_lifecycle_report_lines(report: object) -> tuple[str, ...]:
     as_dict = getattr(report, "as_dict", None)
     payload = as_dict() if callable(as_dict) else {}
@@ -337,6 +367,8 @@ __all__ = [
     "PlatformHealthSnapshot",
     "render_lifecycle_report_lines",
     "render_lifecycle_report_text",
+    "render_platform_audit_lines",
+    "render_platform_audit_text",
     "render_platform_report_lines",
     "render_platform_report_text",
     "summarize_cutover_state",

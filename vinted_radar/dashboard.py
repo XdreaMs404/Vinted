@@ -17,6 +17,7 @@ from vinted_radar.platform.postgres_repository import PostgresMutableTruthReposi
 from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import load_listing_score_detail
+from vinted_radar.services.platform_audit import load_platform_audit_snapshot
 from vinted_radar.serving import RouteContext, normalize_base_path
 from vinted_radar.state_machine import STATE_ORDER
 
@@ -213,6 +214,7 @@ class DashboardApplication:
                 runtime_status = query_backend.runtime_status(limit=8, now=self.now)
             payload = dict(runtime_status)
             payload["cutover"] = _load_cutover_snapshot().as_dict()
+            payload["platform_audit"] = load_platform_audit_snapshot(self.db_path, reference_now=self.now)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
@@ -258,6 +260,7 @@ class DashboardApplication:
                 freshness = query_backend.overview_snapshot(now=self.now)["summary"]["inventory"]
                 runtime_status = query_backend.runtime_status(limit=1, now=self.now)
             cutover = _load_cutover_snapshot()
+            platform_audit = load_platform_audit_snapshot(self.db_path, reference_now=self.now)
             body = json.dumps(
                 {
                     "status": "ok",
@@ -269,6 +272,7 @@ class DashboardApplication:
                     "latest_runtime_cycle": runtime_status["latest_cycle"],
                     "acquisition": runtime_status.get("acquisition"),
                     "cutover": cutover.as_dict(),
+                    "platform_audit": platform_audit,
                     "serving": {
                         "base_path": route_context.base_path or "/",
                         "public_base_url": route_context.public_base_url,
@@ -611,6 +615,8 @@ def build_runtime_payload(
     heartbeat = runtime.get("heartbeat") or {}
     acquisition = runtime.get("acquisition") or {}
     cutover = _load_cutover_snapshot()
+    platform_audit = load_platform_audit_snapshot(repository.db_path, reference_now=now)
+    audit_summary = dict(platform_audit.get("summary") or {})
     return {
         "generated_at": generated_at,
         "db_path": str(repository.db_path),
@@ -621,6 +627,7 @@ def build_runtime_payload(
         "runtime": runtime,
         "acquisition": acquisition,
         "cutover": cutover.as_dict(),
+        "platform_audit": platform_audit,
         "summary": {
             "status": runtime.get("status"),
             "phase": runtime.get("phase"),
@@ -644,6 +651,8 @@ def build_runtime_payload(
             "cutover_dual_write_active": cutover.dual_write_active,
             "cutover_write_targets": list(cutover.write_targets),
             "cutover_warnings": list(cutover.warnings),
+            "platform_audit_status": platform_audit.get("overall_status"),
+            "reconciliation_status": audit_summary.get("reconciliation_status"),
         },
         "latest_cycle": latest_cycle,
         "recent_cycles": runtime.get("recent_cycles") or [],
