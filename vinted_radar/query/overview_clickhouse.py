@@ -11,6 +11,14 @@ from vinted_radar.query.explorer_clickhouse import (
     build_explorer_filter_options,
     build_explorer_snapshot,
 )
+from vinted_radar.query.feature_marts import (
+    fetch_clickhouse_listing_day_mart,
+    fetch_clickhouse_price_change_mart,
+    fetch_clickhouse_segment_day_mart,
+    fetch_clickhouse_state_transition_mart,
+    load_clickhouse_evidence_packs,
+    load_clickhouse_feature_marts_export,
+)
 from vinted_radar.state_machine import STATE_ORDER, evaluate_listing_state
 
 _PRICE_BAND_LABELS = {
@@ -102,6 +110,114 @@ class ClickHouseProductQueryAdapter:
             self.clickhouse_client,
             database=self.database,
             listing_id=listing_id,
+            now=now,
+            limit=limit,
+        )
+
+    def listing_day_mart(
+        self,
+        *,
+        listing_ids: list[int] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        return fetch_clickhouse_listing_day_mart(
+            self.clickhouse_client,
+            database=self.database,
+            listing_ids=listing_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+    def segment_day_mart(
+        self,
+        *,
+        segment_lens: str = "all",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        return fetch_clickhouse_segment_day_mart(
+            self.clickhouse_client,
+            database=self.database,
+            segment_lens=segment_lens,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+    def price_change_mart(
+        self,
+        *,
+        listing_ids: list[int] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        return fetch_clickhouse_price_change_mart(
+            self.clickhouse_client,
+            database=self.database,
+            listing_ids=listing_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+    def state_transition_mart(
+        self,
+        *,
+        listing_ids: list[int] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        return fetch_clickhouse_state_transition_mart(
+            self.clickhouse_client,
+            database=self.database,
+            listing_ids=listing_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+    def evidence_packs(
+        self,
+        *,
+        listing_ids: list[int] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        now: str | None = None,
+        limit: int = 25,
+    ) -> list[dict[str, object]]:
+        return load_clickhouse_evidence_packs(
+            self.clickhouse_client,
+            database=self.database,
+            listing_ids=listing_ids,
+            start_date=start_date,
+            end_date=end_date,
+            now=now,
+            limit=limit,
+        )
+
+    def feature_marts_export(
+        self,
+        *,
+        listing_ids: list[int] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        segment_lens: str = "all",
+        now: str | None = None,
+        limit: int = 25,
+    ) -> dict[str, object]:
+        return load_clickhouse_feature_marts_export(
+            self.clickhouse_client,
+            database=self.database,
+            listing_ids=listing_ids,
+            start_date=start_date,
+            end_date=end_date,
+            segment_lens=segment_lens,
             now=now,
             limit=limit,
         )

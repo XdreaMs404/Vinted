@@ -13,10 +13,18 @@ class ScriptedClickHouseClient:
         state_rows: list[dict[str, Any]],
         timeline_rows: dict[int, list[dict[str, Any]]],
         peer_price_rows: dict[tuple[int | None, str | None, str | None, str | None], list[int]],
+        listing_day_rows: list[dict[str, Any]] | None = None,
+        segment_day_rows: list[dict[str, Any]] | None = None,
+        price_change_rows: list[dict[str, Any]] | None = None,
+        state_transition_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         self.state_rows = [dict(row) for row in state_rows]
         self.timeline_rows = {int(key): [dict(row) for row in value] for key, value in timeline_rows.items()}
         self.peer_price_rows = {key: [int(item) for item in value] for key, value in peer_price_rows.items()}
+        self.listing_day_rows = [dict(row) for row in listing_day_rows or []]
+        self.segment_day_rows = [dict(row) for row in segment_day_rows or []]
+        self.price_change_rows = [dict(row) for row in price_change_rows or []]
+        self.state_transition_rows = [dict(row) for row in state_transition_rows or []]
         self.queries: list[str] = []
 
     def query(self, sql: str):
@@ -40,6 +48,42 @@ class ScriptedClickHouseClient:
                 rows = rows[:limit]
             return SimpleNamespace(result_rows=[dict(row) for row in rows])
 
+        if "clickhouse-query: feature-mart" in sql:
+            def _marker(name: str) -> str | None:
+                match = re.search(rf"{name}=([^ */]+)", sql)
+                if match is None:
+                    return None
+                value = match.group(1)
+                return None if value == "*" else value
+
+            dataset = _marker("dataset") or "unknown"
+            listing_marker = _marker("listing_ids")
+            start_date = _marker("start_date")
+            end_date = _marker("end_date")
+            segment_lens = _marker("segment_lens") or "all"
+            limit_match = re.search(r"limit=(\d+)", sql)
+            limit = None if limit_match is None else int(limit_match.group(1))
+            if listing_marker in {None, "all"}:
+                listing_ids = None
+            else:
+                listing_ids = {int(value) for value in listing_marker.split(",") if value}
+
+            if dataset == "listing_day":
+                rows = self._filter_mart_rows(self.listing_day_rows, listing_ids=listing_ids, start_date=start_date, end_date=end_date, date_field="bucket_date")
+            elif dataset == "segment_day":
+                rows = self._filter_mart_rows(self.segment_day_rows, listing_ids=None, start_date=start_date, end_date=end_date, date_field="bucket_date")
+                if segment_lens != "all":
+                    rows = [row for row in rows if str(row.get("segment_lens")) == segment_lens]
+            elif dataset == "price_change":
+                rows = self._filter_mart_rows(self.price_change_rows, listing_ids=listing_ids, start_date=start_date, end_date=end_date, date_field="change_date")
+            elif dataset == "state_transition":
+                rows = self._filter_mart_rows(self.state_transition_rows, listing_ids=listing_ids, start_date=start_date, end_date=end_date, date_field="change_date")
+            else:
+                raise AssertionError(f"Unexpected feature mart dataset: {dataset}")
+            if limit is not None:
+                rows = rows[:limit]
+            return SimpleNamespace(result_rows=[dict(row) for row in rows])
+
         if "clickhouse-query: peer-prices" in sql:
             def _marker(name: str) -> str | None:
                 match = re.search(rf"{name}=([^ */]+)", sql)
@@ -59,6 +103,24 @@ class ScriptedClickHouseClient:
             return SimpleNamespace(result_rows=[{"price_amount_cents": int(price)} for price in prices])
 
         raise AssertionError(f"Unexpected ClickHouse SQL: {sql}")
+
+    def _filter_mart_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        listing_ids: set[int] | None,
+        start_date: str | None,
+        end_date: str | None,
+        date_field: str,
+    ) -> list[dict[str, Any]]:
+        filtered = [dict(row) for row in rows]
+        if listing_ids is not None:
+            filtered = [row for row in filtered if int(row.get("listing_id") or 0) in listing_ids]
+        if start_date is not None:
+            filtered = [row for row in filtered if str(row.get(date_field) or "") >= start_date]
+        if end_date is not None:
+            filtered = [row for row in filtered if str(row.get(date_field) or "") <= end_date]
+        return filtered
 
     def close(self) -> None:
         return None
@@ -314,8 +376,203 @@ def make_clickhouse_product_client() -> ScriptedClickHouseClient:
         (2001, "femmes", "sandro", "bon état"): [3000],
         (2001, "femmes", "maje", "neuf"): [4200],
     }
+    listing_day_rows = [
+        {
+            "bucket_date": "2026-03-19",
+            "listing_id": 9001,
+            "primary_catalog_id": 2001,
+            "primary_root_catalog_id": 1904,
+            "root_title": "Femmes",
+            "category_path": "Femmes > Robes",
+            "brand": "Zara",
+            "condition_label": "Très bon état",
+            "price_band_code": "under_20_eur",
+            "price_band_label": "< 20 €",
+            "seen_events": 1,
+            "unique_listing_count": 1,
+            "sighting_count": 1,
+            "average_price_amount_cents": 1500.0,
+            "average_favourite_count": 11.0,
+            "average_view_count": 120.0,
+            "first_seen_at": "2026-03-19T10:05:00+00:00",
+            "last_seen_at": "2026-03-19T10:05:00+00:00",
+            "window_started_at": "2026-03-19T10:05:00+00:00",
+            "window_ended_at": "2026-03-19T10:05:00+00:00",
+            "manifest_ids": ["manifest-seen-run-3"],
+            "source_event_ids": ["evt-seen-run-3"],
+            "run_ids": ["run-3"],
+        },
+        {
+            "bucket_date": "2026-03-18",
+            "listing_id": 9001,
+            "primary_catalog_id": 2001,
+            "primary_root_catalog_id": 1904,
+            "root_title": "Femmes",
+            "category_path": "Femmes > Robes",
+            "brand": "Zara",
+            "condition_label": "Très bon état",
+            "price_band_code": "under_20_eur",
+            "price_band_label": "< 20 €",
+            "seen_events": 1,
+            "unique_listing_count": 1,
+            "sighting_count": 1,
+            "average_price_amount_cents": 1400.0,
+            "average_favourite_count": 8.0,
+            "average_view_count": 95.0,
+            "first_seen_at": "2026-03-18T10:05:00+00:00",
+            "last_seen_at": "2026-03-18T10:05:00+00:00",
+            "window_started_at": "2026-03-18T10:05:00+00:00",
+            "window_ended_at": "2026-03-18T10:05:00+00:00",
+            "manifest_ids": ["manifest-seen-run-2"],
+            "source_event_ids": ["evt-seen-run-2"],
+            "run_ids": ["run-2"],
+        },
+        {
+            "bucket_date": "2026-03-17",
+            "listing_id": 9002,
+            "primary_catalog_id": 2001,
+            "primary_root_catalog_id": 1904,
+            "root_title": "Femmes",
+            "category_path": "Femmes > Robes",
+            "brand": "Sandro",
+            "condition_label": "Bon état",
+            "price_band_code": "20_to_39_eur",
+            "price_band_label": "20–39 €",
+            "seen_events": 1,
+            "unique_listing_count": 1,
+            "sighting_count": 1,
+            "average_price_amount_cents": 3000.0,
+            "average_favourite_count": 2.0,
+            "average_view_count": 35.0,
+            "first_seen_at": "2026-03-17T10:06:00+00:00",
+            "last_seen_at": "2026-03-17T10:06:00+00:00",
+            "window_started_at": "2026-03-17T10:06:00+00:00",
+            "window_ended_at": "2026-03-17T10:06:00+00:00",
+            "manifest_ids": ["manifest-seen-run-1"],
+            "source_event_ids": ["evt-seen-run-1"],
+            "run_ids": ["run-1"],
+        },
+    ]
+    segment_day_rows = [
+        {
+            "bucket_date": "2026-03-19",
+            "segment_lens": "category",
+            "segment_value": "2001",
+            "segment_label": "Femmes > Robes",
+            "primary_catalog_id": 2001,
+            "primary_root_catalog_id": 1904,
+            "root_title": "Femmes",
+            "category_path": "Femmes > Robes",
+            "brand": None,
+            "condition_label": "Très bon état",
+            "price_band_code": "under_20_eur",
+            "price_band_label": "< 20 €",
+            "seen_events": 1,
+            "unique_listing_count": 1,
+            "average_price_amount_cents": 1500.0,
+            "average_favourite_count": 11.0,
+            "average_view_count": 120.0,
+            "first_seen_at": "2026-03-19T10:05:00+00:00",
+            "last_seen_at": "2026-03-19T10:05:00+00:00",
+            "window_started_at": "2026-03-19T10:05:00+00:00",
+            "window_ended_at": "2026-03-19T10:05:00+00:00",
+            "manifest_ids": ["manifest-seen-run-3"],
+            "source_event_ids": ["evt-seen-run-3"],
+            "run_ids": ["run-3"],
+        },
+        {
+            "bucket_date": "2026-03-19",
+            "segment_lens": "brand",
+            "segment_value": "Zara",
+            "segment_label": "Zara",
+            "primary_catalog_id": 2001,
+            "primary_root_catalog_id": 1904,
+            "root_title": "Femmes",
+            "category_path": "Femmes > Robes",
+            "brand": "Zara",
+            "condition_label": "Très bon état",
+            "price_band_code": "under_20_eur",
+            "price_band_label": "< 20 €",
+            "seen_events": 1,
+            "unique_listing_count": 1,
+            "average_price_amount_cents": 1500.0,
+            "average_favourite_count": 11.0,
+            "average_view_count": 120.0,
+            "first_seen_at": "2026-03-19T10:05:00+00:00",
+            "last_seen_at": "2026-03-19T10:05:00+00:00",
+            "window_started_at": "2026-03-19T10:05:00+00:00",
+            "window_ended_at": "2026-03-19T10:05:00+00:00",
+            "manifest_ids": ["manifest-seen-run-3"],
+            "source_event_ids": ["evt-seen-run-3"],
+            "run_ids": ["run-3"],
+        },
+    ]
+    price_change_rows = [
+        {
+            "occurred_at": "2026-03-19T10:05:00+00:00",
+            "change_date": "2026-03-19",
+            "listing_id": 9001,
+            "primary_catalog_id": 2001,
+            "primary_root_catalog_id": 1904,
+            "root_title": "Femmes",
+            "category_path": "Femmes > Robes",
+            "brand": "Zara",
+            "condition_label": "Très bon état",
+            "price_band_code": "under_20_eur",
+            "previous_price_amount_cents": 1400,
+            "current_price_amount_cents": 1500,
+            "previous_total_price_amount_cents": 1550,
+            "current_total_price_amount_cents": 1650,
+            "previous_favourite_count": 8,
+            "current_favourite_count": 11,
+            "previous_view_count": 95,
+            "current_view_count": 120,
+            "follow_up_miss_count": 0,
+            "manifest_id": "manifest-seen-run-3",
+            "source_event_id": "evt-seen-run-3",
+            "source_event_type": "vinted.discovery.listing-seen.batch",
+            "change_summary": "Price 1400 → 1500.",
+            "change_json": json.dumps({"change_kind": "price_change", "current": {"listing_id": 9001}}),
+            "metadata_json": json.dumps({"run_id": "run-3", "page_number": 1, "card_position": 1, "catalog_scan_terminal": True}),
+        },
+    ]
+    state_transition_rows = [
+        {
+            "occurred_at": "2026-03-19T10:05:00+00:00",
+            "change_date": "2026-03-19",
+            "listing_id": 9002,
+            "primary_catalog_id": 2001,
+            "primary_root_catalog_id": 1904,
+            "root_title": "Femmes",
+            "category_path": "Femmes > Robes",
+            "brand": "Sandro",
+            "condition_label": "Bon état",
+            "price_band_code": "20_to_39_eur",
+            "previous_state_code": "active",
+            "current_state_code": "sold_probable",
+            "previous_basis_kind": "observed",
+            "current_basis_kind": "inferred",
+            "previous_confidence_label": "high",
+            "current_confidence_label": "medium",
+            "previous_confidence_score": 0.98,
+            "current_confidence_score": 0.74,
+            "follow_up_miss_count": 2,
+            "probe_outcome": "unknown",
+            "response_status": 403,
+            "manifest_id": "manifest-transition-run-3",
+            "source_event_id": "evt-transition-run-3",
+            "source_event_type": "vinted.discovery.listing-seen.batch",
+            "change_summary": "State active → sold_probable.",
+            "change_json": json.dumps({"change_kind": "state_transition", "state_explanation": {"reasons": ["Two missed follow-up scans triggered a probable sold state."]}}),
+            "metadata_json": json.dumps({"run_id": "run-3", "catalog_scan_terminal": True, "missing_from_scan": True}),
+        },
+    ]
     return ScriptedClickHouseClient(
         state_rows=state_rows,
         timeline_rows=timeline_rows,
         peer_price_rows=peer_price_rows,
+        listing_day_rows=listing_day_rows,
+        segment_day_rows=segment_day_rows,
+        price_change_rows=price_change_rows,
+        state_transition_rows=state_transition_rows,
     )

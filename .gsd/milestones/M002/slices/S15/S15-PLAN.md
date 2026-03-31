@@ -21,7 +21,7 @@
   - Estimate: 2-3 sessions
   - Files: vinted_radar/platform/clickhouse_ingest.py, vinted_radar/services/projectors.py, vinted_radar/platform/postgres_repository.py, vinted_radar/services/full_backfill.py, infra/clickhouse/migrations/V002__serving_warehouse.sql, tests/test_clickhouse_ingest.py, tests/test_full_backfill.py
   - Verify: python -m pytest tests/test_clickhouse_ingest.py tests/test_full_backfill.py -q
-- [ ] **T05: AI-ready feature marts on trustworthy warehouse change facts** — Build the deferred AI-ready marts only after the change-fact source exists. Materialize/export listing-day, segment-day, price-change, state-transition, and evidence-pack outputs from ClickHouse rollups plus populated change facts, and keep manifest/window traceability explicit so downstream grounded-intelligence work does not need raw-event rescans.
+- [x] **T05: Added ClickHouse-backed feature marts and evidence-pack exports with explicit manifest/window traceability.** — Build the deferred AI-ready marts only after the change-fact source exists. Materialize/export listing-day, segment-day, price-change, state-transition, and evidence-pack outputs from ClickHouse rollups plus populated change facts, and keep manifest/window traceability explicit so downstream grounded-intelligence work does not need raw-event rescans.
   - Estimate: 2 sessions
   - Files: vinted_radar/query/feature_marts.py, vinted_radar/cli.py, vinted_radar/platform/health.py, infra/clickhouse/migrations/V002__serving_warehouse.sql, tests/test_feature_marts.py
   - Verify: python -m pytest tests/test_feature_marts.py -q

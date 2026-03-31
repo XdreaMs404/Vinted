@@ -283,6 +283,54 @@ def render_platform_audit_lines(report: object) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def render_feature_mart_lines(report: object) -> tuple[str, ...]:
+    payload = dict(report or {})
+    filters = dict(payload.get("filters") or {})
+    evidence_packs = dict(payload.get("evidence_packs") or {})
+    lines: list[str] = []
+    lines.append(f"Generated at: {payload.get('generated_at') or 'unknown'}")
+    lines.append(f"Source: {payload.get('source') or 'unknown'}")
+    lines.append(
+        "Filters: listings {listings} | window {start} → {end} | segment lens {segment_lens} | limit {limit}".format(
+            listings=", ".join(str(item) for item in list(filters.get("listing_ids") or [])) or "all",
+            start=filters.get("start_date") or "*",
+            end=filters.get("end_date") or "*",
+            segment_lens=filters.get("segment_lens") or "all",
+            limit=filters.get("limit") or 0,
+        )
+    )
+    for key, label in (
+        ("listing_day", "Listing-day rows"),
+        ("segment_day", "Segment-day rows"),
+        ("price_change", "Price-change rows"),
+        ("state_transition", "State-transition rows"),
+        ("evidence_packs", "Evidence packs"),
+    ):
+        section = dict(payload.get(key) or {})
+        lines.append(f"{label}: {section.get('row_count') or 0}")
+
+    preview_rows = list(evidence_packs.get("rows") or [])[:5]
+    if preview_rows:
+        lines.append("Evidence-pack preview:")
+    for row in preview_rows:
+        current = dict(row.get("current") or {})
+        window = dict(row.get("window") or {})
+        trace = dict(row.get("trace") or {})
+        lines.append(
+            "- {listing_id} | {state} | days {listing_days} | price changes {price_changes} | state transitions {state_transitions}".format(
+                listing_id=row.get("listing_id") or "unknown",
+                state=current.get("state_code") or "unknown",
+                listing_days=window.get("listing_day_count") or 0,
+                price_changes=window.get("price_change_count") or 0,
+                state_transitions=window.get("state_transition_count") or 0,
+            )
+        )
+        manifests = ", ".join(str(item) for item in list(trace.get("manifest_ids") or [])[:3]) or "n/a"
+        runs = ", ".join(str(item) for item in list(trace.get("run_ids") or [])[:3]) or "n/a"
+        lines.append(f"  trace: manifests {manifests} | runs {runs}")
+    return tuple(lines)
+
+
 def render_lifecycle_report_lines(report: object) -> tuple[str, ...]:
     as_dict = getattr(report, "as_dict", None)
     payload = as_dict() if callable(as_dict) else {}
@@ -365,6 +413,7 @@ def _cutover_flag(config: object | None, name: str) -> bool:
 __all__ = [
     "CutoverStatusSnapshot",
     "PlatformHealthSnapshot",
+    "render_feature_mart_lines",
     "render_lifecycle_report_lines",
     "render_lifecycle_report_text",
     "render_platform_audit_lines",

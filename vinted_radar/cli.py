@@ -25,6 +25,7 @@ from vinted_radar.platform import (
     summarize_cutover_state,
 )
 from vinted_radar.platform.health import (
+    render_feature_mart_lines,
     render_lifecycle_report_lines,
     render_platform_audit_lines,
 )
@@ -1406,6 +1407,43 @@ def market_summary(
                 **segment
             )
         )
+
+
+@app.command("feature-marts")
+def feature_marts(
+    db: Path = typer.Option(Path("data/vinted-radar.db"), "--db", help="SQLite database path."),
+    listing_id: list[int] | None = typer.Option(None, "--listing-id", min=1, help="Limit mart output to one or more listing IDs. Repeatable."),
+    start_date: str | None = typer.Option(None, "--start-date", help="Optional lower date bound (YYYY-MM-DD) for mart windows."),
+    end_date: str | None = typer.Option(None, "--end-date", help="Optional upper date bound (YYYY-MM-DD) for mart windows."),
+    segment_lens: str = typer.Option("all", "--segment-lens", help="all, category, or brand."),
+    limit: int = typer.Option(25, "--limit", min=1, help="Maximum rows per mart section and evidence-pack count."),
+    now: str | None = typer.Option(None, "--now", help="Optional ISO timestamp override for deterministic evidence-pack evaluation."),
+    output_format: str = typer.Option("table", "--format", help="table or json."),
+) -> None:
+    with _open_product_query_backend(db) as repository:
+        feature_export = getattr(repository, "feature_marts_export", None)
+        if not callable(feature_export):
+            typer.echo("Feature marts require the ClickHouse-backed product query adapter.", err=True)
+            typer.echo("Enable polyglot reads before using this warehouse export surface.", err=True)
+            raise typer.Exit(code=1)
+        payload = feature_export(
+            listing_ids=listing_id,
+            start_date=start_date,
+            end_date=end_date,
+            segment_lens=segment_lens,
+            now=now,
+            limit=limit,
+        )
+
+    if output_format == "json":
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table' or 'json'.")
+
+    typer.echo(f"Database: {db}")
+    for line in render_feature_mart_lines(payload):
+        typer.echo(line)
 
 
 @app.command("dashboard")

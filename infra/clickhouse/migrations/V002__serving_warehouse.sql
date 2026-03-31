@@ -621,3 +621,263 @@ SELECT
     change_json,
     metadata_json
 FROM fact_listing_change_events;
+
+CREATE VIEW IF NOT EXISTS mart_listing_day AS
+WITH trace AS (
+    SELECT
+        toDate(observed_at) AS bucket_date,
+        listing_id,
+        arraySort(groupUniqArrayIf(manifest_id, manifest_id IS NOT NULL)) AS manifest_ids,
+        arraySort(groupUniqArrayIf(source_event_id, source_event_id IS NOT NULL)) AS source_event_ids,
+        arraySort(groupUniqArrayIf(run_id, run_id IS NOT NULL)) AS run_ids,
+        min(observed_at) AS window_started_at,
+        max(observed_at) AS window_ended_at
+    FROM fact_listing_seen_events
+    GROUP BY bucket_date, listing_id
+)
+SELECT
+    daily.bucket_date,
+    daily.listing_id,
+    daily.primary_catalog_id,
+    daily.primary_root_catalog_id,
+    daily.root_title,
+    daily.category_path,
+    daily.brand,
+    daily.condition_label,
+    daily.price_band_code,
+    multiIf(
+        daily.price_band_code = 'under_20_eur', '< 20 €',
+        daily.price_band_code = '20_to_39_eur', '20–39 €',
+        daily.price_band_code = '40_plus_eur', '40 € et plus',
+        'Prix indisponible'
+    ) AS price_band_label,
+    toUInt64(finalizeAggregation(daily.seen_events_state)) AS seen_events,
+    toUInt64(finalizeAggregation(daily.unique_listing_state)) AS unique_listing_count,
+    toUInt64(finalizeAggregation(daily.sighting_count_state)) AS sighting_count,
+    if(
+        finalizeAggregation(daily.price_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(daily.price_sum_state)) / finalizeAggregation(daily.price_count_state), 2)
+    ) AS average_price_amount_cents,
+    if(
+        finalizeAggregation(daily.favourite_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(daily.favourite_sum_state)) / finalizeAggregation(daily.favourite_count_state), 2)
+    ) AS average_favourite_count,
+    if(
+        finalizeAggregation(daily.view_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(daily.view_sum_state)) / finalizeAggregation(daily.view_count_state), 2)
+    ) AS average_view_count,
+    finalizeAggregation(daily.first_seen_state) AS first_seen_at,
+    finalizeAggregation(daily.last_seen_state) AS last_seen_at,
+    trace.window_started_at,
+    trace.window_ended_at,
+    trace.manifest_ids,
+    trace.source_event_ids,
+    trace.run_ids
+FROM rollup_listing_seen_daily AS daily
+LEFT JOIN trace USING (bucket_date, listing_id);
+
+CREATE VIEW IF NOT EXISTS mart_segment_day AS
+WITH category_trace AS (
+    SELECT
+        toDate(observed_at) AS bucket_date,
+        primary_catalog_id,
+        primary_root_catalog_id,
+        root_title,
+        category_path,
+        condition_label,
+        price_band_code,
+        arraySort(groupUniqArrayIf(manifest_id, manifest_id IS NOT NULL)) AS manifest_ids,
+        arraySort(groupUniqArrayIf(source_event_id, source_event_id IS NOT NULL)) AS source_event_ids,
+        arraySort(groupUniqArrayIf(run_id, run_id IS NOT NULL)) AS run_ids,
+        min(observed_at) AS window_started_at,
+        max(observed_at) AS window_ended_at
+    FROM fact_listing_seen_events
+    GROUP BY bucket_date, primary_catalog_id, primary_root_catalog_id, root_title, category_path, condition_label, price_band_code
+),
+brand_trace AS (
+    SELECT
+        toDate(observed_at) AS bucket_date,
+        brand,
+        primary_catalog_id,
+        primary_root_catalog_id,
+        root_title,
+        category_path,
+        condition_label,
+        price_band_code,
+        arraySort(groupUniqArrayIf(manifest_id, manifest_id IS NOT NULL)) AS manifest_ids,
+        arraySort(groupUniqArrayIf(source_event_id, source_event_id IS NOT NULL)) AS source_event_ids,
+        arraySort(groupUniqArrayIf(run_id, run_id IS NOT NULL)) AS run_ids,
+        min(observed_at) AS window_started_at,
+        max(observed_at) AS window_ended_at
+    FROM fact_listing_seen_events
+    GROUP BY bucket_date, brand, primary_catalog_id, primary_root_catalog_id, root_title, category_path, condition_label, price_band_code
+)
+SELECT
+    category.bucket_date,
+    'category' AS segment_lens,
+    if(category.primary_catalog_id IS NULL, ifNull(category.root_title, 'unknown-root'), toString(category.primary_catalog_id)) AS segment_value,
+    ifNull(category.category_path, ifNull(category.root_title, 'Catégorie inconnue')) AS segment_label,
+    category.primary_catalog_id,
+    category.primary_root_catalog_id,
+    category.root_title,
+    category.category_path,
+    CAST(NULL AS Nullable(String)) AS brand,
+    category.condition_label,
+    category.price_band_code,
+    multiIf(
+        category.price_band_code = 'under_20_eur', '< 20 €',
+        category.price_band_code = '20_to_39_eur', '20–39 €',
+        category.price_band_code = '40_plus_eur', '40 € et plus',
+        'Prix indisponible'
+    ) AS price_band_label,
+    toUInt64(finalizeAggregation(category.seen_events_state)) AS seen_events,
+    toUInt64(finalizeAggregation(category.unique_listing_state)) AS unique_listing_count,
+    if(
+        finalizeAggregation(category.price_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(category.price_sum_state)) / finalizeAggregation(category.price_count_state), 2)
+    ) AS average_price_amount_cents,
+    if(
+        finalizeAggregation(category.favourite_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(category.favourite_sum_state)) / finalizeAggregation(category.favourite_count_state), 2)
+    ) AS average_favourite_count,
+    if(
+        finalizeAggregation(category.view_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(category.view_sum_state)) / finalizeAggregation(category.view_count_state), 2)
+    ) AS average_view_count,
+    finalizeAggregation(category.first_seen_state) AS first_seen_at,
+    finalizeAggregation(category.last_seen_state) AS last_seen_at,
+    category_trace.window_started_at,
+    category_trace.window_ended_at,
+    category_trace.manifest_ids,
+    category_trace.source_event_ids,
+    category_trace.run_ids
+FROM rollup_category_daily AS category
+LEFT JOIN category_trace
+    ON category_trace.bucket_date = category.bucket_date
+   AND ifNull(category_trace.primary_catalog_id, toUInt64(0)) = ifNull(category.primary_catalog_id, toUInt64(0))
+   AND ifNull(category_trace.primary_root_catalog_id, toUInt64(0)) = ifNull(category.primary_root_catalog_id, toUInt64(0))
+   AND ifNull(category_trace.root_title, '') = ifNull(category.root_title, '')
+   AND ifNull(category_trace.category_path, '') = ifNull(category.category_path, '')
+   AND ifNull(category_trace.condition_label, '') = ifNull(category.condition_label, '')
+   AND category_trace.price_band_code = category.price_band_code
+UNION ALL
+SELECT
+    brand_daily.bucket_date,
+    'brand' AS segment_lens,
+    ifNull(brand_daily.brand, 'unknown-brand') AS segment_value,
+    ifNull(brand_daily.brand, 'Marque inconnue') AS segment_label,
+    brand_daily.primary_catalog_id,
+    brand_daily.primary_root_catalog_id,
+    brand_daily.root_title,
+    brand_daily.category_path,
+    brand_daily.brand,
+    brand_daily.condition_label,
+    brand_daily.price_band_code,
+    multiIf(
+        brand_daily.price_band_code = 'under_20_eur', '< 20 €',
+        brand_daily.price_band_code = '20_to_39_eur', '20–39 €',
+        brand_daily.price_band_code = '40_plus_eur', '40 € et plus',
+        'Prix indisponible'
+    ) AS price_band_label,
+    toUInt64(finalizeAggregation(brand_daily.seen_events_state)) AS seen_events,
+    toUInt64(finalizeAggregation(brand_daily.unique_listing_state)) AS unique_listing_count,
+    if(
+        finalizeAggregation(brand_daily.price_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(brand_daily.price_sum_state)) / finalizeAggregation(brand_daily.price_count_state), 2)
+    ) AS average_price_amount_cents,
+    if(
+        finalizeAggregation(brand_daily.favourite_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(brand_daily.favourite_sum_state)) / finalizeAggregation(brand_daily.favourite_count_state), 2)
+    ) AS average_favourite_count,
+    if(
+        finalizeAggregation(brand_daily.view_count_state) = 0,
+        CAST(NULL AS Nullable(Float64)),
+        round(toFloat64(finalizeAggregation(brand_daily.view_sum_state)) / finalizeAggregation(brand_daily.view_count_state), 2)
+    ) AS average_view_count,
+    finalizeAggregation(brand_daily.first_seen_state) AS first_seen_at,
+    finalizeAggregation(brand_daily.last_seen_state) AS last_seen_at,
+    brand_trace.window_started_at,
+    brand_trace.window_ended_at,
+    brand_trace.manifest_ids,
+    brand_trace.source_event_ids,
+    brand_trace.run_ids
+FROM rollup_brand_daily AS brand_daily
+LEFT JOIN brand_trace
+    ON brand_trace.bucket_date = brand_daily.bucket_date
+   AND ifNull(brand_trace.brand, '') = ifNull(brand_daily.brand, '')
+   AND ifNull(brand_trace.primary_catalog_id, toUInt64(0)) = ifNull(brand_daily.primary_catalog_id, toUInt64(0))
+   AND ifNull(brand_trace.primary_root_catalog_id, toUInt64(0)) = ifNull(brand_daily.primary_root_catalog_id, toUInt64(0))
+   AND ifNull(brand_trace.root_title, '') = ifNull(brand_daily.root_title, '')
+   AND ifNull(brand_trace.category_path, '') = ifNull(brand_daily.category_path, '')
+   AND ifNull(brand_trace.condition_label, '') = ifNull(brand_daily.condition_label, '')
+   AND brand_trace.price_band_code = brand_daily.price_band_code;
+
+CREATE VIEW IF NOT EXISTS mart_price_change AS
+SELECT
+    occurred_at,
+    change_date,
+    listing_id,
+    primary_catalog_id,
+    primary_root_catalog_id,
+    root_title,
+    category_path,
+    brand,
+    condition_label,
+    price_band_code,
+    previous_price_amount_cents,
+    current_price_amount_cents,
+    previous_total_price_amount_cents,
+    current_total_price_amount_cents,
+    previous_favourite_count,
+    current_favourite_count,
+    previous_view_count,
+    current_view_count,
+    follow_up_miss_count,
+    manifest_id,
+    source_event_id,
+    source_event_type,
+    change_summary,
+    change_json,
+    metadata_json
+FROM fact_listing_change_events
+WHERE change_kind = 'price_change';
+
+CREATE VIEW IF NOT EXISTS mart_state_transition AS
+SELECT
+    occurred_at,
+    change_date,
+    listing_id,
+    primary_catalog_id,
+    primary_root_catalog_id,
+    root_title,
+    category_path,
+    brand,
+    condition_label,
+    price_band_code,
+    previous_state_code,
+    current_state_code,
+    previous_basis_kind,
+    current_basis_kind,
+    previous_confidence_label,
+    current_confidence_label,
+    previous_confidence_score,
+    current_confidence_score,
+    follow_up_miss_count,
+    probe_outcome,
+    response_status,
+    manifest_id,
+    source_event_id,
+    source_event_type,
+    change_summary,
+    change_json,
+    metadata_json
+FROM fact_listing_change_events
+WHERE change_kind = 'state_transition';
