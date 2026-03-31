@@ -27,3 +27,5 @@
 {"cmd":"reassess-roadmap","params":{"milestoneId":"M002","completedSliceId":"S12"},"ts":"2026-03-31T06:19:05.365Z","actor":"agent","hash":"9dcd4d16a8751624","session_id":"bbdbee38-a024-4f86-85cb-cac651577a6f"}
 {"cmd":"complete-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T01"},"ts":"2026-03-31T06:41:20.060Z","actor":"agent","hash":"cb4a3542eda8bd6e","session_id":"63db88e4-80b6-4744-ac75-971826daf1d7"}
 {"cmd":"complete-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T02"},"ts":"2026-03-31T07:04:16.630Z","actor":"agent","hash":"7986e1d1d965ba32","session_id":"63db88e4-80b6-4744-ac75-971826daf1d7"}
+{"cmd":"reopen-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T03","reason":"Reopen incomplete S13 task after recovery-summary drift cleanup"},"ts":"2026-03-31T08:15:00.000Z","actor":"agent","actor_name":"pi","trigger_reason":"state-cleanup"}
+{"cmd":"reopen-task","params":{"milestoneId":"M002","sliceId":"S13","taskId":"T04","reason":"Reopen incomplete S13 task after recovery-summary drift cleanup"},"ts":"2026-03-31T08:15:01.000Z","actor":"agent","actor_name":"pi","trigger_reason":"state-cleanup"}
