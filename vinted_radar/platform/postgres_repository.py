@@ -1201,7 +1201,11 @@ class PostgresMutableTruthRepository:
                 (listing_id,),
             )
         )
-        return None if row is None else dict(row)
+        if row is None:
+            return None
+        hydrated = dict(row)
+        hydrated["state_explanation_json"] = _encode_json_object(hydrated.get("state_explanation_json"))
+        return hydrated
 
     def listing_ids_for_catalog(self, catalog_id: int) -> list[int]:
         rows = _fetchall(
@@ -2131,7 +2135,7 @@ class PostgresMutableTruthRepository:
                     payload.get("latest_probe_outcome"),
                     payload.get("latest_probe_error_message"),
                     payload.get("last_seen_age_hours", 0.0),
-                    payload.get("state_explanation_json", canonical_json({})),
+                    _encode_json_object(payload.get("state_explanation_json")),
                     payload.get("last_event_id"),
                     payload.get("last_manifest_id"),
                     payload.get("projected_at", _utc_now()),
@@ -2358,6 +2362,11 @@ def _decode_json_object(value: object) -> dict[str, object]:
             return {}
         return decoded if isinstance(decoded, dict) else {}
     return {}
+
+
+
+def _encode_json_object(value: object) -> str:
+    return canonical_json(_decode_json_object(value))
 
 
 

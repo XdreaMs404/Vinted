@@ -339,25 +339,24 @@ def test_state_refresh_probe_projection_materializes_parent_projection_event() -
 
 
 
-def test_discovery_catalog_scan_completed_materializes_mutable_manifest_for_source_batch() -> None:
+def test_discovery_catalog_scan_completed_reuses_existing_current_state_with_decoded_jsonb() -> None:
     connection = ProjectionConnection()
-    repository = PostgresMutableTruthRepository(connection)
-    connection.events["batch-event-1"] = {
-        "event_id": "batch-event-1",
+    connection.events["batch-event-2"] = {
+        "event_id": "batch-event-2",
         "schema_version": 1,
         "event_type": "vinted.discovery.listing-seen.batch",
         "aggregate_type": "discovery-run",
-        "aggregate_id": "run-123",
-        "occurred_at": "2026-04-08T18:10:00+00:00",
+        "aggregate_id": "run-456",
+        "occurred_at": "2026-04-08T18:20:00+00:00",
         "producer": "vinted_radar.services.discovery",
         "partition_key": "1123",
         "payload_json": {},
         "metadata_json": {},
         "payload_checksum": "checksum",
     }
-    connection.discovery_runs["run-123"] = {
-        "run_id": "run-123",
-        "started_at": "2026-04-08T18:00:00+00:00",
+    connection.discovery_runs["run-456"] = {
+        "run_id": "run-456",
+        "started_at": "2026-04-08T18:10:00+00:00",
         "finished_at": None,
         "status": "running",
         "root_scope": "women",
@@ -374,11 +373,83 @@ def test_discovery_catalog_scan_completed_materializes_mutable_manifest_for_sour
         "last_error": None,
         "last_event_id": None,
         "last_manifest_id": None,
-        "projected_at": "2026-04-08T18:00:00+00:00",
+        "projected_at": "2026-04-08T18:10:00+00:00",
     }
+    connection.catalogs[1123] = {
+        "catalog_id": 1123,
+        "root_catalog_id": 1904,
+        "root_title": "Femmes",
+        "parent_catalog_id": 1904,
+        "title": "Accessoires pour cheveux",
+        "code": "hair-accessories",
+        "url": "https://www.vinted.fr/catalog/1123-hair-accessories",
+        "path": "Femmes > Accessoires pour cheveux",
+        "depth": 1,
+        "is_leaf": True,
+        "allow_browsing_subcategories": True,
+        "order_index": 10,
+        "synced_at": "2026-04-08T18:20:00+00:00",
+        "last_run_id": None,
+        "last_event_id": None,
+        "last_manifest_id": None,
+        "projected_at": "2026-04-08T18:20:00+00:00",
+    }
+    connection.listing_identity[8131026948] = {
+        "listing_id": 8131026948,
+        "canonical_url": "https://www.vinted.fr/items/8131026948-test",
+        "source_url": "https://www.vinted.fr/items/8131026948-test?referrer=catalog",
+        "title": "Accessoire existant",
+        "brand": "Zara",
+        "size_label": None,
+        "condition_label": "Très bon état",
+        "price_amount_cents": 1500,
+        "price_currency": "EUR",
+        "total_price_amount_cents": 1650,
+        "total_price_currency": "EUR",
+        "image_url": "https://images/8131026948.webp",
+        "favourite_count": 12,
+        "view_count": 30,
+        "user_id": 42,
+        "user_login": "seller42",
+        "user_profile_url": "https://www.vinted.fr/member/42",
+        "created_at_ts": 1712600000,
+        "primary_catalog_id": 1123,
+        "primary_root_catalog_id": 1904,
+        "first_seen_at": "2026-04-08T18:10:00+00:00",
+        "last_seen_at": "2026-04-08T18:15:00+00:00",
+        "first_seen_run_id": "run-456",
+        "last_seen_run_id": "run-456",
+        "last_event_id": None,
+        "last_manifest_id": None,
+        "projected_at": "2026-04-08T18:15:00+00:00",
+    }
+    connection.listing_current_state[8131026948] = {
+        "listing_id": 8131026948,
+        "state_code": "active",
+        "state_label": "Actif",
+        "basis_kind": "observed",
+        "confidence_label": "high",
+        "confidence_score": 1.0,
+        "sold_like": False,
+        "seen_in_latest_primary_scan": False,
+        "latest_primary_scan_run_id": None,
+        "latest_primary_scan_at": None,
+        "follow_up_miss_count": 1,
+        "latest_follow_up_miss_at": "2026-04-08T18:15:00+00:00",
+        "latest_probe_at": "2026-04-08T18:16:00+00:00",
+        "latest_probe_response_status": 200,
+        "latest_probe_outcome": "active",
+        "latest_probe_error_message": None,
+        "last_seen_age_hours": 0.0,
+        "state_explanation_json": {"reason": "buy_signal_open"},
+        "last_event_id": None,
+        "last_manifest_id": None,
+        "projected_at": "2026-04-08T18:16:00+00:00",
+    }
+    repository = PostgresMutableTruthRepository(connection)
 
     repository.project_discovery_catalog_scan_completed(
-        run_id="run-123",
+        run_id="run-456",
         catalog={
             "catalog_id": 1123,
             "root_catalog_id": 1904,
@@ -393,21 +464,21 @@ def test_discovery_catalog_scan_completed_materializes_mutable_manifest_for_sour
             "allow_browsing_subcategories": True,
             "order_index": 10,
         },
-        completed_at="2026-04-08T18:10:00+00:00",
-        successful_pages=0,
+        completed_at="2026-04-08T18:20:00+00:00",
+        successful_pages=1,
         failed_pages=0,
         raw_listing_hits=1,
         unique_listing_hits=1,
         listing_rows=[
             {
-                "run_id": "run-123",
-                "observed_at": "2026-04-08T18:10:00+00:00",
+                "run_id": "run-456",
+                "observed_at": "2026-04-08T18:20:00+00:00",
                 "catalog_id": 1123,
                 "root_catalog_id": 1904,
-                "listing_id": 5403391218,
-                "canonical_url": "https://www.vinted.fr/items/5403391218-test",
-                "source_url": "https://www.vinted.fr/items/5403391218-test?referrer=catalog",
-                "title": "Accessoire test",
+                "listing_id": 8131026948,
+                "canonical_url": "https://www.vinted.fr/items/8131026948-test",
+                "source_url": "https://www.vinted.fr/items/8131026948-test?referrer=catalog",
+                "title": "Accessoire existant",
                 "brand": "Zara",
                 "size_label": None,
                 "condition_label": "Très bon état",
@@ -415,15 +486,16 @@ def test_discovery_catalog_scan_completed_materializes_mutable_manifest_for_sour
                 "price_currency": "EUR",
                 "total_price_amount_cents": 1650,
                 "total_price_currency": "EUR",
-                "image_url": "https://images/5403391218.webp",
-                "source_event_id": "batch-event-1",
-                "source_manifest_id": "manifest-1",
+                "image_url": "https://images/8131026948.webp",
+                "source_event_id": "batch-event-2",
+                "source_manifest_id": "manifest-2",
             }
         ],
-        event_id="projection-event-3",
+        event_id="projection-event-4",
     )
 
-    assert connection.mutable_manifests["manifest-1"]["event_id"] == "batch-event-1"
-    assert connection.mutable_manifests["manifest-1"]["manifest_type"] == "listing-seen-evidence-batch"
-    assert connection.listing_identity[5403391218]["last_manifest_id"] == "manifest-1"
-    assert connection.listing_presence_summary[5403391218]["last_manifest_id"] == "manifest-1"
+    assert connection.listing_current_state[8131026948]["seen_in_latest_primary_scan"] is True
+    assert isinstance(connection.listing_current_state[8131026948]["state_explanation_json"], dict)
+    assert connection.listing_current_state[8131026948]["latest_probe_outcome"] == "active"
+
+
