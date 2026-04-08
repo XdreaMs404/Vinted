@@ -666,6 +666,7 @@ class PostgresMutableTruthRepository:
         )
         root_catalog_id = int(catalog["root_catalog_id"])
         seen_listing_ids: set[int] = set()
+        projected_manifest_ids: set[str] = set()
 
         for raw_row in listing_rows:
             row = dict(raw_row)
@@ -675,6 +676,24 @@ class PostgresMutableTruthRepository:
             source_manifest_id = _optional_str(row.get("source_manifest_id"))
             observed_at = str(row["observed_at"])
             sighting_count = max(int(row.get("sighting_count") or 1), 1)
+
+            if source_manifest_id is not None and source_manifest_id not in projected_manifest_ids:
+                self._ensure_mutable_manifest_reference(
+                    manifest_id=source_manifest_id,
+                    event_id=source_event_id,
+                    event_type="vinted.discovery.listing-seen.batch",
+                    aggregate_type="discovery-run",
+                    aggregate_id=run_id,
+                    occurred_at=observed_at,
+                    manifest_type="listing-seen-evidence-batch",
+                    projected_at=completed_at,
+                    metadata={
+                        "run_id": run_id,
+                        "catalog_id": catalog_id,
+                        "listing_count": len(listing_rows),
+                    },
+                )
+                projected_manifest_ids.add(source_manifest_id)
 
             merged_identity = self._merge_listing_identity(
                 listing_id=listing_id,
@@ -1312,6 +1331,40 @@ class PostgresMutableTruthRepository:
                 "metadata_json": canonical_json(resolved_metadata),
                 "payload_checksum": sha256_hex(payload_json),
             }
+        )
+
+    def _ensure_mutable_manifest_reference(
+        self,
+        *,
+        manifest_id: str | None,
+        event_id: str | None,
+        event_type: str,
+        aggregate_type: str,
+        aggregate_id: str,
+        occurred_at: str,
+        manifest_type: str,
+        projected_at: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> None:
+        resolved_manifest_id = _optional_str(manifest_id)
+        resolved_event_id = _optional_str(event_id)
+        if resolved_manifest_id is None or resolved_event_id is None:
+            return
+        self.upsert_mutable_manifest(
+            manifest_id=resolved_manifest_id,
+            event_id=resolved_event_id,
+            event_type=event_type,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            occurred_at=occurred_at,
+            manifest_type=manifest_type,
+            projection_status="projected",
+            projected_at=projected_at or occurred_at,
+            last_error=None,
+            metadata={
+                "source": "mutable-truth-direct-projector",
+                **dict(metadata or {}),
+            },
         )
 
     def _merge_listing_identity(
