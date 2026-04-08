@@ -137,9 +137,13 @@ def test_clickhouse_serving_schema_v002_defines_fact_ttl_rollups_and_latest_serv
     for view_name in CLICKHOUSE_MATERIALIZED_VIEWS:
         assert f"CREATE MATERIALIZED VIEW IF NOT EXISTS {view_name}" in migration_sql
 
-    assert "TTL observed_at + INTERVAL 730 DAY" in migration_sql
-    assert "TTL probed_at + INTERVAL 730 DAY" in migration_sql
-    assert "TTL occurred_at + INTERVAL 730 DAY" in migration_sql
+    assert "TTL toDateTime(observed_at) + INTERVAL 730 DAY" in migration_sql
+    assert "TTL toDateTime(probed_at) + INTERVAL 730 DAY" in migration_sql
+    assert "TTL toDateTime(occurred_at) + INTERVAL 730 DAY" in migration_sql
+    assert "allow_nullable_key = 1" in migration_sql
+    assert "sumState(toInt64(ifNull(price_amount_cents, 0))) AS price_sum_state" in migration_sql
+    assert "sumState(toUInt64(price_amount_cents IS NOT NULL)) AS price_count_state" in migration_sql
+    assert "LowCardinality(Nullable(String))" in migration_sql
     assert "TTL bucket_start + INTERVAL 3650 DAY" in migration_sql
     assert "TTL bucket_date + INTERVAL 3650 DAY" in migration_sql
     assert "ENGINE = AggregatingMergeTree" in migration_sql

@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS fact_listing_seen_events (
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(observed_at)
 ORDER BY (observed_at, listing_id, event_id)
-TTL observed_at + INTERVAL 730 DAY
+TTL toDateTime(observed_at) + INTERVAL 730 DAY
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS fact_listing_probe_events (
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS fact_listing_probe_events (
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(probed_at)
 ORDER BY (probed_at, listing_id, event_id)
-TTL probed_at + INTERVAL 730 DAY
+TTL toDateTime(probed_at) + INTERVAL 730 DAY
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS fact_listing_change_events (
@@ -131,12 +131,12 @@ CREATE TABLE IF NOT EXISTS fact_listing_change_events (
     producer LowCardinality(String) DEFAULT 'platform.clickhouse_ingest',
     listing_id UInt64,
     change_kind LowCardinality(String),
-    previous_state_code Nullable(LowCardinality(String)),
-    current_state_code Nullable(LowCardinality(String)),
-    previous_basis_kind Nullable(LowCardinality(String)),
-    current_basis_kind Nullable(LowCardinality(String)),
-    previous_confidence_label Nullable(LowCardinality(String)),
-    current_confidence_label Nullable(LowCardinality(String)),
+    previous_state_code LowCardinality(Nullable(String)),
+    current_state_code LowCardinality(Nullable(String)),
+    previous_basis_kind LowCardinality(Nullable(String)),
+    current_basis_kind LowCardinality(Nullable(String)),
+    previous_confidence_label LowCardinality(Nullable(String)),
+    current_confidence_label LowCardinality(Nullable(String)),
     previous_confidence_score Nullable(Float32),
     current_confidence_score Nullable(Float32),
     previous_price_amount_cents Nullable(Int32),
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS fact_listing_change_events (
     previous_view_count Nullable(Int32),
     current_view_count Nullable(Int32),
     follow_up_miss_count Nullable(UInt16),
-    probe_outcome Nullable(LowCardinality(String)),
+    probe_outcome LowCardinality(Nullable(String)),
     response_status Nullable(UInt16),
     primary_catalog_id Nullable(UInt64),
     primary_root_catalog_id Nullable(UInt64),
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS fact_listing_change_events (
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(occurred_at)
 ORDER BY (occurred_at, listing_id, change_kind, event_id)
-TTL occurred_at + INTERVAL 730 DAY
+TTL toDateTime(occurred_at) + INTERVAL 730 DAY
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS rollup_listing_seen_hourly (
@@ -351,12 +351,12 @@ CREATE TABLE IF NOT EXISTS serving_listing_latest_change (
     event_id String,
     manifest_id Nullable(String),
     change_kind LowCardinality(String),
-    previous_state_code Nullable(LowCardinality(String)),
-    current_state_code Nullable(LowCardinality(String)),
-    previous_basis_kind Nullable(LowCardinality(String)),
-    current_basis_kind Nullable(LowCardinality(String)),
-    previous_confidence_label Nullable(LowCardinality(String)),
-    current_confidence_label Nullable(LowCardinality(String)),
+    previous_state_code LowCardinality(Nullable(String)),
+    current_state_code LowCardinality(Nullable(String)),
+    previous_basis_kind LowCardinality(Nullable(String)),
+    current_basis_kind LowCardinality(Nullable(String)),
+    previous_confidence_label LowCardinality(Nullable(String)),
+    current_confidence_label LowCardinality(Nullable(String)),
     previous_confidence_score Nullable(Float32),
     current_confidence_score Nullable(Float32),
     previous_price_amount_cents Nullable(Int32),
@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS serving_listing_latest_change (
     previous_view_count Nullable(Int32),
     current_view_count Nullable(Int32),
     follow_up_miss_count Nullable(UInt16),
-    probe_outcome Nullable(LowCardinality(String)),
+    probe_outcome LowCardinality(Nullable(String)),
     response_status Nullable(UInt16),
     primary_catalog_id Nullable(UInt64),
     primary_root_catalog_id Nullable(UInt64),
@@ -400,12 +400,12 @@ SELECT
     sumState(toUInt64(1)) AS seen_events_state,
     uniqExactState(listing_id) AS unique_listing_state,
     sumState(toUInt64(1)) AS sighting_count_state,
-    sumState(if(price_amount_cents IS NULL, toInt64(0), toInt64(price_amount_cents))) AS price_sum_state,
-    sumState(if(price_amount_cents IS NULL, toUInt64(0), toUInt64(1))) AS price_count_state,
-    sumState(if(favourite_count IS NULL, toInt64(0), toInt64(favourite_count))) AS favourite_sum_state,
-    sumState(if(favourite_count IS NULL, toUInt64(0), toUInt64(1))) AS favourite_count_state,
-    sumState(if(view_count IS NULL, toInt64(0), toInt64(view_count))) AS view_sum_state,
-    sumState(if(view_count IS NULL, toUInt64(0), toUInt64(1))) AS view_count_state,
+    sumState(toInt64(ifNull(price_amount_cents, 0))) AS price_sum_state,
+    sumState(toUInt64(price_amount_cents IS NOT NULL)) AS price_count_state,
+    sumState(toInt64(ifNull(favourite_count, 0))) AS favourite_sum_state,
+    sumState(toUInt64(favourite_count IS NOT NULL)) AS favourite_count_state,
+    sumState(toInt64(ifNull(view_count, 0))) AS view_sum_state,
+    sumState(toUInt64(view_count IS NOT NULL)) AS view_count_state,
     minState(observed_at) AS first_seen_state,
     maxState(observed_at) AS last_seen_state
 FROM fact_listing_seen_events
@@ -436,12 +436,12 @@ SELECT
     sumState(toUInt64(1)) AS seen_events_state,
     uniqExactState(listing_id) AS unique_listing_state,
     sumState(toUInt64(1)) AS sighting_count_state,
-    sumState(if(price_amount_cents IS NULL, toInt64(0), toInt64(price_amount_cents))) AS price_sum_state,
-    sumState(if(price_amount_cents IS NULL, toUInt64(0), toUInt64(1))) AS price_count_state,
-    sumState(if(favourite_count IS NULL, toInt64(0), toInt64(favourite_count))) AS favourite_sum_state,
-    sumState(if(favourite_count IS NULL, toUInt64(0), toUInt64(1))) AS favourite_count_state,
-    sumState(if(view_count IS NULL, toInt64(0), toInt64(view_count))) AS view_sum_state,
-    sumState(if(view_count IS NULL, toUInt64(0), toUInt64(1))) AS view_count_state,
+    sumState(toInt64(ifNull(price_amount_cents, 0))) AS price_sum_state,
+    sumState(toUInt64(price_amount_cents IS NOT NULL)) AS price_count_state,
+    sumState(toInt64(ifNull(favourite_count, 0))) AS favourite_sum_state,
+    sumState(toUInt64(favourite_count IS NOT NULL)) AS favourite_count_state,
+    sumState(toInt64(ifNull(view_count, 0))) AS view_sum_state,
+    sumState(toUInt64(view_count IS NOT NULL)) AS view_count_state,
     minState(observed_at) AS first_seen_state,
     maxState(observed_at) AS last_seen_state
 FROM fact_listing_seen_events
@@ -469,12 +469,12 @@ SELECT
     price_band_code,
     sumState(toUInt64(1)) AS seen_events_state,
     uniqExactState(listing_id) AS unique_listing_state,
-    sumState(if(price_amount_cents IS NULL, toInt64(0), toInt64(price_amount_cents))) AS price_sum_state,
-    sumState(if(price_amount_cents IS NULL, toUInt64(0), toUInt64(1))) AS price_count_state,
-    sumState(if(favourite_count IS NULL, toInt64(0), toInt64(favourite_count))) AS favourite_sum_state,
-    sumState(if(favourite_count IS NULL, toUInt64(0), toUInt64(1))) AS favourite_count_state,
-    sumState(if(view_count IS NULL, toInt64(0), toInt64(view_count))) AS view_sum_state,
-    sumState(if(view_count IS NULL, toUInt64(0), toUInt64(1))) AS view_count_state,
+    sumState(toInt64(ifNull(price_amount_cents, 0))) AS price_sum_state,
+    sumState(toUInt64(price_amount_cents IS NOT NULL)) AS price_count_state,
+    sumState(toInt64(ifNull(favourite_count, 0))) AS favourite_sum_state,
+    sumState(toUInt64(favourite_count IS NOT NULL)) AS favourite_count_state,
+    sumState(toInt64(ifNull(view_count, 0))) AS view_sum_state,
+    sumState(toUInt64(view_count IS NOT NULL)) AS view_count_state,
     minState(observed_at) AS first_seen_state,
     maxState(observed_at) AS last_seen_state
 FROM fact_listing_seen_events
@@ -501,12 +501,12 @@ SELECT
     price_band_code,
     sumState(toUInt64(1)) AS seen_events_state,
     uniqExactState(listing_id) AS unique_listing_state,
-    sumState(if(price_amount_cents IS NULL, toInt64(0), toInt64(price_amount_cents))) AS price_sum_state,
-    sumState(if(price_amount_cents IS NULL, toUInt64(0), toUInt64(1))) AS price_count_state,
-    sumState(if(favourite_count IS NULL, toInt64(0), toInt64(favourite_count))) AS favourite_sum_state,
-    sumState(if(favourite_count IS NULL, toUInt64(0), toUInt64(1))) AS favourite_count_state,
-    sumState(if(view_count IS NULL, toInt64(0), toInt64(view_count))) AS view_sum_state,
-    sumState(if(view_count IS NULL, toUInt64(0), toUInt64(1))) AS view_count_state,
+    sumState(toInt64(ifNull(price_amount_cents, 0))) AS price_sum_state,
+    sumState(toUInt64(price_amount_cents IS NOT NULL)) AS price_count_state,
+    sumState(toInt64(ifNull(favourite_count, 0))) AS favourite_sum_state,
+    sumState(toUInt64(favourite_count IS NOT NULL)) AS favourite_count_state,
+    sumState(toInt64(ifNull(view_count, 0))) AS view_sum_state,
+    sumState(toUInt64(view_count IS NOT NULL)) AS view_count_state,
     minState(observed_at) AS first_seen_state,
     maxState(observed_at) AS last_seen_state
 FROM fact_listing_seen_events
