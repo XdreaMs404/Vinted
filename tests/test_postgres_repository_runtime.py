@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import psycopg
 from psycopg.rows import dict_row
 
@@ -47,8 +48,8 @@ class RuntimeProjectionConnection:
                 "aging_followup": params[13],
                 "stale_followup": params[14],
                 "last_error": params[15],
-                "state_refresh_summary_json": params[16],
-                "config_json": params[17],
+                "state_refresh_summary_json": json.loads(str(params[16])),
+                "config_json": json.loads(str(params[17])),
                 "last_event_id": params[18],
                 "last_manifest_id": params[19],
                 "projected_at": params[20],
@@ -75,7 +76,7 @@ class RuntimeProjectionConnection:
                 "requested_action": params[12],
                 "requested_at": params[13],
                 "heartbeat_at": params[14],
-                "config_json": params[15],
+                "config_json": json.loads(str(params[15])),
                 "last_event_id": params[16],
                 "last_manifest_id": params[17],
                 "projected_at": params[18],

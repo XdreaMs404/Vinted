@@ -2077,13 +2077,21 @@ def _safe_identifier(value: str, *, field_name: str) -> str:
 
 
 def _decode_json_object(value: object) -> dict[str, object]:
-    if value in {None, ""}:
+    if value is None:
         return {}
-    try:
-        decoded = json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {}
-    return decoded if isinstance(decoded, dict) else {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="ignore")
+    if isinstance(value, str):
+        if value == "":
+            return {}
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
 
 
 
