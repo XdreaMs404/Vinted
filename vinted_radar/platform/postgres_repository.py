@@ -70,7 +70,7 @@ class PostgresMutableTruthRepository:
                 "state_refresh_summary": {},
                 "config": dict(config),
             },
-            event_id=_projection_event_id("runtime-cycle-start", cycle_id, started_at),
+            event_id=None,
         )
         self.set_runtime_controller_state(
             status="running",
@@ -98,7 +98,7 @@ class PostgresMutableTruthRepository:
         cycle["finished_at"] = cycle.get("finished_at")
         self.project_runtime_cycle_snapshot(
             cycle=cycle,
-            event_id=_projection_event_id("runtime-cycle-phase", cycle_id, phase, _utc_now()),
+            event_id=None,
         )
         controller = self._runtime_controller_row()
         if controller is not None and _optional_str(controller.get("active_cycle_id")) == cycle_id:
@@ -141,7 +141,7 @@ class PostgresMutableTruthRepository:
         )
         self.project_runtime_cycle_snapshot(
             cycle=updated_cycle,
-            event_id=_projection_event_id("runtime-cycle-complete", cycle_id, status, finished_at),
+            event_id=None,
         )
 
         controller_status = _controller_status_from_runtime_cycle_status(status)
@@ -247,14 +247,6 @@ class PostgresMutableTruthRepository:
             payload["requested_action"] = "none"
 
         heartbeat_at = _optional_str(payload.get("updated_at"))
-        event_id = _projection_event_id(
-            "runtime-controller",
-            payload.get("status") or "idle",
-            payload.get("phase") or "idle",
-            payload.get("updated_at") or _utc_now(),
-            payload.get("latest_cycle_id") or "none",
-            payload.get("requested_action") or "none",
-        )
         self._upsert_runtime_controller(
             {
                 "controller_id": _RUNTIME_CONTROLLER_SINGLETON_ID,
@@ -273,7 +265,7 @@ class PostgresMutableTruthRepository:
                 "requested_at": payload.get("requested_at"),
                 "heartbeat_at": heartbeat_at,
                 "config_json": canonical_json(payload.get("config") or {}),
-                "last_event_id": event_id,
+                "last_event_id": None,
                 "last_manifest_id": None,
                 "projected_at": payload.get("updated_at") or _utc_now(),
             }
@@ -768,7 +760,7 @@ class PostgresMutableTruthRepository:
     # ------------------------------------------------------------------
     # Runtime/control-plane projection
     # ------------------------------------------------------------------
-    def project_runtime_cycle_snapshot(self, *, cycle: Mapping[str, object], event_id: str) -> None:
+    def project_runtime_cycle_snapshot(self, *, cycle: Mapping[str, object], event_id: str | None) -> None:
         payload = {
             "cycle_id": str(cycle["cycle_id"]),
             "started_at": str(cycle["started_at"]),
@@ -788,13 +780,13 @@ class PostgresMutableTruthRepository:
             "last_error": _optional_str(cycle.get("last_error")),
             "state_refresh_summary_json": canonical_json(cycle.get("state_refresh_summary") or {}),
             "config_json": canonical_json(cycle.get("config") or {}),
-            "last_event_id": event_id,
+            "last_event_id": _optional_str(event_id),
             "last_manifest_id": None,
             "projected_at": _coalesce_str(cycle.get("finished_at"), cycle.get("started_at"), _utc_now()),
         }
         self._upsert_runtime_cycle(payload)
 
-    def project_runtime_controller_snapshot(self, *, controller: Mapping[str, object], event_id: str) -> None:
+    def project_runtime_controller_snapshot(self, *, controller: Mapping[str, object], event_id: str | None) -> None:
         payload = {
             "controller_id": _RUNTIME_CONTROLLER_SINGLETON_ID,
             "status": str(controller["status"]),
@@ -812,7 +804,7 @@ class PostgresMutableTruthRepository:
             "requested_at": _optional_str(controller.get("requested_at")),
             "heartbeat_at": _optional_str(controller.get("updated_at")),
             "config_json": canonical_json(controller.get("config") or {}),
-            "last_event_id": event_id,
+            "last_event_id": _optional_str(event_id),
             "last_manifest_id": None,
             "projected_at": _coalesce_str(controller.get("updated_at"), _utc_now()),
         }
@@ -1210,7 +1202,7 @@ class PostgresMutableTruthRepository:
         run_id: str,
         observed_at: str,
         row: Mapping[str, object],
-        source_event_id: str,
+        source_event_id: str | None,
         source_manifest_id: str | None,
     ) -> dict[str, object]:
         existing = self.listing_identity(listing_id) or {}
@@ -1264,7 +1256,7 @@ class PostgresMutableTruthRepository:
         observed_at: str,
         sighting_count: int,
         identity: Mapping[str, object],
-        source_event_id: str,
+        source_event_id: str | None,
         source_manifest_id: str | None,
     ) -> dict[str, object]:
         existing = self.listing_presence_summary(listing_id)
@@ -1333,7 +1325,7 @@ class PostgresMutableTruthRepository:
         listing_id: int,
         *,
         now: str,
-        source_event_id: str,
+        source_event_id: str | None,
         source_manifest_id: str | None,
     ) -> None:
         identity = self.listing_identity(listing_id)
@@ -2235,11 +2227,6 @@ def _controller_phase_from_runtime_state(status: str, phase: str) -> str:
     if status == "idle":
         return "idle"
     return phase
-
-
-def _projection_event_id(*parts: object) -> str:
-    normalized = ":".join(str(part) for part in parts if part is not None)
-    return f"sqlite-backfill:{uuid.uuid5(uuid.NAMESPACE_URL, normalized)}"
 
 
 __all__ = [

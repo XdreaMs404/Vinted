@@ -94,7 +94,6 @@ class PostgresBackfillService:
             ).fetchall()
         ]
         for row in rows:
-            event_id = _backfill_event_id("discovery-run", row["run_id"], row["started_at"], row.get("finished_at"))
             self.target._upsert_discovery_run(
                 {
                     "run_id": row["run_id"],
@@ -113,7 +112,7 @@ class PostgresBackfillService:
                     "raw_listing_hits": int(row["raw_listing_hits"]),
                     "unique_listing_hits": int(row["unique_listing_hits"]),
                     "last_error": row["last_error"],
-                    "last_event_id": event_id,
+                    "last_event_id": None,
                     "last_manifest_id": None,
                     "projected_at": row["finished_at"] or row["started_at"],
                 }
@@ -151,7 +150,6 @@ class PostgresBackfillService:
         for row in rows:
             catalog_id = int(row["catalog_id"])
             last_run_id = latest_runs.get(catalog_id)
-            event_id = _backfill_event_id("catalog", catalog_id, row["synced_at"], last_run_id)
             self.target._upsert_catalog(
                 {
                     "catalog_id": catalog_id,
@@ -168,7 +166,7 @@ class PostgresBackfillService:
                     "order_index": row["order_index"],
                     "synced_at": row["synced_at"],
                     "last_run_id": last_run_id,
-                    "last_event_id": event_id,
+                    "last_event_id": None,
                     "last_manifest_id": None,
                     "projected_at": row["synced_at"],
                 }
@@ -215,7 +213,6 @@ class PostgresBackfillService:
             listing_id = int(item["listing_id"])
             listing_row = listings_by_id.get(listing_id, {})
             run_id_row = run_ids.get(listing_id, {})
-            event_id = _backfill_event_id("listing", listing_id, item["last_seen_at"], reference_now)
             first_seen_run_id = _optional_str(run_id_row.get("first_seen_run_id")) or _optional_str(item.get("last_observed_run_id")) or _optional_str(listing_row.get("last_seen_run_id")) or "backfill"
             last_seen_run_id = _optional_str(run_id_row.get("last_seen_run_id")) or _optional_str(item.get("last_observed_run_id")) or _optional_str(listing_row.get("last_seen_run_id")) or first_seen_run_id
             self.target._upsert_listing_identity(
@@ -244,7 +241,7 @@ class PostgresBackfillService:
                     "last_seen_at": item["last_seen_at"],
                     "first_seen_run_id": first_seen_run_id,
                     "last_seen_run_id": last_seen_run_id,
-                    "last_event_id": event_id,
+                    "last_event_id": None,
                     "last_manifest_id": None,
                     "projected_at": reference_now,
                 }
@@ -269,7 +266,7 @@ class PostgresBackfillService:
                     "price_band_code": price_band_code,
                     "price_band_label": price_band_label,
                     "price_band_sort_order": price_band_sort_order,
-                    "last_event_id": event_id,
+                    "last_event_id": None,
                     "last_manifest_id": None,
                     "projected_at": reference_now,
                 }
@@ -291,7 +288,7 @@ class PostgresBackfillService:
                     "latest_probe_response_status": latest_probe.get("response_status"),
                     "latest_probe_outcome": latest_probe.get("probe_outcome"),
                     "latest_probe_error_message": latest_probe.get("error_message"),
-                    "last_event_id": event_id,
+                    "last_event_id": None,
                     "last_manifest_id": None,
                     "projected_at": reference_now,
                 }
@@ -300,7 +297,7 @@ class PostgresBackfillService:
             self.target._refresh_projected_listing(
                 listing_id,
                 now=reference_now,
-                source_event_id=event_id,
+                source_event_id=None,
                 source_manifest_id=None,
             )
         return len(inputs)
@@ -318,7 +315,7 @@ class PostgresBackfillService:
                 continue
             self.target.project_runtime_cycle_snapshot(
                 cycle=cycle,
-                event_id=_backfill_event_id("runtime-cycle", cycle_id, cycle.get("started_at"), cycle.get("finished_at")),
+                event_id=None,
             )
         return len(cycle_ids)
 
@@ -328,12 +325,7 @@ class PostgresBackfillService:
             return 0
         self.target.project_runtime_controller_snapshot(
             controller=controller,
-            event_id=_backfill_event_id(
-                "runtime-controller",
-                controller.get("status"),
-                controller.get("phase"),
-                controller.get("updated_at"),
-            ),
+            event_id=None,
         )
         return 1
 
@@ -385,10 +377,6 @@ def _optional_str(value: object) -> str | None:
         return None
     candidate = str(value).strip()
     return candidate or None
-
-
-def _backfill_event_id(*parts: object) -> str:
-    return "sqlite-backfill:" + ":".join(str(part) for part in parts if part is not None)
 
 
 def _utc_now() -> str:

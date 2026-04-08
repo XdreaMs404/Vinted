@@ -20,8 +20,8 @@ class SpyMutableTruthRepository:
         self.listing_presence_summaries: dict[int, dict[str, object]] = {}
         self.listing_current_states: dict[int, dict[str, object]] = {}
         self.refresh_calls: list[tuple[int, str, str | None, str | None]] = []
-        self.runtime_cycles: list[tuple[dict[str, object], str]] = []
-        self.runtime_controllers: list[tuple[dict[str, object], str]] = []
+        self.runtime_cycles: list[tuple[dict[str, object], str | None]] = []
+        self.runtime_controllers: list[tuple[dict[str, object], str | None]] = []
         self.closed = False
 
     def close(self) -> None:
@@ -77,10 +77,10 @@ class SpyMutableTruthRepository:
     ) -> None:
         self.refresh_calls.append((listing_id, now, source_event_id, source_manifest_id))
 
-    def project_runtime_cycle_snapshot(self, *, cycle: dict[str, object], event_id: str) -> None:
+    def project_runtime_cycle_snapshot(self, *, cycle: dict[str, object], event_id: str | None) -> None:
         self.runtime_cycles.append((dict(cycle), event_id))
 
-    def project_runtime_controller_snapshot(self, *, controller: dict[str, object], event_id: str) -> None:
+    def project_runtime_controller_snapshot(self, *, controller: dict[str, object], event_id: str | None) -> None:
         self.runtime_controllers.append((dict(controller), event_id))
 
 
@@ -235,13 +235,20 @@ def test_backfill_postgres_mutable_truth_projects_sqlite_rows_into_mutable_truth
     assert report.as_dict()["postgres_dsn"] == "postgresql://***@db.example/vinted_radar"
 
     assert target.discovery_runs[run_id]["status"] == "completed"
+    assert target.discovery_runs[run_id]["last_event_id"] is None
     assert target.catalogs[2001]["last_run_id"] == run_id
+    assert target.catalogs[2001]["last_event_id"] is None
     assert target.listing_identities[9001]["canonical_url"] == "https://www.vinted.fr/items/9001-runtime"
+    assert target.listing_identities[9001]["last_event_id"] is None
     assert target.listing_presence_summaries[9001]["freshness_bucket"] == "first-pass-only"
+    assert target.listing_presence_summaries[9001]["last_event_id"] is None
     assert target.listing_current_states[9001]["latest_probe_outcome"] == "active"
+    assert target.listing_current_states[9001]["last_event_id"] is None
     assert target.runtime_cycles[0][0]["cycle_id"] == cycle_id
     assert target.runtime_cycles[0][0]["status"] == "completed"
+    assert target.runtime_cycles[0][1] is None
     assert target.runtime_controllers[0][0]["status"] == "idle"
+    assert target.runtime_controllers[0][1] is None
     assert target.refresh_calls == [
         (
             9001,
