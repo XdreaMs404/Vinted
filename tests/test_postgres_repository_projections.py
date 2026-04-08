@@ -204,11 +204,14 @@ class ProjectionConnection:
             return _QueryResult(rows)
         if normalized.startswith("INSERT INTO platform_listing_current_state"):
             assert params is not None
+            listing_id = int(params[0])
+            if listing_id not in self.listing_identity:
+                raise AssertionError(f"missing listing identity for current-state row: {listing_id}")
             last_event_id = None if params[18] is None else str(params[18])
             if last_event_id is not None and last_event_id not in self.events:
                 raise AssertionError(f"missing parent platform_event for current-state row: {last_event_id}")
-            self.listing_current_state[int(params[0])] = {
-                "listing_id": int(params[0]),
+            self.listing_current_state[listing_id] = {
+                "listing_id": listing_id,
                 "state_code": str(params[1]),
                 "state_label": str(params[2]),
                 "basis_kind": str(params[3]),
@@ -273,16 +276,53 @@ def test_discovery_run_started_materializes_parent_projection_event() -> None:
 
 def test_state_refresh_probe_projection_materializes_parent_projection_event() -> None:
     connection = ProjectionConnection()
+    connection.events["batch-event-probe-1"] = {
+        "event_id": "batch-event-probe-1",
+        "schema_version": 1,
+        "event_type": "vinted.state-refresh.probe.batch",
+        "aggregate_type": "state-refresh",
+        "aggregate_id": "all",
+        "occurred_at": "2026-04-08T18:05:00+00:00",
+        "producer": "vinted_radar.services.state_refresh",
+        "partition_key": "9001",
+        "payload_json": {},
+        "metadata_json": {},
+        "payload_checksum": "checksum",
+    }
     repository = PostgresMutableTruthRepository(connection)
 
     repository.project_state_refresh_probes(
         probe_rows=[
             {
                 "listing_id": 9001,
+                "canonical_url": "https://www.vinted.fr/items/9001-active",
+                "source_url": "https://www.vinted.fr/items/9001-active?referrer=catalog",
+                "title": "Runtime robe",
+                "brand": "Zara",
+                "size_label": "M",
+                "condition_label": "Très bon état",
+                "price_amount_cents": 1500,
+                "price_currency": "EUR",
+                "total_price_amount_cents": 1650,
+                "total_price_currency": "EUR",
+                "image_url": "https://images/9001.webp",
+                "favourite_count": 12,
+                "view_count": 30,
+                "user_id": 42,
+                "user_login": "seller42",
+                "user_profile_url": "https://www.vinted.fr/member/42",
+                "created_at_ts": 1712600000,
+                "primary_catalog_id": 1123,
+                "primary_root_catalog_id": 1904,
+                "first_seen_at": "2026-04-08T18:00:00+00:00",
+                "last_seen_at": "2026-04-08T18:04:00+00:00",
+                "last_observed_run_id": "run-123",
                 "probed_at": "2026-04-08T18:05:00+00:00",
                 "response_status": 200,
                 "probe_outcome": "active",
                 "error_message": None,
+                "source_event_id": "batch-event-probe-1",
+                "source_manifest_id": "manifest-probe-1",
             }
         ],
         projected_at="2026-04-08T18:05:00+00:00",
@@ -291,7 +331,10 @@ def test_state_refresh_probe_projection_materializes_parent_projection_event() -
 
     assert "projection-event-2" in connection.events
     assert connection.events["projection-event-2"]["event_type"] == "vinted.mutable-truth.state-refresh.probes"
-    assert connection.listing_current_state[9001]["last_event_id"] == "projection-event-2"
+    assert connection.mutable_manifests["manifest-probe-1"]["event_id"] == "batch-event-probe-1"
+    assert connection.listing_identity[9001]["canonical_url"] == "https://www.vinted.fr/items/9001-active"
+    assert connection.listing_current_state[9001]["last_event_id"] == "batch-event-probe-1"
+    assert connection.listing_current_state[9001]["last_manifest_id"] == "manifest-probe-1"
     assert connection.listing_current_state[9001]["latest_probe_outcome"] == "active"
 
 

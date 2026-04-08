@@ -987,6 +987,63 @@ class PostgresMutableTruthRepository:
             listing_id = int(row["listing_id"])
             source_event_id = _optional_str(row.get("source_event_id")) or event_id
             source_manifest_id = _optional_str(row.get("source_manifest_id")) or manifest_id
+            if source_manifest_id is not None:
+                self._ensure_mutable_manifest_reference(
+                    manifest_id=source_manifest_id,
+                    event_id=source_event_id,
+                    event_type="vinted.state-refresh.probe.batch",
+                    aggregate_type="state-refresh",
+                    aggregate_id=str(row.get("targeted_listing_id") or "all"),
+                    occurred_at=str(row.get("probed_at") or projected_at),
+                    manifest_type="probe-evidence-batch",
+                    projected_at=projected_at,
+                    metadata={
+                        "listing_id": listing_id,
+                    },
+                )
+            if self.listing_identity(listing_id) is None:
+                first_seen_at = _coalesce_str(
+                    row.get("first_seen_at"),
+                    _coalesce_str(row.get("last_seen_at"), row.get("probed_at"), projected_at),
+                )
+                last_seen_at = _coalesce_str(row.get("last_seen_at"), row.get("probed_at"), projected_at)
+                self._upsert_listing_identity(
+                    {
+                        "listing_id": listing_id,
+                        "canonical_url": _coalesce_str(
+                            row.get("canonical_url"),
+                            _coalesce_str(row.get("requested_url"), row.get("final_url"), ""),
+                        ),
+                        "source_url": _coalesce_str(
+                            row.get("source_url"),
+                            _coalesce_str(row.get("requested_url"), _coalesce_str(row.get("canonical_url"), row.get("final_url"), "")),
+                        ),
+                        "title": _optional_str(row.get("title")),
+                        "brand": _optional_str(row.get("brand")),
+                        "size_label": _optional_str(row.get("size_label")),
+                        "condition_label": _optional_str(row.get("condition_label")),
+                        "price_amount_cents": _optional_int(row.get("price_amount_cents")),
+                        "price_currency": _optional_str(row.get("price_currency")),
+                        "total_price_amount_cents": _optional_int(row.get("total_price_amount_cents")),
+                        "total_price_currency": _optional_str(row.get("total_price_currency")),
+                        "image_url": _optional_str(row.get("image_url")),
+                        "favourite_count": _optional_int(row.get("favourite_count")),
+                        "view_count": _optional_int(row.get("view_count")),
+                        "user_id": _optional_int(row.get("user_id")),
+                        "user_login": _optional_str(row.get("user_login")),
+                        "user_profile_url": _optional_str(row.get("user_profile_url")),
+                        "created_at_ts": _optional_int(row.get("created_at_ts")),
+                        "primary_catalog_id": _optional_int(row.get("primary_catalog_id")),
+                        "primary_root_catalog_id": _optional_int(row.get("primary_root_catalog_id")),
+                        "first_seen_at": first_seen_at,
+                        "last_seen_at": last_seen_at,
+                        "first_seen_run_id": _optional_str(row.get("first_seen_run_id")),
+                        "last_seen_run_id": _optional_str(row.get("last_observed_run_id")),
+                        "last_event_id": source_event_id,
+                        "last_manifest_id": source_manifest_id,
+                        "projected_at": projected_at,
+                    }
+                )
             current = self.listing_current_state(listing_id) or self._default_listing_current_state(listing_id)
             current.update(
                 {

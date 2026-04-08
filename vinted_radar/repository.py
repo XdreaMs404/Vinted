@@ -1833,6 +1833,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 SELECT
                     listing_observations.listing_id,
                     COUNT(*) AS observation_count,
+                    MIN(listing_observations.observed_at) AS first_seen_at,
                     MAX(listing_observations.observed_at) AS last_seen_at
                 FROM listing_observations
                 GROUP BY listing_observations.listing_id
@@ -1870,7 +1871,26 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             SELECT
                 observation_summary.listing_id,
                 listings.canonical_url,
+                listings.source_url,
+                listings.title,
+                listings.brand,
+                listings.size_label,
+                listings.condition_label,
+                listings.price_amount_cents,
+                listings.price_currency,
+                listings.total_price_amount_cents,
+                listings.total_price_currency,
+                listings.image_url,
+                listings.favourite_count,
+                listings.view_count,
+                listings.user_id,
+                listings.user_login,
+                listings.user_profile_url,
+                listings.created_at_ts,
+                listings.primary_catalog_id,
+                listings.primary_root_catalog_id,
                 observation_summary.observation_count,
+                observation_summary.first_seen_at,
                 observation_summary.last_seen_at,
                 CASE
                     WHEN (julianday(?) - julianday(observation_summary.last_seen_at)) * 24.0 < 0 THEN 0.0

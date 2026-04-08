@@ -98,6 +98,28 @@ class StateRefreshService:
                 probe_records.append(
                     {
                         "listing_id": listing_id_value,
+                        "canonical_url": target.get("canonical_url"),
+                        "source_url": target.get("source_url"),
+                        "title": target.get("title"),
+                        "brand": target.get("brand"),
+                        "size_label": target.get("size_label"),
+                        "condition_label": target.get("condition_label"),
+                        "price_amount_cents": target.get("price_amount_cents"),
+                        "price_currency": target.get("price_currency"),
+                        "total_price_amount_cents": target.get("total_price_amount_cents"),
+                        "total_price_currency": target.get("total_price_currency"),
+                        "image_url": target.get("image_url"),
+                        "favourite_count": target.get("favourite_count"),
+                        "view_count": target.get("view_count"),
+                        "user_id": target.get("user_id"),
+                        "user_login": target.get("user_login"),
+                        "user_profile_url": target.get("user_profile_url"),
+                        "created_at_ts": target.get("created_at_ts"),
+                        "primary_catalog_id": target.get("primary_catalog_id"),
+                        "primary_root_catalog_id": target.get("primary_root_catalog_id"),
+                        "first_seen_at": target.get("first_seen_at"),
+                        "last_seen_at": target.get("last_seen_at"),
+                        "last_observed_run_id": target.get("last_observed_run_id"),
                         "probed_at": probed_at,
                         "requested_url": requested_url,
                         "final_url": page.url,
@@ -124,6 +146,28 @@ class StateRefreshService:
                 probe_records.append(
                     {
                         "listing_id": listing_id_value,
+                        "canonical_url": target.get("canonical_url"),
+                        "source_url": target.get("source_url"),
+                        "title": target.get("title"),
+                        "brand": target.get("brand"),
+                        "size_label": target.get("size_label"),
+                        "condition_label": target.get("condition_label"),
+                        "price_amount_cents": target.get("price_amount_cents"),
+                        "price_currency": target.get("price_currency"),
+                        "total_price_amount_cents": target.get("total_price_amount_cents"),
+                        "total_price_currency": target.get("total_price_currency"),
+                        "image_url": target.get("image_url"),
+                        "favourite_count": target.get("favourite_count"),
+                        "view_count": target.get("view_count"),
+                        "user_id": target.get("user_id"),
+                        "user_login": target.get("user_login"),
+                        "user_profile_url": target.get("user_profile_url"),
+                        "created_at_ts": target.get("created_at_ts"),
+                        "primary_catalog_id": target.get("primary_catalog_id"),
+                        "primary_root_catalog_id": target.get("primary_root_catalog_id"),
+                        "first_seen_at": target.get("first_seen_at"),
+                        "last_seen_at": target.get("last_seen_at"),
+                        "last_observed_run_id": target.get("last_observed_run_id"),
                         "probed_at": probed_at,
                         "requested_url": requested_url,
                         "final_url": None,
@@ -145,6 +189,9 @@ class StateRefreshService:
             probe_records=probe_records,
         )
         if probe_batch is not None:
+            for record in probe_records:
+                record["source_event_id"] = probe_batch.get("event_id")
+                record["source_manifest_id"] = probe_batch.get("manifest_id")
             evidence_batches.append(probe_batch)
 
         self._project_state_refresh_probes(reference_now=reference_now, probe_records=probe_records)
