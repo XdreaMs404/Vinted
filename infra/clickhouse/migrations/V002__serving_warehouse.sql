@@ -198,7 +198,7 @@ ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(bucket_start)
 ORDER BY (bucket_start, listing_id, primary_root_catalog_id, primary_catalog_id, brand)
 TTL bucket_start + INTERVAL 3650 DAY
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192, allow_nullable_key = 1;
 
 CREATE TABLE IF NOT EXISTS rollup_listing_seen_daily (
     bucket_date Date,
@@ -226,7 +226,7 @@ ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(bucket_date)
 ORDER BY (bucket_date, listing_id, primary_root_catalog_id, primary_catalog_id, brand)
 TTL bucket_date + INTERVAL 3650 DAY
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192, allow_nullable_key = 1;
 
 CREATE TABLE IF NOT EXISTS rollup_category_daily (
     bucket_date Date,
@@ -251,7 +251,7 @@ ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(bucket_date)
 ORDER BY (bucket_date, primary_root_catalog_id, primary_catalog_id, price_band_code, condition_label)
 TTL bucket_date + INTERVAL 3650 DAY
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192, allow_nullable_key = 1;
 
 CREATE TABLE IF NOT EXISTS rollup_brand_daily (
     bucket_date Date,
@@ -277,7 +277,7 @@ ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(bucket_date)
 ORDER BY (bucket_date, brand, primary_root_catalog_id, primary_catalog_id, price_band_code)
 TTL bucket_date + INTERVAL 3650 DAY
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192, allow_nullable_key = 1;
 
 CREATE TABLE IF NOT EXISTS serving_listing_latest_seen (
     listing_id UInt64,
