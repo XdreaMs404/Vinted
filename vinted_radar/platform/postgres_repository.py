@@ -7,7 +7,7 @@ import re
 from typing import Any
 import uuid
 
-from vinted_radar.domain.events import canonical_json
+from vinted_radar.domain.events import canonical_json, sha256_hex
 from vinted_radar.repository import FULL_SIGNAL_COMPLETENESS, HIGH_SIGNAL_COMPLETENESS
 from vinted_radar.state_machine import evaluate_listing_state
 
@@ -521,6 +521,22 @@ class PostgresMutableTruthRepository:
         request_delay_seconds: float,
         event_id: str,
     ) -> None:
+        self._ensure_projection_event(
+            event_id=event_id,
+            event_type="vinted.mutable-truth.discovery-run.started",
+            aggregate_type="discovery-run",
+            aggregate_id=run_id,
+            occurred_at=started_at,
+            partition_key=run_id,
+            payload={
+                "run_id": run_id,
+                "started_at": started_at,
+                "root_scope": root_scope,
+                "page_limit": int(page_limit),
+                "max_leaf_categories": None if max_leaf_categories is None else int(max_leaf_categories),
+                "request_delay_seconds": float(request_delay_seconds),
+            },
+        )
         payload = {
             "run_id": run_id,
             "started_at": started_at,
@@ -554,6 +570,21 @@ class PostgresMutableTruthRepository:
         catalogs: Sequence[Mapping[str, object]],
         event_id: str,
     ) -> None:
+        self._ensure_projection_event(
+            event_id=event_id,
+            event_type="vinted.mutable-truth.discovery-run.catalogs-synced",
+            aggregate_type="discovery-run",
+            aggregate_id=run_id,
+            occurred_at=synced_at,
+            partition_key=run_id,
+            payload={
+                "run_id": run_id,
+                "synced_at": synced_at,
+                "total_seed_catalogs": int(total_seed_catalogs),
+                "total_leaf_catalogs": int(total_leaf_catalogs),
+                "catalog_ids": [int(row["catalog_id"]) for row in catalogs],
+            },
+        )
         for row in catalogs:
             catalog_id = int(row["catalog_id"])
             payload = {
@@ -615,6 +646,24 @@ class PostgresMutableTruthRepository:
         event_id: str,
     ) -> None:
         catalog_id = int(catalog["catalog_id"])
+        self._ensure_projection_event(
+            event_id=event_id,
+            event_type="vinted.mutable-truth.discovery.catalog-scan-completed",
+            aggregate_type="catalog-scan",
+            aggregate_id=f"{run_id}:{catalog_id}",
+            occurred_at=completed_at,
+            partition_key=str(catalog_id),
+            payload={
+                "run_id": run_id,
+                "catalog_id": catalog_id,
+                "completed_at": completed_at,
+                "successful_pages": int(successful_pages),
+                "failed_pages": int(failed_pages),
+                "raw_listing_hits": int(raw_listing_hits),
+                "unique_listing_hits": int(unique_listing_hits),
+                "listing_ids": [int(row["listing_id"]) for row in listing_rows],
+            },
+        )
         root_catalog_id = int(catalog["root_catalog_id"])
         seen_listing_ids: set[int] = set()
 
@@ -734,6 +783,25 @@ class PostgresMutableTruthRepository:
         last_error: str | None,
         event_id: str,
     ) -> None:
+        self._ensure_projection_event(
+            event_id=event_id,
+            event_type="vinted.mutable-truth.discovery-run.completed",
+            aggregate_type="discovery-run",
+            aggregate_id=run_id,
+            occurred_at=finished_at,
+            partition_key=run_id,
+            payload={
+                "run_id": run_id,
+                "finished_at": finished_at,
+                "status": status,
+                "scanned_leaf_catalogs": int(scanned_leaf_catalogs),
+                "successful_scans": int(successful_scans),
+                "failed_scans": int(failed_scans),
+                "raw_listing_hits": int(raw_listing_hits),
+                "unique_listing_hits": int(unique_listing_hits),
+                "last_error": last_error,
+            },
+        )
         existing = self.discovery_run(run_id) or {}
         payload = {
             "run_id": run_id,
@@ -882,6 +950,19 @@ class PostgresMutableTruthRepository:
         event_id: str,
         manifest_id: str | None = None,
     ) -> None:
+        self._ensure_projection_event(
+            event_id=event_id,
+            event_type="vinted.mutable-truth.state-refresh.probes",
+            aggregate_type="state-refresh",
+            aggregate_id=projected_at,
+            occurred_at=projected_at,
+            partition_key=projected_at,
+            payload={
+                "projected_at": projected_at,
+                "manifest_id": manifest_id,
+                "listing_ids": [int(row["listing_id"]) for row in probe_rows],
+            },
+        )
         for raw_row in probe_rows:
             row = dict(raw_row)
             listing_id = int(row["listing_id"])
@@ -1196,6 +1277,43 @@ class PostgresMutableTruthRepository:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _ensure_projection_event(
+        self,
+        *,
+        event_id: str | None,
+        event_type: str,
+        aggregate_type: str,
+        aggregate_id: str,
+        occurred_at: str,
+        partition_key: str | None = None,
+        payload: Mapping[str, object] | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> None:
+        resolved_event_id = _optional_str(event_id)
+        if resolved_event_id is None:
+            return
+        payload_json = canonical_json(payload or {})
+        resolved_metadata = {
+            "synthetic": True,
+            "source": "mutable-truth-direct-projector",
+            **dict(metadata or {}),
+        }
+        self._upsert_platform_event(
+            {
+                "event_id": resolved_event_id,
+                "schema_version": 1,
+                "event_type": str(event_type),
+                "aggregate_type": str(aggregate_type),
+                "aggregate_id": str(aggregate_id),
+                "occurred_at": str(occurred_at),
+                "producer": "vinted_radar.platform.postgres_repository",
+                "partition_key": str(partition_key or aggregate_id),
+                "payload_json": payload_json,
+                "metadata_json": canonical_json(resolved_metadata),
+                "payload_checksum": sha256_hex(payload_json),
+            }
+        )
+
     def _merge_listing_identity(
         self,
         *,
@@ -1488,6 +1606,44 @@ class PostgresMutableTruthRepository:
                     payload["projected_at"],
                     payload["last_error"],
                     payload["metadata_json"],
+                ),
+            )
+            _commit_quietly(self.connection)
+        except Exception:  # noqa: BLE001
+            _rollback_quietly(self.connection)
+            raise
+
+    def _upsert_platform_event(self, payload: Mapping[str, object]) -> None:
+        try:
+            self.connection.execute(
+                """
+                INSERT INTO platform_events (
+                    event_id,
+                    schema_version,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    occurred_at,
+                    producer,
+                    partition_key,
+                    payload_json,
+                    metadata_json,
+                    payload_checksum
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
+                ON CONFLICT (event_id) DO NOTHING
+                """,
+                (
+                    payload["event_id"],
+                    payload["schema_version"],
+                    payload["event_type"],
+                    payload["aggregate_type"],
+                    payload["aggregate_id"],
+                    payload["occurred_at"],
+                    payload["producer"],
+                    payload["partition_key"],
+                    payload["payload_json"],
+                    payload["metadata_json"],
+                    payload["payload_checksum"],
                 ),
             )
             _commit_quietly(self.connection)
