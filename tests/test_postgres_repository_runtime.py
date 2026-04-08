@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import psycopg
+from psycopg.rows import dict_row
+
 from vinted_radar.platform.postgres_repository import PostgresMutableTruthRepository
 
 
@@ -97,6 +100,25 @@ class RuntimeProjectionConnection:
 
     def close(self) -> None:
         return None
+
+
+def test_from_dsn_uses_dict_row_factory(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    fake_connection = object()
+
+    def fake_connect(dsn: str, *, row_factory=None):
+        captured["dsn"] = dsn
+        captured["row_factory"] = row_factory
+        return fake_connection
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+
+    repository = PostgresMutableTruthRepository.from_dsn("postgresql://user:secret@db.example/vinted_radar")
+
+    assert repository.connection is fake_connection
+    assert captured["dsn"] == "postgresql://user:secret@db.example/vinted_radar"
+    assert captured["row_factory"] is dict_row
+
 
 
 def test_runtime_snapshots_do_not_reference_missing_platform_events() -> None:

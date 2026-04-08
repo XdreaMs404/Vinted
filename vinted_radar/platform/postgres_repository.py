@@ -25,8 +25,9 @@ class PostgresMutableTruthRepository:
     @classmethod
     def from_dsn(cls, dsn: str) -> "PostgresMutableTruthRepository":
         import psycopg
+        from psycopg.rows import dict_row
 
-        return cls(psycopg.connect(dsn))
+        return cls(psycopg.connect(dsn, row_factory=dict_row))
 
     def close(self) -> None:
         close = getattr(self.connection, "close", None)
