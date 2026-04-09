@@ -17,7 +17,7 @@ from vinted_radar.services.lifecycle import (
     PostgresLifecycleSection,
     StoragePostureSummary,
 )
-from vinted_radar.services.platform_audit import run_platform_audit
+from vinted_radar.services.platform_audit import PlatformAuditService, run_platform_audit
 
 
 class _CheckpointRepository:
@@ -163,6 +163,48 @@ def test_run_platform_audit_reports_healthy_when_reconcile_and_paths_are_green(t
     assert payload["paths"]["backfill"]["status"] == "complete"
 
 
+def test_platform_audit_embedded_snapshot_defers_reconciliation_for_runtime_surfaces(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "source.db.full-backfill-checkpoint.json"
+    checkpoint_path.write_text(
+        json.dumps(
+            {
+                "completed": True,
+                "updated_at": "2026-03-31T11:00:00+00:00",
+                "reference_now": "2026-03-31T11:00:00+00:00",
+                "datasets": {"discoveries": {"completed_batches": 2}},
+                "clickhouse": {"claimed_count": 2, "processed_count": 2, "skipped_count": 0},
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    service = PlatformAuditService(
+        tmp_path / "source.db",
+        config=_cutover_config(postgres=True, clickhouse=True, object_storage=True, polyglot_reads=True),
+        checkpoint_path=checkpoint_path,
+        repository=_CheckpointRepository(),
+        lake_writer=_DummyWriter(),
+        clickhouse_client=object(),
+        lifecycle_report=_healthy_lifecycle_report(),
+    )
+    try:
+        payload = service.run_embedded_snapshot()
+    finally:
+        service.close()
+
+    assert payload["embedded"] is True
+    assert payload["ok"] is False
+    assert payload["summary"]["reconciliation_status"] == "deferred"
+    assert payload["overall_status"] == "healthy"
+    assert payload["paths"]["current_state"]["status"] == "healthy"
+    assert payload["paths"]["analytical"]["status"] == "active"
+    assert payload["paths"]["backfill"]["status"] == "complete"
+    assert "authoritative parity report" in payload["notes"][0]
+
+
 def test_platform_audit_cli_emits_json(monkeypatch, tmp_path: Path) -> None:
     fake_config = _cutover_config(postgres=True, clickhouse=True, object_storage=True, polyglot_reads=True)
     fake_report = run_platform_audit(
@@ -192,7 +234,7 @@ def test_runtime_payload_and_health_include_platform_audit(monkeypatch, tmp_path
     audit_payload = {
         "overall_status": "healthy",
         "summary": {
-            "reconciliation_status": "match",
+            "reconciliation_status": "deferred",
             "current_state_status": "healthy",
             "analytical_status": "active",
             "lifecycle_status": "healthy",
@@ -200,20 +242,28 @@ def test_runtime_payload_and_health_include_platform_audit(monkeypatch, tmp_path
         },
     }
     backend = _RuntimeBackend(tmp_path / "runtime.db")
+    calls: list[dict[str, object]] = []
 
-    monkeypatch.setattr("vinted_radar.dashboard.load_platform_audit_snapshot", lambda *args, **kwargs: audit_payload)
+    def fake_load_platform_audit_snapshot(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return audit_payload
+
+    monkeypatch.setattr("vinted_radar.dashboard.load_platform_audit_snapshot", fake_load_platform_audit_snapshot)
 
     payload = build_runtime_payload(backend, now="2026-03-31T11:05:00+00:00")
     assert payload["platform_audit"]["overall_status"] == "healthy"
     assert payload["summary"]["platform_audit_status"] == "healthy"
-    assert payload["summary"]["reconciliation_status"] == "match"
+    assert payload["summary"]["reconciliation_status"] == "deferred"
 
     app_instance = DashboardApplication(
         tmp_path / "runtime.db",
         now="2026-03-31T11:05:00+00:00",
         query_backend_factory=lambda _repository: backend,
     )
+    runtime_response = _call_app(app_instance, "/api/runtime")
     response = _call_app(app_instance, "/health")
+    assert runtime_response["status"] == "200 OK"
     assert response["status"] == "200 OK"
     body = json.loads(response["body"])
     assert body["platform_audit"]["overall_status"] == "healthy"
+    assert calls and all(call.get("embedded") is True for call in calls)

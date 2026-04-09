@@ -88,10 +88,7 @@ def _close_service(service: object) -> None:
 
 def _platform_control_plane_active(config: object) -> bool:
     cutover = getattr(config, "cutover", None)
-    return bool(
-        getattr(cutover, "enable_postgres_writes", False)
-        or getattr(cutover, "enable_polyglot_reads", False)
-    )
+    return bool(getattr(cutover, "enable_polyglot_reads", False))
 
 
 def _platform_query_reads_active(config: object) -> bool:
@@ -825,7 +822,7 @@ def runtime_status(
             status = repository.runtime_status(limit=limit, now=now)
 
     status = {**status, "cutover": cutover.as_dict()}
-    platform_audit = load_platform_audit_snapshot(db, reference_now=now)
+    platform_audit = load_platform_audit_snapshot(db, reference_now=now, embedded=True)
     status["platform_audit"] = platform_audit
 
     if status["latest_cycle"] is None and status.get("controller") is None:

@@ -352,8 +352,9 @@ def test_continuous_cli_defaults_to_bounded_price_filter(monkeypatch, tmp_path: 
     assert captured["options"].max_price == 0.0
 
 
-def test_runtime_status_cli_emits_json_payload(tmp_path: Path) -> None:
+def test_runtime_status_cli_emits_json_payload(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
+    captured: dict[str, object] = {}
     with RadarRepository(db_path) as repository:
         cycle_id = repository.start_runtime_cycle(
             mode="batch",
@@ -385,6 +386,20 @@ def test_runtime_status_cli_emits_json_payload(tmp_path: Path) -> None:
             },
         )
 
+    def fake_load_platform_audit_snapshot(*args, **kwargs):
+        captured["embedded"] = kwargs.get("embedded")
+        return {
+            "overall_status": "lagging",
+            "summary": {
+                "reconciliation_status": "deferred",
+                "current_state_status": "never-run",
+                "analytical_status": "never-run",
+                "lifecycle_status": "healthy",
+                "backfill_status": "not-run",
+            },
+        }
+
+    monkeypatch.setattr("vinted_radar.cli.load_platform_audit_snapshot", fake_load_platform_audit_snapshot)
     runner = CliRunner()
     result = runner.invoke(app, ["runtime-status", "--db", str(db_path), "--format", "json"])
 
@@ -397,6 +412,8 @@ def test_runtime_status_cli_emits_json_payload(tmp_path: Path) -> None:
     assert payload["latest_cycle"]["state_refresh_summary"]["status"] == "degraded"
     assert payload["latest_cycle"]["state_refresh_summary"]["anti_bot_challenge_count"] == 1
     assert payload["totals"]["completed_cycles"] == 1
+    assert payload["platform_audit"]["summary"]["reconciliation_status"] == "deferred"
+    assert captured["embedded"] is True
 
 
 
@@ -704,6 +721,72 @@ def test_runtime_status_cli_table_shows_controller_timing(tmp_path: Path) -> Non
         ],
     )
 
+def test_runtime_status_cli_stays_on_sqlite_in_shadow_mode(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    with RadarRepository(db_path) as repository:
+        cycle_id = repository.start_runtime_cycle(
+            mode="continuous",
+            phase="waiting",
+            interval_seconds=300.0,
+            state_probe_limit=2,
+            config={"state_refresh_limit": 2},
+        )
+        repository.complete_runtime_cycle(
+            cycle_id,
+            status="completed",
+            phase="completed",
+            discovery_run_id=None,
+            state_probed_count=1,
+            tracked_listings=2,
+            freshness_counts={
+                "first-pass-only": 1,
+                "fresh-followup": 1,
+                "aging-followup": 0,
+                "stale-followup": 0,
+            },
+            last_error=None,
+            state_refresh_summary={
+                "status": "healthy",
+                "direct_signal_count": 1,
+                "inconclusive_probe_count": 0,
+                "degraded_probe_count": 0,
+            },
+        )
+
+    fake_config = SimpleNamespace(
+        cutover=SimpleNamespace(enable_postgres_writes=True, enable_polyglot_reads=False),
+        postgres=SimpleNamespace(dsn="postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"),
+    )
+    monkeypatch.setattr("vinted_radar.cli.load_platform_config", lambda: fake_config)
+
+    def fail_if_called(dsn: str):
+        raise AssertionError("runtime-status should stay on SQLite in dual-write-shadow mode")
+
+    monkeypatch.setattr("vinted_radar.cli.PostgresMutableTruthRepository.from_dsn", fail_if_called)
+    monkeypatch.setattr(
+        "vinted_radar.cli.load_platform_audit_snapshot",
+        lambda *args, **kwargs: {
+            "overall_status": "lagging",
+            "summary": {
+                "reconciliation_status": "deferred",
+                "current_state_status": "never-run",
+                "analytical_status": "never-run",
+                "lifecycle_status": "healthy",
+                "backfill_status": "not-run",
+            },
+        },
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["runtime-status", "--db", str(db_path), "--format", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["latest_cycle"]["cycle_id"] == cycle_id
+    assert payload["status"] == "idle"
+
+
+
 def test_runtime_status_cli_uses_polyglot_control_plane_when_enabled(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
@@ -877,9 +960,8 @@ def test_batch_cli_injects_polyglot_control_plane_repository_into_runtime_servic
 
 
 
-def test_batch_cli_injects_control_plane_repository_when_postgres_writes_are_enabled(monkeypatch, tmp_path: Path) -> None:
+def test_batch_cli_keeps_sqlite_control_plane_in_shadow_mode(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
-    fake_repository = object()
 
     class FakeRuntimeService:
         def __init__(self, db_path: Path, *, control_plane_repository: object | None = None) -> None:
@@ -912,13 +994,17 @@ def test_batch_cli_injects_control_plane_repository_when_postgres_writes_are_ena
         postgres=SimpleNamespace(dsn="postgresql://vinted:vinted@127.0.0.1:5432/vinted_radar"),
     )
     monkeypatch.setattr("vinted_radar.cli.load_platform_config", lambda: fake_config)
-    monkeypatch.setattr("vinted_radar.cli.PostgresMutableTruthRepository.from_dsn", lambda dsn: fake_repository)
+
+    def fail_if_called(dsn: str):
+        raise AssertionError("Postgres control-plane repository should stay disabled in dual-write-shadow mode")
+
+    monkeypatch.setattr("vinted_radar.cli.PostgresMutableTruthRepository.from_dsn", fail_if_called)
     monkeypatch.setattr("vinted_radar.cli.RadarRuntimeService", FakeRuntimeService)
     runner = CliRunner()
 
     result = runner.invoke(app, ["batch", "--db", str(tmp_path / "runtime.db"), "--request-delay", "0.0", "--timeout-seconds", "5.0"])
 
     assert result.exit_code == 0
-    assert captured["control_plane_repository"] is fake_repository
+    assert captured["control_plane_repository"] is None
     assert captured["mode"] == "batch"
     assert captured["closed"] is True

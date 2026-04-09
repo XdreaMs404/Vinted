@@ -214,7 +214,7 @@ class DashboardApplication:
                 runtime_status = query_backend.runtime_status(limit=8, now=self.now)
             payload = dict(runtime_status)
             payload["cutover"] = _load_cutover_snapshot().as_dict()
-            payload["platform_audit"] = load_platform_audit_snapshot(self.db_path, reference_now=self.now)
+            payload["platform_audit"] = load_platform_audit_snapshot(self.db_path, reference_now=self.now, embedded=True)
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
@@ -260,7 +260,7 @@ class DashboardApplication:
                 freshness = query_backend.overview_snapshot(now=self.now)["summary"]["inventory"]
                 runtime_status = query_backend.runtime_status(limit=1, now=self.now)
             cutover = _load_cutover_snapshot()
-            platform_audit = load_platform_audit_snapshot(self.db_path, reference_now=self.now)
+            platform_audit = load_platform_audit_snapshot(self.db_path, reference_now=self.now, embedded=True)
             body = json.dumps(
                 {
                     "status": "ok",
@@ -615,7 +615,7 @@ def build_runtime_payload(
     heartbeat = runtime.get("heartbeat") or {}
     acquisition = runtime.get("acquisition") or {}
     cutover = _load_cutover_snapshot()
-    platform_audit = load_platform_audit_snapshot(repository.db_path, reference_now=now)
+    platform_audit = load_platform_audit_snapshot(repository.db_path, reference_now=now, embedded=True)
     audit_summary = dict(platform_audit.get("summary") or {})
     return {
         "generated_at": generated_at,

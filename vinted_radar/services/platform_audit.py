@@ -165,6 +165,51 @@ class PlatformAuditService:
             overall_status=overall_status,
         )
 
+    def run_embedded_snapshot(self) -> dict[str, object]:
+        cutover = summarize_cutover_state(self.config)
+        if _embedded_audit_needs_runtime_dependencies(cutover):
+            self._ensure_runtime_dependencies()
+
+        current_state = self._build_current_state_path(cutover=cutover)
+        analytical = self._build_analytical_path(cutover=cutover)
+        lifecycle = self._build_lifecycle_path(cutover=cutover)
+        backfill = self._build_backfill_path_without_reconciliation(cutover=cutover)
+        note = _embedded_audit_note(self.sqlite_db_path)
+        overall_status = _build_embedded_overall_status(
+            paths=(current_state, analytical, lifecycle, backfill),
+        )
+        command = f"python -m vinted_radar.cli platform-audit --db {self.sqlite_db_path}"
+        return {
+            "sqlite_db_path": str(self.sqlite_db_path),
+            "generated_at": _utc_now(),
+            "cutover": cutover.as_dict(),
+            "summary": {
+                "reconciliation_status": "deferred",
+                "current_state_status": current_state.status,
+                "analytical_status": analytical.status,
+                "lifecycle_status": lifecycle.status,
+                "backfill_status": backfill.status,
+            },
+            "reconciliation": {
+                "store": "reconciliation",
+                "status": "deferred",
+                "datasets": [],
+                "command": command,
+                "notes": [note],
+            },
+            "paths": {
+                "current_state": current_state.as_dict(),
+                "analytical": analytical.as_dict(),
+                "lifecycle": lifecycle.as_dict(),
+                "backfill": backfill.as_dict(),
+            },
+            "overall_status": overall_status,
+            "ok": False,
+            "error": None,
+            "embedded": True,
+            "notes": [note],
+        }
+
     def _ensure_runtime_dependencies(self) -> None:
         if self.repository is None:
             self.repository = PostgresMutableTruthRepository.from_dsn(self.config.postgres.dsn)
@@ -358,6 +403,90 @@ class PlatformAuditService:
             },
         )
 
+    def _build_backfill_path_without_reconciliation(self, *, cutover: CutoverStatusSnapshot) -> AuditPathStatus:
+        resolved_checkpoint = self.checkpoint_path or _default_full_backfill_checkpoint_path(self.sqlite_db_path)
+        command = f"python -m vinted_radar.cli full-backfill --db {self.sqlite_db_path} --dry-run --checkpoint {resolved_checkpoint}"
+        if not _platform_stack_enabled(cutover):
+            return _disabled_path(
+                "backfill",
+                command=command,
+                detail="Historical backfill audit is inactive while platform writes and reads stay on SQLite.",
+            )
+        if not resolved_checkpoint.exists():
+            return AuditPathStatus(
+                path="backfill",
+                status="not-run",
+                detail=(
+                    f"No full-backfill checkpoint is present at {resolved_checkpoint}. "
+                    "Embedded audit skipped the cross-store coverage scan."
+                ),
+                command=command,
+                metadata={
+                    "checkpoint_path": str(resolved_checkpoint),
+                    "checkpoint_present": False,
+                    "reconciliation_deferred": True,
+                },
+            )
+
+        try:
+            payload = json.loads(resolved_checkpoint.read_text(encoding="utf-8"))
+            if not isinstance(payload, Mapping):
+                raise ValueError("Checkpoint must decode to an object.")
+        except Exception as exc:  # noqa: BLE001
+            return AuditPathStatus(
+                path="backfill",
+                status="failed",
+                detail=f"Backfill checkpoint inspection failed: {type(exc).__name__}: {exc}",
+                command=command,
+                last_error=f"{type(exc).__name__}: {exc}",
+                metadata={
+                    "checkpoint_path": str(resolved_checkpoint),
+                    "checkpoint_present": True,
+                    "reconciliation_deferred": True,
+                },
+            )
+
+        dataset_state = dict(payload.get("datasets") or {})
+        clickhouse_state = dict(payload.get("clickhouse") or {})
+        completed = bool(payload.get("completed"))
+        completed_batches = sum(int((state or {}).get("completed_batches") or 0) for state in dataset_state.values())
+        processed_rows = int(clickhouse_state.get("processed_count") or 0)
+        if completed:
+            status = "complete"
+            detail = (
+                f"Checkpoint completed with {completed_batches} batch(es) recorded and "
+                f"ClickHouse worker progress {processed_rows} row(s). "
+                "Embedded audit did not rerun cross-store reconciliation."
+            )
+        elif completed_batches or processed_rows:
+            status = "in-progress"
+            detail = (
+                f"Checkpoint is still in progress with {completed_batches} completed batch(es) and "
+                f"ClickHouse worker progress {processed_rows} row(s)."
+            )
+        else:
+            status = "not-run"
+            detail = "Checkpoint exists but does not record any completed backfill work yet."
+        return AuditPathStatus(
+            path="backfill",
+            status=status,
+            detail=detail,
+            command=command,
+            raw_status="completed" if completed else "incomplete",
+            updated_at=_optional_str(payload.get("updated_at")),
+            metadata={
+                "checkpoint_path": str(resolved_checkpoint),
+                "checkpoint_present": True,
+                "completed": completed,
+                "reference_now": _optional_str(payload.get("reference_now")),
+                "completed_batches": completed_batches,
+                "clickhouse_claimed_count": int(clickhouse_state.get("claimed_count") or 0),
+                "clickhouse_processed_count": processed_rows,
+                "clickhouse_skipped_count": int(clickhouse_state.get("skipped_count") or 0),
+                "reconciliation_deferred": True,
+            },
+        )
+
     def _checkpoint(self, *, consumer_name: str, sink: str) -> dict[str, object] | None:
         resolver = getattr(self.repository, "outbox_checkpoint", None)
         if not callable(resolver):
@@ -410,6 +539,7 @@ def load_platform_audit_snapshot(
     config: PlatformConfig | None = None,
     reference_now: str | None = None,
     checkpoint_path: str | Path | None = None,
+    embedded: bool = False,
 ) -> dict[str, object]:
     resolved_config = config
     config_error: str | None = None
@@ -421,6 +551,17 @@ def load_platform_audit_snapshot(
 
     cutover = summarize_cutover_state(resolved_config, config_error=config_error)
     try:
+        if embedded:
+            service = PlatformAuditService(
+                sqlite_db_path,
+                config=resolved_config,
+                reference_now=reference_now,
+                checkpoint_path=checkpoint_path,
+            )
+            try:
+                return service.run_embedded_snapshot()
+            finally:
+                service.close()
         report = run_platform_audit(
             sqlite_db_path,
             config=resolved_config,
@@ -454,6 +595,7 @@ def load_platform_audit_snapshot(
             "overall_status": "failed",
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}",
+            "embedded": embedded,
         }
 
 
@@ -527,6 +669,31 @@ def _build_overall_status(
     if any(path.status in _ATTENTION_PATH_STATUSES for path in paths):
         return "lagging"
     return "healthy"
+
+
+def _build_embedded_overall_status(*, paths: tuple[AuditPathStatus, ...]) -> str:
+    if any(path.status == "failed" for path in paths):
+        return "failed"
+    if any(path.status in _ATTENTION_PATH_STATUSES for path in paths):
+        return "lagging"
+    return "healthy"
+
+
+def _embedded_audit_needs_runtime_dependencies(cutover: CutoverStatusSnapshot) -> bool:
+    return any(
+        (
+            _current_state_path_enabled(cutover),
+            _analytical_path_enabled(cutover),
+            _platform_stack_enabled(cutover),
+        )
+    )
+
+
+def _embedded_audit_note(sqlite_db_path: str | Path) -> str:
+    return (
+        "Embedded platform audit skipped full cross-store reconciliation to keep runtime and health surfaces bounded. "
+        f"Run `python -m vinted_radar.cli platform-audit --db {sqlite_db_path}` for the authoritative parity report."
+    )
 
 
 def _current_state_path_enabled(cutover: CutoverStatusSnapshot) -> bool:
