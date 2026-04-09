@@ -530,6 +530,15 @@ python scripts/sync_db_safe.py \
   --integrity
 ```
 
+For unattended or auto-mode VPS access on this workstation, use the project helper instead of ad hoc SSH setup. It targets `root@46.225.113.129`, uses the local key at `~/.ssh/id_ed25519`, and loads the passphrase from the gitignored `.env.vps` file:
+
+```bash
+bash scripts/vpsctl.sh config
+bash scripts/vpsctl.sh exec -- 'hostname && pwd'
+bash scripts/vpsctl.sh get /root/Vinted/data/vinted-radar.clean.db data/vps-copy.db
+bash scripts/vpsctl.sh put scripts/run_vps_verification.sh /root/Vinted/run_vps_verification.sh
+```
+
 Recover a structurally healthy partial emergency copy when the source database is already corrupted:
 
 ```bash

@@ -92,5 +92,6 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 - [x] M001: Listing-Level Market Radar — implementation complete; closeout summary written, verification result `needs-attention` pending healthy multi-day runtime proof.
 - [x] M002: Enriched Market Intelligence Experience — complete; closeout summary written at `.gsd/milestones/M002/M002-SUMMARY.md`, with only an environment-gated Docker rerun remaining as a non-blocking operational follow-up.
-- [ ] M003: Product-Level Intelligence + Grounded AI Layer — group listings into product-level signals and add grounded AI insights, summaries, and analytical exploration.
-- [ ] M004: SaaS Hardening and Commercialization — industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.
+- [ ] M003: Acquisition Throughput, Multi-Market Scale, and Bounded Live Storage — benchmark-led acquisition optimization on the real VPS, including multi-lane scheduling, multi-market safety, adaptive frontier depth, and hot-store compaction.
+- [ ] M004: Product-Level Intelligence + Grounded AI Layer — group listings into product-level signals and add grounded AI insights, syntheses, and analytical exploration on top of the stronger M003 substrate.
+- [ ] M005: SaaS Hardening and Commercialization — industrialize the radar into a durable SaaS product without sacrificing evidence and credibility.

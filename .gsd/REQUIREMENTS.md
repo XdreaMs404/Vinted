@@ -2,8 +2,6 @@
 
 This file is the explicit capability and coverage contract for the project.
 
-> Planning note: future auto-mode `execute-task` units for this project must use the inlined **Task Summary** and **Decisions** templates carried by the prompt, and any stale instruction that points to a user-home template path is non-normative and should be ignored. Future auto-mode `complete-slice` units must draft slice closeout content in memory and call `gsd_complete_slice` as the canonical writer; stale direct-file-write instructions for `Sxx-SUMMARY.md` or `Sxx-UAT.md` are non-normative and should be ignored.
-
 ## Active
 
 ### R001 — The system must discover and ingest public Vinted listings across the Homme and Femme categories and all reachable sub-categories without requiring login.
@@ -67,10 +65,10 @@ This file is the explicit capability and coverage contract for the project.
 - Description: The system must move beyond individual listings and group related listings into product or article-level entities that better reflect what the market is buying.
 - Why it matters: The long-term value of the radar improves when it can reason about products, not only isolated listings.
 - Source: user
-- Primary owning slice: M003 (provisional)
+- Primary owning slice: M004
 - Supporting slices: none
 - Validation: mapped
-- Notes: Grouping should combine deterministic and probabilistic evidence rather than rely on brittle rules alone.
+- Notes: Primary owner moved from the previous provisional M003 placeholder to M004 after inserting the dedicated acquisition-scale milestone M003 ahead of grouped intelligence.
 
 ### R014 — The product must use AI to generate grounded inline insights and periodic market summaries that are tied back to observed data, time windows, and confidence levels.
 - Class: differentiator
@@ -78,10 +76,10 @@ This file is the explicit capability and coverage contract for the project.
 - Description: The product must use AI to generate grounded inline insights and periodic market summaries that are tied back to observed data, time windows, and confidence levels.
 - Why it matters: The user wants the radar to evolve into an intelligence layer, not remain a collection of static tops.
 - Source: user
-- Primary owning slice: M003 (provisional)
+- Primary owning slice: M004
 - Supporting slices: none
 - Validation: mapped
-- Notes: AI must not act like an oracle; it must stay grounded in collected evidence and be allowed to say when support is insufficient.
+- Notes: Primary owner moved from the previous provisional M003 placeholder to M004 after inserting the dedicated acquisition-scale milestone M003 ahead of grounded AI work.
 
 ### R015 — The product should support an AI-assisted exploration mode that helps the user ask analytical questions of the collected market data.
 - Class: differentiator
@@ -281,8 +279,8 @@ This file is the explicit capability and coverage contract for the project.
 | R010 | operability | validated | M001/S06 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05 | S06 proof: `python -m pytest`, `python -m vinted_radar.cli batch --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 4 --state-refresh-limit 6 --request-delay 0.0`, `python -m vinted_radar.cli runtime-status --db data/vinted-radar-s06.db --format json`, and `python -m vinted_radar.cli continuous --db data/vinted-radar-s06.db --page-limit 1 --max-leaf-categories 2 --state-refresh-limit 4 --interval-seconds 5 --request-delay 0.0 --dashboard --host 127.0.0.1 --port 8766` plus browser verification at `http://127.0.0.1:8766` and direct checks against `/api/runtime`, `/api/dashboard`, and `/health` confirmed both operator modes and persisted runtime diagnostics. |
 | R011 | quality-attribute | validated | M001/S03 | M001/S01, M001/S02, M001/S04, M001/S05, M001/S06 | S06+S07 proof: `python -m pytest -q`, `MSYS_NO_PATHCONV=1 python scripts/verify_vps_serving.py --base-url http://127.0.0.1:8790/radar --listing-id 64882428`, desktop/mobile browser verification on the mounted realistic corpus, `python scripts/verify_vps_serving.py --base-url http://46.225.113.129:8765 --listing-id 8468335111`, and direct public checks against `/`, `/explorer`, `/runtime`, `/api/runtime`, `/api/listings/8468335111`, and `/health` confirmed the product stays explicit about healthy/degraded acquisition truth while remaining operable through the recovered public VPS entrypoint. |
 | R012 | differentiator | active | M002 (provisional) | none | S04 proof: `python -m pytest`, `python -m vinted_radar.cli dashboard --db data/vinted-radar-s04.db --host 127.0.0.1 --port 8783`, and browser verification at `http://127.0.0.1:8783/explorer?root=Femmes&state=active&price_band=40_plus_eur&sort=view_desc&page_size=12` confirmed richer comparison and navigation workflows beyond the overview-only market read. |
-| R013 | core-capability | active | M003 (provisional) | none | mapped |
-| R014 | differentiator | active | M003 (provisional) | none | mapped |
+| R013 | core-capability | active | M004 | none | mapped |
+| R014 | differentiator | active | M004 | none | mapped |
 | R015 | differentiator | active | M003 (provisional) | none | mapped |
 | R016 | launchability | active | M004 (provisional) | none | mapped |
 | R020 | admin/support | deferred | none | none | unmapped |
