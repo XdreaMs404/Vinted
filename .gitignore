@@ -15,6 +15,12 @@
 .gsd/DISCUSSION-MANIFEST.json
 .gsd/doctor-history.jsonl
 .gsd/journal/
+.gsd/backups/
+.gsd/audit-log.jsonl
+.gsd/event-log.jsonl
+.gsd/state-manifest.json
+.gsd/**/*.stale
+.gsd/milestones/**/benchmarks/**/*.sqlite
 .gsd/milestones/**/*-CONTINUE.md
 .gsd/milestones/**/continue.md
 .gsd/milestones/**/*-SECRETS.md

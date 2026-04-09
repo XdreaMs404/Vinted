@@ -34,6 +34,13 @@ from vinted_radar.proxies import mask_proxy_url, resolve_proxy_pool
 from vinted_radar.query.overview_clickhouse import ClickHouseProductQueryAdapter
 from vinted_radar.repository import RadarRepository
 from vinted_radar.scoring import build_listing_score_detail, build_market_summary, build_rankings, load_listing_scores
+from vinted_radar.services.acquisition_benchmark import (
+    build_acquisition_benchmark_report,
+    collect_acquisition_benchmark_facts,
+    redact_acquisition_benchmark_report,
+    render_acquisition_benchmark_markdown,
+    write_acquisition_benchmark_report,
+)
 from vinted_radar.services.discovery import DiscoveryOptions, build_default_service
 from vinted_radar.services.evidence_export import HistoricalEvidenceExportReport, HistoricalEvidenceExporter
 from vinted_radar.services.evidence_lookup import EvidenceLookupResult, EvidenceLookupService
@@ -970,6 +977,70 @@ def audit_long_run(
 
     if not bool(((report.get("db") or {}).get("health") or {}).get("healthy")):
         raise typer.Exit(code=1)
+
+
+@app.command("acquisition-benchmark")
+def acquisition_benchmark(
+    spec_file: list[Path] | None = typer.Option(None, "--spec-file", help="Experiment spec JSON file. Repeatable; each file can contain one spec object or a list of spec objects."),
+    json_out: Path | None = typer.Option(None, "--json-out", help="Optional benchmark JSON artifact path. Defaults under artifacts/acquisition-benchmarks/."),
+    markdown_out: Path | None = typer.Option(None, "--markdown-out", help="Optional benchmark markdown artifact path. Defaults under artifacts/acquisition-benchmarks/."),
+    generated_at: str | None = typer.Option(None, "--generated-at", help="Optional ISO timestamp override for deterministic benchmark IDs and reports."),
+    output_format: str = typer.Option("table", "--format", help="table, json, or markdown."),
+) -> None:
+    spec_paths = [Path(path) for path in (spec_file or [])]
+    if not spec_paths:
+        raise typer.BadParameter("Provide at least one --spec-file.")
+
+    try:
+        experiments = _load_acquisition_benchmark_specs(spec_paths)
+        report = redact_acquisition_benchmark_report(
+            build_acquisition_benchmark_report(experiments, generated_at=generated_at)
+        )
+        written = _write_acquisition_benchmark_artifacts(
+            report,
+            json_out=json_out,
+            markdown_out=markdown_out,
+        )
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        typer.echo(f"Acquisition benchmark failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    _emit_acquisition_benchmark_report(
+        report,
+        output_format=output_format,
+        written=written,
+    )
+
+
+@app.command("acquisition-benchmark-report")
+def acquisition_benchmark_report(
+    input_path: Path = typer.Option(..., "--input", help="Benchmark JSON input. Accepts either an existing report payload or a raw experiment bundle."),
+    json_out: Path | None = typer.Option(None, "--json-out", help="Optional redacted benchmark JSON artifact path."),
+    markdown_out: Path | None = typer.Option(None, "--markdown-out", help="Optional benchmark markdown artifact path."),
+    generated_at: str | None = typer.Option(None, "--generated-at", help="Optional ISO timestamp override when the input is a raw experiment bundle."),
+    output_format: str = typer.Option("table", "--format", help="table, json, or markdown."),
+) -> None:
+    try:
+        report = _load_acquisition_benchmark_report_input(
+            input_path,
+            generated_at=generated_at,
+        )
+        written = None
+        if json_out is not None or markdown_out is not None:
+            written = _write_acquisition_benchmark_artifacts(
+                report,
+                json_out=json_out,
+                markdown_out=markdown_out,
+            )
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        typer.echo(f"Acquisition benchmark report failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    _emit_acquisition_benchmark_report(
+        report,
+        output_format=output_format,
+        written=written,
+    )
 
 
 @app.command()
@@ -2197,6 +2268,254 @@ def _render_evidence_lookup_result(result: EvidenceLookupResult) -> None:
     typer.echo(f"Fragment root: {result.fragment_root}")
     typer.echo(f"Fragment path: {result.fragment_path or '(whole row)'}")
     _echo(json.dumps(result.fragment, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+
+def _load_acquisition_benchmark_specs(spec_paths: list[Path]) -> list[dict[str, object]]:
+    experiments: list[dict[str, object]] = []
+    for spec_path in spec_paths:
+        payload = json.loads(spec_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            payload_items = [payload]
+        elif isinstance(payload, list):
+            payload_items = payload
+        else:
+            raise ValueError(
+                f"Acquisition benchmark spec must be a JSON object or list: {spec_path}"
+            )
+
+        for index, item in enumerate(payload_items, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Acquisition benchmark spec entry {index} in {spec_path} must be an object."
+                )
+            experiments.append(
+                _build_acquisition_benchmark_experiment_from_spec(
+                    item,
+                    source_path=spec_path,
+                    item_index=index,
+                )
+            )
+
+    if not experiments:
+        raise ValueError("No acquisition benchmark experiments were loaded.")
+    return experiments
+
+
+
+def _build_acquisition_benchmark_experiment_from_spec(
+    spec: dict[str, object],
+    *,
+    source_path: Path,
+    item_index: int,
+) -> dict[str, object]:
+    required_fields = (
+        "experiment_id",
+        "db_path",
+        "window_started_at",
+        "window_finished_at",
+    )
+    missing = [field_name for field_name in required_fields if not spec.get(field_name)]
+    if missing:
+        raise ValueError(
+            f"Acquisition benchmark spec entry {item_index} in {source_path} is missing required field(s): {', '.join(missing)}"
+        )
+
+    config = spec.get("config") or {}
+    if not isinstance(config, dict):
+        raise ValueError(
+            f"Acquisition benchmark spec entry {item_index} in {source_path} must use an object for config."
+        )
+
+    storage_snapshots = spec.get("storage_snapshots") or []
+    resource_snapshots = spec.get("resource_snapshots") or []
+    if not isinstance(storage_snapshots, list) or not all(
+        isinstance(item, dict) for item in storage_snapshots
+    ):
+        raise ValueError(
+            f"Acquisition benchmark spec entry {item_index} in {source_path} must use a list of objects for storage_snapshots."
+        )
+    if not isinstance(resource_snapshots, list) or not all(
+        isinstance(item, dict) for item in resource_snapshots
+    ):
+        raise ValueError(
+            f"Acquisition benchmark spec entry {item_index} in {source_path} must use a list of objects for resource_snapshots."
+        )
+
+    db_path = Path(str(spec["db_path"]))
+    resolved_db_path = db_path if db_path.is_absolute() else source_path.parent / db_path
+    experiment_id = str(spec["experiment_id"])
+
+    return collect_acquisition_benchmark_facts(
+        resolved_db_path,
+        experiment_id=experiment_id,
+        profile=str(spec.get("profile") or experiment_id),
+        label=None if spec.get("label") is None else str(spec.get("label")),
+        window_started_at=str(spec["window_started_at"]),
+        window_finished_at=str(spec["window_finished_at"]),
+        config=config,
+        storage_snapshots=storage_snapshots,
+        resource_snapshots=resource_snapshots,
+    )
+
+
+
+def _load_acquisition_benchmark_report_input(
+    input_path: Path,
+    *,
+    generated_at: str | None = None,
+) -> dict[str, object]:
+    payload = json.loads(input_path.read_text(encoding="utf-8"))
+
+    if isinstance(payload, dict) and isinstance(payload.get("leaderboard"), list):
+        report = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("benchmark_report"), dict):
+        nested_report = payload["benchmark_report"]
+        if isinstance(nested_report.get("leaderboard"), list):
+            report = nested_report
+        elif isinstance(nested_report.get("experiments"), list):
+            report = build_acquisition_benchmark_report(
+                nested_report["experiments"],
+                generated_at=generated_at,
+            )
+        else:
+            raise ValueError(
+                "Acquisition benchmark bundle must contain a benchmark_report with either a leaderboard or experiments array."
+            )
+    elif isinstance(payload, dict) and isinstance(payload.get("experiments"), list):
+        report = build_acquisition_benchmark_report(
+            payload["experiments"],
+            generated_at=generated_at,
+        )
+    elif isinstance(payload, list):
+        report = build_acquisition_benchmark_report(payload, generated_at=generated_at)
+    else:
+        raise ValueError(
+            "Acquisition benchmark input must be a report object, an object with a benchmark_report or experiments array, or a raw experiments array."
+        )
+
+    return redact_acquisition_benchmark_report(report)
+
+
+
+def _write_acquisition_benchmark_artifacts(
+    report: dict[str, object],
+    *,
+    json_out: Path | None,
+    markdown_out: Path | None,
+) -> dict[str, str]:
+    resolved_json, resolved_markdown = _resolve_acquisition_benchmark_artifact_paths(
+        report,
+        json_out=json_out,
+        markdown_out=markdown_out,
+    )
+    return write_acquisition_benchmark_report(
+        report,
+        json_path=resolved_json,
+        markdown_path=resolved_markdown,
+    )
+
+
+
+def _resolve_acquisition_benchmark_artifact_paths(
+    report: dict[str, object],
+    *,
+    json_out: Path | None,
+    markdown_out: Path | None,
+) -> tuple[Path, Path]:
+    benchmark_id = str(report.get("benchmark_id") or "acquisition-benchmark")
+    base_dir = Path("artifacts") / "acquisition-benchmarks"
+    resolved_json = json_out or (base_dir / f"{benchmark_id}.json")
+    resolved_markdown = markdown_out or (base_dir / f"{benchmark_id}.md")
+    return (resolved_json, resolved_markdown)
+
+
+
+def _emit_acquisition_benchmark_report(
+    report: dict[str, object],
+    *,
+    output_format: str,
+    written: dict[str, str] | None,
+) -> None:
+    if output_format == "json":
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if output_format == "markdown":
+        _echo(render_acquisition_benchmark_markdown(report))
+        return
+    if output_format != "table":
+        raise typer.BadParameter("--format must be either 'table', 'json', or 'markdown'.")
+    _render_acquisition_benchmark_cli_report(report, written=written)
+
+
+
+def _render_acquisition_benchmark_cli_report(
+    report: dict[str, object],
+    *,
+    written: dict[str, str] | None,
+) -> None:
+    summary = dict(report.get("summary") or {})
+    leaderboard = list(report.get("leaderboard") or [])
+    compared_profiles = [
+        str(item)
+        for item in list(summary.get("profiles") or [])
+        if str(item).strip()
+    ]
+
+    typer.echo(f"Benchmark: {report.get('benchmark_id')}")
+    typer.echo(f"Generated at: {report.get('generated_at')}")
+    typer.echo(f"Compared profiles: {summary.get('profile_count', len(leaderboard))}")
+    if compared_profiles:
+        _echo(f"Profiles: {', '.join(compared_profiles)}")
+    typer.echo(
+        "Winner: {winner}".format(
+            winner=summary.get("winner_profile")
+            or summary.get("winner_experiment_id")
+            or "n/a"
+        )
+    )
+    if summary.get("runner_up_profile") or summary.get("runner_up_experiment_id"):
+        typer.echo(
+            "Runner-up: {runner_up}".format(
+                runner_up=summary.get("runner_up_profile")
+                or summary.get("runner_up_experiment_id")
+            )
+        )
+    _echo(f"Why it won: {summary.get('winner_reason') or 'n/a'}")
+    if written is not None:
+        typer.echo(f"JSON artifact: {written.get('json')}")
+        if written.get("markdown"):
+            typer.echo(f"Markdown artifact: {written['markdown']}")
+
+    if not leaderboard:
+        typer.echo("Leaderboard: none")
+        return
+
+    typer.echo("Leaderboard:")
+    for row in leaderboard:
+        winner_marker = " 🏆" if row.get("winner") else ""
+        _echo(
+            "- {rank}. {profile}{winner} | net new/h {net_new} | duplicate {duplicate} | challenge {challenge} | degraded {degraded} | bytes/new {bytes_per_new} | mean CPU {mean_cpu} | peak RAM {peak_ram}".format(
+                rank=row.get("rank") or "?",
+                profile=row.get("profile") or row.get("experiment_id") or "unknown",
+                winner=winner_marker,
+                net_new=_format_cli_number(row.get("net_new_listings_per_hour"), digits=2),
+                duplicate=_format_cli_number(row.get("duplicate_ratio"), digits=4),
+                challenge=_format_cli_number(row.get("challenge_rate"), digits=4),
+                degraded=int(row.get("degraded_count") or 0),
+                bytes_per_new=_format_cli_number(row.get("bytes_per_new_listing"), digits=2),
+                mean_cpu=_format_cli_number(row.get("mean_cpu_percent"), digits=2),
+                peak_ram=_format_cli_number(row.get("peak_ram_mb"), digits=2),
+            )
+        )
+
+
+
+def _format_cli_number(value: object, *, digits: int) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.{digits}f}"
+
 
 
 def _default_full_backfill_checkpoint_path(db: Path) -> Path:

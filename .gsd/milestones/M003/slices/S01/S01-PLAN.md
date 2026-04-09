@@ -4,7 +4,7 @@
 **Demo:** After this: After this: one command can run comparable VPS acquisition experiments and produce a leaderboard ranking profiles by net new listings/hour, duplicate ratio, challenge rate, bytes/new listing, and resource footprint.
 
 ## Tasks
-- [ ] **T01: Define the acquisition benchmark scorecard contract** — Why: Later slices need one stable definition of “better”, or the project will regress into intuition-led tuning.
+- [x] **T01: Added the acquisition benchmark service contract with repository-window ingestion, explicit score fields, and deterministic leaderboard tests.** — Why: Later slices need one stable definition of “better”, or the project will regress into intuition-led tuning.
 Do:
 - Add a benchmark domain/service that normalizes experiment config, run windows, and outcome metrics from discovery runs, catalog scans, runtime cycles, and DB/file growth.
 - Define explicit score fields for net new listings per hour, duplicate ratio, challenge/degraded counts, bytes per new listing, and CPU/RAM snapshots.
@@ -14,7 +14,7 @@ Done when:
   - Estimate: 1.5h
   - Files: vinted_radar/services/acquisition_benchmark.py, vinted_radar/repository.py, vinted_radar/db.py, tests/test_acquisition_benchmark.py
   - Verify: python -m pytest tests/test_acquisition_benchmark.py -q
-- [ ] **T02: Add CLI and report renderers for benchmark artifacts** — Why: The scorecard is only useful if operators and auto-mode can run it through first-class commands.
+- [x] **T02: Added acquisition benchmark CLI commands that build redacted leaderboard artifacts from spec files or saved experiment bundles.** — Why: The scorecard is only useful if operators and auto-mode can run it through first-class commands.
 Do:
 - Add CLI commands to run benchmark comparisons, inspect leaderboards, and export JSON/Markdown artifacts.
 - Keep outputs safe for logs: redact proxy credentials, avoid secret leakage, and include explicit artifact paths.
@@ -24,7 +24,7 @@ Done when:
   - Estimate: 1h
   - Files: vinted_radar/cli.py, vinted_radar/services/acquisition_benchmark.py, tests/test_acquisition_benchmark_cli.py, README.md
   - Verify: python -m pytest tests/test_acquisition_benchmark.py tests/test_acquisition_benchmark_cli.py -q
-- [ ] **T03: Build the VPS experiment runner and artifact bundle flow** — Why: The user explicitly wants the system to test itself on the real VPS, not rely on copied shell output.
+- [x] **T03: Added a VPS benchmark runner that snapshots the live DB safely, executes bounded remote acquisition cycles, and emits local benchmark bundles with resource evidence.** — Why: The user explicitly wants the system to test itself on the real VPS, not rely on copied shell output.
 Do:
 - Create a remote benchmark runner script that connects to the VPS, launches bounded experiments with safe configs, collects resulting DB/metric snapshots, and writes local JSON/Markdown artifacts under `.gsd/milestones/M003/benchmarks/`.
 - Ensure the runner can preserve the live service posture when required and can label destructive vs non-destructive modes clearly.
@@ -34,7 +34,7 @@ Done when:
   - Estimate: 1.5h
   - Files: scripts/run_vps_benchmark.py, tests/test_vps_benchmark_runner.py, .gsd/milestones/M003/benchmarks/.gitkeep
   - Verify: python -m pytest tests/test_vps_benchmark_runner.py -q
-- [ ] **T04: Capture the real VPS baseline benchmark** — Why: The milestone needs a real baseline floor before any optimization claims can be judged.
+- [x] **T04: Captured the real VPS baseline artifact and hardened the benchmark runner for unattended SSH execution.** — Why: The milestone needs a real baseline floor before any optimization claims can be judged.
 Do:
 - Use the new runner to benchmark the current FR `page_limit=1` production-like profile on the real VPS.
 - Persist the JSON/Markdown outputs under `.gsd/milestones/M003/benchmarks/` and summarize the baseline in the milestone research artifact.

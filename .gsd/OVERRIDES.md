@@ -35,3 +35,27 @@ User-issued overrides that supersede plan document content.
 **Applied-at:** M003 planning
 
 ---
+
+## Override: 2026-04-09T16:25:00Z
+
+**Change:** For future auto-mode recovery in this project, never leave blocker or timeout handoff content under canonical `*-SUMMARY.md` task filenames. Use `*-ASSESSMENT.md` (or another non-canonical name) and leave the task pending until a real task summary exists.
+**Scope:** active
+**Applied-at:** M003/S02 auto-mode recovery hardening
+
+---
+
+## Override: 2026-04-09T16:27:00Z
+
+**Change:** For future auto-mode execution in this repo, do not call workspace-wide `lsp diagnostics` unless `lsp status` already shows a working Python language server for the current shell. Prefer file reads, focused tests, and repo-specific verification commands when no active LSP server is available.
+**Scope:** active
+**Applied-at:** M003/S02 auto-mode recovery hardening
+
+---
+
+## Override: 2026-04-09T16:41:00Z
+
+**Change:** For future auto-mode recovery in this project, if a slice is already complete, any lingering `.gsd/runtime/units/execute-task-<mid>-<sid>-*.json` files for that slice must be treated as stale runtime residue and parked or ignored before the next unit starts. Completed-slice residue must not be allowed to pollute the next task's recovery context.
+**Scope:** active
+**Applied-at:** M003/S02 runtime-state hardening
+
+---

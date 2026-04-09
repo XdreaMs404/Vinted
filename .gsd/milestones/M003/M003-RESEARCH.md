@@ -498,3 +498,20 @@ These are advisory, not auto-binding:
 ## Planner Takeaway
 
 If the roadmap planner does only one thing with this research, it should order M003 so that **grouping quality and grouped evidence contracts are proven before AI interpretation surfaces are allowed to become user-facing**. The codebase already has excellent provenance, warehouse, and parity foundations; M003 should capitalize on those strengths instead of jumping straight to copilote UX.
+
+## 2026-04-09 VPS baseline benchmark capture (M003/S01/T04)
+
+Artifacts:
+- `.gsd/milestones/M003/benchmarks/baseline-fr-page1.json`
+- `.gsd/milestones/M003/benchmarks/baseline-fr-page1.md`
+
+Real VPS result for the current FR `page_limit=1` preserve-live profile:
+- The benchmark runner now executes non-interactively from this workstation by auto-loading `.env.vps` SSH defaults/askpass, uploading the remote helper script as a temporary file, and auto-detecting a remote Python interpreter that can actually import `typer` plus `vinted_radar.cli` (the current VPS resolves that to `/root/Vinted/venv/bin/python`).
+- The first T04 capture still matters as a root-cause artifact: the default host `python3` path failed immediately with `ModuleNotFoundError: No module named 'typer'`, which proved the original runner default was not trustworthy for unattended VPS benchmarks.
+- After fixing the interpreter-selection path, the runner was revalidated live against `46.225.113.129` and the named baseline artifact was refreshed from a successful preserve-live capture (`2026-04-09T13:11:17Z` → `2026-04-09T13:13:36Z`).
+- That refreshed baseline completed `3` bounded batch cycles, kept both `vinted-scraper.service` and `vinted-dashboard.service` active before and after the run, and captured a truthful short-window scorecard: `54` net new listings, `1398.96` net new listings/hour, duplicate ratio `0.9688`, challenge rate `0.0000`, degraded count `4`, storage growth `2,588,672` bytes, bytes/new listing `47,938.37`, mean CPU `5.86%`, peak RAM `165.94 MB`.
+- The preserved working snapshot grew from `85,499` listings / `1,451,192,320` bytes to `85,553` listings / `1,453,780,992` bytes during the run, and the observed runtime config recorded `transport_mode=proxy-pool`, `proxy_pool_size=100`, `concurrency=24`, `page_limit=1`, `max_leaf_categories=6`, and `state_refresh_limit=6`.
+
+Interpretation:
+- The runner now proves the real VPS experiment path end to end, and later M003 slices can compare against a durable mechanical FR baseline artifact without hand-copied shell output.
+- This refreshed artifact is still a short-window baseline captured during slice closeout, not a fresh 90-minute endurance run, so future benchmark slices should extend the window before making stronger cadence or stability claims.

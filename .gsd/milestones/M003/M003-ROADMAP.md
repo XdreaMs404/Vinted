@@ -6,7 +6,7 @@ Turn the collector into an empirically tuned, benchmark-led acquisition system t
 ## Slice Overview
 | ID | Slice | Risk | Depends | Done | After this |
 |----|-------|------|---------|------|------------|
-| S01 | Acquisition Benchmark Scorecards + VPS Experiment Harness | high | — | ⬜ | After this: one command can run comparable VPS acquisition experiments and produce a leaderboard ranking profiles by net new listings/hour, duplicate ratio, challenge rate, bytes/new listing, and resource footprint. |
+| S01 | Acquisition Benchmark Scorecards + VPS Experiment Harness | high | — | ✅ | After this: one command can run comparable VPS acquisition experiments and produce a leaderboard ranking profiles by net new listings/hour, duplicate ratio, challenge rate, bytes/new listing, and resource footprint. |
 | S02 | Start-to-Start Multi-Lane Runtime Control | high | S01 | ⬜ | After this: the runtime can execute named lanes such as frontier and expansion start-to-start, and `/runtime` / CLI surfaces show truthful per-lane state, timers, errors, and current config. |
 | S03 | Market-Aware Identity + Domain Adapters | high | S01, S02 | ⬜ | After this: the collector can ingest more than one Vinted market domain into separated market partitions without ID collisions, mixed catalogs, or ambiguous diagnostics, while existing FR reads remain truthful. |
 | S04 | Transport Optimizer + Empirical Concurrency/Session Tuning | high | S01, S02, S03 | ⬜ | After this: operators can benchmark proxy/session/concurrency profiles per market on the VPS and the system can explain which transport recipe wins on real useful yield rather than only on request speed. |

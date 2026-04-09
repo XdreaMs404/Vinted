@@ -22,6 +22,7 @@ verification_max_retries: 1
 custom_instructions:
   - Toujours travailler dans le dossier principal du projet, pas dans `.gsd/worktrees`.
   - À la fin de chaque slice `Sxx`, commit et push les changements sur le dépôt GitHub.
+  - Si `lsp status` ne montre pas de serveur Python actif, ne pas lancer `lsp diagnostics` sur tout le workspace ; utiliser des lectures ciblées et les commandes de vérification du repo à la place.
 ---
 
 # GSD Skill Preferences

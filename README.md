@@ -6,6 +6,60 @@ Local-first batch collector and analysis stack for Vinted Homme/Femme market sig
 
 Acquisition now defaults to the bounded API posture: `--min-price 30` and `--max-price 0` on the real acquisition entrypoints (`discover`, `batch`, `continuous`). Use `--min-price 0` only when you explicitly want an unbounded debug or benchmark run.
 
+## Acquisition benchmark CLI
+
+Use the acquisition benchmark commands when you want a reproducible scorecard from persisted SQLite/runtime windows rather than ad hoc SQL or notebooks.
+
+### Compare benchmark specs and write artifacts
+
+```bash
+python -m vinted_radar.cli acquisition-benchmark \
+  --spec-file specs/baseline-fr-page1.json \
+  --spec-file specs/candidate-fr-page2.json
+```
+
+When `--json-out` / `--markdown-out` are omitted, the command writes both artifacts under `artifacts/acquisition-benchmarks/` and prints the explicit artifact paths.
+
+Spec file contract (one JSON object per file, or one file containing a JSON array of objects):
+
+```json
+{
+  "experiment_id": "baseline-fr-page1",
+  "profile": "baseline-fr-page1",
+  "label": "Baseline FR page_limit=1",
+  "db_path": "data/vinted-radar.db",
+  "window_started_at": "2026-03-25T09:00:00+00:00",
+  "window_finished_at": "2026-03-25T10:30:00+00:00",
+  "config": {
+    "proxy": "http://user:pass@proxy.example:8080",
+    "page_limit": 1
+  },
+  "storage_snapshots": [
+    {"captured_at": "2026-03-25T09:00:00+00:00", "listing_count": 100, "db_size_bytes": 50000, "artifact_size_bytes": 5000},
+    {"captured_at": "2026-03-25T10:30:00+00:00", "listing_count": 112, "db_size_bytes": 51800, "artifact_size_bytes": 5600}
+  ],
+  "resource_snapshots": [
+    {"captured_at": "2026-03-25T09:15:00+00:00", "cpu_percent": 30.0, "rss_mb": 240.0},
+    {"captured_at": "2026-03-25T10:15:00+00:00", "cpu_percent": 34.0, "rss_mb": 252.0}
+  ]
+}
+```
+
+Notes:
+
+- `db_path`, `window_started_at`, `window_finished_at`, and `experiment_id` are required.
+- Relative `db_path` values resolve from the spec file directory.
+- Proxy URLs, DSNs, tokens, and password-shaped config keys are redacted in both stdout and written artifacts.
+
+### Inspect or re-render an existing benchmark payload
+
+```bash
+python -m vinted_radar.cli acquisition-benchmark-report \
+  --input artifacts/acquisition-benchmarks/acquisition-benchmark-20260325T103000Z.json
+```
+
+`acquisition-benchmark-report` accepts either a full report JSON payload, a VPS runner bundle containing `benchmark_report`, or a raw JSON array / object containing `experiments`, then renders the leaderboard as table/json/markdown and can optionally re-export redacted JSON/Markdown artifacts.
+
 ## Polyglot data-platform foundation (M002/S10)
 
 The repo now carries the shared configuration contract for the long-term PostgreSQL + ClickHouse + S3-compatible storage platform in `vinted_radar.platform.config`.

@@ -1,0 +1,1232 @@
+{
+  "artifacts": {
+    "json": ".gsd\\milestones\\M003\\benchmarks\\_probe-baseline-fr-page1.json",
+    "markdown": ".gsd\\milestones\\M003\\benchmarks\\_probe-baseline-fr-page1.md"
+  },
+  "benchmark_report": {
+    "benchmark_id": "acquisition-benchmark-2026-04-09T131336+0000",
+    "experiments": [
+      {
+        "catalog_scans": {
+          "accepted_listing_count_total": 1728,
+          "api_listing_count_total": 1728,
+          "challenge_count": 0,
+          "failure_count": 0,
+          "filtered_out_count_total": 0,
+          "http_403_count": 0,
+          "http_429_count": 0,
+          "response_status_counts": {
+            "200": 18
+          },
+          "scan_count": 18,
+          "success_count": 18
+        },
+        "config": {
+          "declared": {
+            "profile": {
+              "label": "Baseline FR page-limit=1",
+              "max_leaf_categories": 6,
+              "max_price": 0.0,
+              "min_price": 30.0,
+              "page_limit": 1,
+              "request_delay": 3.0,
+              "root_scope": "both",
+              "state_refresh_limit": 6,
+              "timeout_seconds": 20.0
+            },
+            "remote": {
+              "db_path": "/root/Vinted/data/vinted-radar.clean.db",
+              "host": "46.225.113.129",
+              "identity_file": "C:\\Users\\Alexis\\.ssh\\id_ed25519",
+              "repo_root": "/root/Vinted",
+              "ssh_port": 22,
+              "ssh_target": "root@46.225.113.129",
+              "vps_env_file": "C:\\Users\\Alexis\\Documents\\VintedScrap2\\.env.vps"
+            },
+            "runner": {
+              "description": "Create a temporary SQLite snapshot on the VPS, run the bounded experiment against the snapshot, and leave the live DB plus systemd services untouched.",
+              "destructive": false,
+              "duration_minutes": 2.0,
+              "mode": "preserve-live",
+              "preserves_live_service_posture": true,
+              "sample_interval_seconds": 15.0,
+              "wait_between_cycles_seconds": 0.0
+            }
+          },
+          "observed": {
+            "max_leaf_categories": 6,
+            "page_limit": 1,
+            "request_delay_seconds": 3.0,
+            "root_scope": "both",
+            "runtime_config": {
+              "concurrency": 24,
+              "max_leaf_categories": 6,
+              "max_price": 0.0,
+              "min_price": 30.0,
+              "page_limit": 1,
+              "proxy_pool_size": 100,
+              "request_delay": 3.0,
+              "root_scope": "both",
+              "state_refresh_limit": 6,
+              "target_brands": [],
+              "target_catalogs": [],
+              "timeout_seconds": 20.0,
+              "transport_mode": "proxy-pool"
+            },
+            "runtime_mode": "batch",
+            "state_probe_limit": 6
+          }
+        },
+        "discovery": {
+          "failed_scans": 0,
+          "raw_listing_hits": 1728,
+          "run_count": 3,
+          "scanned_leaf_catalogs": 18,
+          "successful_scans": 18,
+          "unique_listing_hits": 1728
+        },
+        "experiment_id": "baseline-fr-page1-2026-04-09T131117+0000",
+        "facts": {
+          "catalog_scans": [
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 99,
+              "catalog_path": "Hommes > Accessoires > Autres",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:11:22+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=99&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131118-6de8524d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 244,
+              "catalog_path": "Hommes > Accessoires > Bijoux > Autre",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:11:22+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=244&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131118-6de8524d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 1123,
+              "catalog_path": "Femmes > Accessoires > Accessoires pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:11:22+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1123&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131118-6de8524d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 1140,
+              "catalog_path": "Femmes > Accessoires > Autres accessoires",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:11:22+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1140&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131118-6de8524d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 2931,
+              "catalog_path": "Femmes > Accessoires > Bandanas et foulards pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:11:22+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=2931&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131118-6de8524d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 2960,
+              "catalog_path": "Hommes > Accessoires > Bandanas et foulards pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:11:22+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=2960&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131118-6de8524d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 99,
+              "catalog_path": "Hommes > Accessoires > Autres",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:11+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=99&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131207-c9df993c",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 244,
+              "catalog_path": "Hommes > Accessoires > Bijoux > Autre",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:11+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=244&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131207-c9df993c",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 1123,
+              "catalog_path": "Femmes > Accessoires > Accessoires pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:11+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1123&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131207-c9df993c",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 1140,
+              "catalog_path": "Femmes > Accessoires > Autres accessoires",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:11+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1140&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131207-c9df993c",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 2931,
+              "catalog_path": "Femmes > Accessoires > Bandanas et foulards pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:11+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=2931&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131207-c9df993c",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 2960,
+              "catalog_path": "Hommes > Accessoires > Bandanas et foulards pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:11+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=2960&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131207-c9df993c",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 99,
+              "catalog_path": "Hommes > Accessoires > Autres",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:59+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=99&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131252-c595bf1d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 244,
+              "catalog_path": "Hommes > Accessoires > Bijoux > Autre",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:59+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=244&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131252-c595bf1d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 1123,
+              "catalog_path": "Femmes > Accessoires > Accessoires pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:59+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1123&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131252-c595bf1d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 1140,
+              "catalog_path": "Femmes > Accessoires > Autres accessoires",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:59+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=1140&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131252-c595bf1d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 2931,
+              "catalog_path": "Femmes > Accessoires > Bandanas et foulards pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:59+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=2931&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Femmes",
+              "run_id": "20260409T131252-c595bf1d",
+              "success": true
+            },
+            {
+              "accepted_listing_count": 96,
+              "accepted_ratio": 1.0,
+              "api_listing_count": 96,
+              "catalog_id": 2960,
+              "catalog_path": "Hommes > Accessoires > Bandanas et foulards pour cheveux",
+              "error_message": null,
+              "fetched_at": "2026-04-09T13:12:59+00:00",
+              "filtered_out_count": 0,
+              "listing_count": 96,
+              "page_number": 1,
+              "requested_url": "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=2960&page=1&per_page=96&price_from=30.0",
+              "response_status": 200,
+              "root_title": "Hommes",
+              "run_id": "20260409T131252-c595bf1d",
+              "success": true
+            }
+          ],
+          "db": {
+            "path": "/root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.benchmark-export-20260409T131336Z.db"
+          },
+          "discovery_runs": [
+            {
+              "failed_scans": 0,
+              "finished_at": "2026-04-09T13:11:28+00:00",
+              "last_error": null,
+              "max_leaf_categories": 6,
+              "page_limit": 1,
+              "raw_listing_hits": 576,
+              "request_delay_seconds": 3.0,
+              "root_scope": "both",
+              "run_id": "20260409T131118-6de8524d",
+              "scanned_leaf_catalogs": 6,
+              "started_at": "2026-04-09T13:11:18+00:00",
+              "status": "completed",
+              "successful_scans": 6,
+              "unique_listing_hits": 576
+            },
+            {
+              "failed_scans": 0,
+              "finished_at": "2026-04-09T13:12:15+00:00",
+              "last_error": null,
+              "max_leaf_categories": 6,
+              "page_limit": 1,
+              "raw_listing_hits": 576,
+              "request_delay_seconds": 3.0,
+              "root_scope": "both",
+              "run_id": "20260409T131207-c9df993c",
+              "scanned_leaf_catalogs": 6,
+              "started_at": "2026-04-09T13:12:07+00:00",
+              "status": "completed",
+              "successful_scans": 6,
+              "unique_listing_hits": 576
+            },
+            {
+              "failed_scans": 0,
+              "finished_at": "2026-04-09T13:13:02+00:00",
+              "last_error": null,
+              "max_leaf_categories": 6,
+              "page_limit": 1,
+              "raw_listing_hits": 576,
+              "request_delay_seconds": 3.0,
+              "root_scope": "both",
+              "run_id": "20260409T131252-c595bf1d",
+              "scanned_leaf_catalogs": 6,
+              "started_at": "2026-04-09T13:12:52+00:00",
+              "status": "completed",
+              "successful_scans": 6,
+              "unique_listing_hits": 576
+            }
+          ],
+          "resource_snapshots": [
+            {
+              "captured_at": "2026-04-09T13:11:18+00:00",
+              "cpu_percent": 0.0,
+              "ram_mb": 7.0
+            },
+            {
+              "captured_at": "2026-04-09T13:11:34+00:00",
+              "cpu_percent": 16.2,
+              "ram_mb": 122.2265625
+            },
+            {
+              "captured_at": "2026-04-09T13:11:50+00:00",
+              "cpu_percent": 8.9,
+              "ram_mb": 157.9765625
+            },
+            {
+              "captured_at": "2026-04-09T13:12:06+00:00",
+              "cpu_percent": 0.0,
+              "ram_mb": 12.25
+            },
+            {
+              "captured_at": "2026-04-09T13:12:07+00:00",
+              "cpu_percent": 0.0,
+              "ram_mb": 7.125
+            },
+            {
+              "captured_at": "2026-04-09T13:12:23+00:00",
+              "cpu_percent": 14.6,
+              "ram_mb": 149.19140625
+            },
+            {
+              "captured_at": "2026-04-09T13:12:39+00:00",
+              "cpu_percent": 8.2,
+              "ram_mb": 165.94140625
+            },
+            {
+              "captured_at": "2026-04-09T13:12:52+00:00",
+              "cpu_percent": 0.0,
+              "ram_mb": 12.25
+            },
+            {
+              "captured_at": "2026-04-09T13:12:53+00:00",
+              "cpu_percent": 0.0,
+              "ram_mb": 7.75
+            },
+            {
+              "captured_at": "2026-04-09T13:13:09+00:00",
+              "cpu_percent": 14.2,
+              "ram_mb": 132.3203125
+            },
+            {
+              "captured_at": "2026-04-09T13:13:25+00:00",
+              "cpu_percent": 8.2,
+              "ram_mb": 163.9453125
+            },
+            {
+              "captured_at": "2026-04-09T13:13:36+00:00",
+              "cpu_percent": 0.0,
+              "ram_mb": 12.25
+            }
+          ],
+          "runtime_cycles": [
+            {
+              "config": {
+                "concurrency": 24,
+                "max_leaf_categories": 6,
+                "max_price": 0.0,
+                "min_price": 30.0,
+                "page_limit": 1,
+                "proxy_pool_size": 100,
+                "request_delay": 3.0,
+                "root_scope": "both",
+                "state_refresh_limit": 6,
+                "target_brands": [],
+                "target_catalogs": [],
+                "timeout_seconds": 20.0,
+                "transport_mode": "proxy-pool"
+              },
+              "cycle_id": "cycle-20260409T131118-9bd88b99",
+              "discovery_run_id": "20260409T131118-6de8524d",
+              "finished_at": "2026-04-09T13:12:05+00:00",
+              "interval_seconds": null,
+              "last_error": null,
+              "mode": "batch",
+              "phase": "completed",
+              "started_at": "2026-04-09T13:11:18+00:00",
+              "state_probe_limit": 6,
+              "state_probed_count": 6,
+              "state_refresh_summary": {
+                "anti_bot_challenge_count": 0,
+                "degraded_listing_ids": [
+                  8601383514
+                ],
+                "degraded_probe_count": 1,
+                "direct_signal_count": 6,
+                "http_error_count": 1,
+                "inconclusive_probe_count": 0,
+                "outcome_counts": {
+                  "active": 5,
+                  "deleted": 1,
+                  "sold": 0,
+                  "unavailable": 0,
+                  "unknown": 0
+                },
+                "probed_count": 6,
+                "reason_counts": {
+                  "buy_signal_open": 5,
+                  "http_404": 1
+                },
+                "requested_limit": 6,
+                "selected_target_count": 6,
+                "status": "degraded",
+                "transport_error_count": 0
+              },
+              "status": "completed",
+              "tracked_listings": 85537
+            },
+            {
+              "config": {
+                "concurrency": 24,
+                "max_leaf_categories": 6,
+                "max_price": 0.0,
+                "min_price": 30.0,
+                "page_limit": 1,
+                "proxy_pool_size": 100,
+                "request_delay": 3.0,
+                "root_scope": "both",
+                "state_refresh_limit": 6,
+                "target_brands": [],
+                "target_catalogs": [],
+                "timeout_seconds": 20.0,
+                "transport_mode": "proxy-pool"
+              },
+              "cycle_id": "cycle-20260409T131206-b45a9829",
+              "discovery_run_id": "20260409T131207-c9df993c",
+              "finished_at": "2026-04-09T13:12:51+00:00",
+              "interval_seconds": null,
+              "last_error": null,
+              "mode": "batch",
+              "phase": "completed",
+              "started_at": "2026-04-09T13:12:06+00:00",
+              "state_probe_limit": 6,
+              "state_probed_count": 6,
+              "state_refresh_summary": {
+                "anti_bot_challenge_count": 0,
+                "degraded_listing_ids": [],
+                "degraded_probe_count": 0,
+                "direct_signal_count": 6,
+                "http_error_count": 0,
+                "inconclusive_probe_count": 0,
+                "outcome_counts": {
+                  "active": 6,
+                  "deleted": 0,
+                  "sold": 0,
+                  "unavailable": 0,
+                  "unknown": 0
+                },
+                "probed_count": 6,
+                "reason_counts": {
+                  "buy_signal_open": 6
+                },
+                "requested_limit": 6,
+                "selected_target_count": 6,
+                "status": "healthy",
+                "transport_error_count": 0
+              },
+              "status": "completed",
+              "tracked_listings": 85547
+            },
+            {
+              "config": {
+                "concurrency": 24,
+                "max_leaf_categories": 6,
+                "max_price": 0.0,
+                "min_price": 30.0,
+                "page_limit": 1,
+                "proxy_pool_size": 100,
+                "request_delay": 3.0,
+                "root_scope": "both",
+                "state_refresh_limit": 6,
+                "target_brands": [],
+                "target_catalogs": [],
+                "timeout_seconds": 20.0,
+                "transport_mode": "proxy-pool"
+              },
+              "cycle_id": "cycle-20260409T131252-46cae7d3",
+              "discovery_run_id": "20260409T131252-c595bf1d",
+              "finished_at": "2026-04-09T13:13:35+00:00",
+              "interval_seconds": null,
+              "last_error": null,
+              "mode": "batch",
+              "phase": "completed",
+              "started_at": "2026-04-09T13:12:52+00:00",
+              "state_probe_limit": 6,
+              "state_probed_count": 6,
+              "state_refresh_summary": {
+                "anti_bot_challenge_count": 0,
+                "degraded_listing_ids": [
+                  8601451485
+                ],
+                "degraded_probe_count": 1,
+                "direct_signal_count": 6,
+                "http_error_count": 1,
+                "inconclusive_probe_count": 0,
+                "outcome_counts": {
+                  "active": 4,
+                  "deleted": 1,
+                  "sold": 0,
+                  "unavailable": 1,
+                  "unknown": 0
+                },
+                "probed_count": 6,
+                "reason_counts": {
+                  "buy_signal_open": 4,
+                  "buy_signal_unavailable": 1,
+                  "http_404": 1
+                },
+                "requested_limit": 6,
+                "selected_target_count": 6,
+                "status": "degraded",
+                "transport_error_count": 0
+              },
+              "status": "completed",
+              "tracked_listings": 85553
+            }
+          ],
+          "storage_snapshots": [
+            {
+              "artifact_size_bytes": 0,
+              "captured_at": "2026-04-09T13:11:17+00:00",
+              "db_size_bytes": 1451192320,
+              "listing_count": 85499,
+              "storage_bytes": 1451192320
+            },
+            {
+              "artifact_size_bytes": 0,
+              "captured_at": "2026-04-09T13:12:06+00:00",
+              "db_size_bytes": 1452101632,
+              "listing_count": 85537,
+              "storage_bytes": 1452101632
+            },
+            {
+              "artifact_size_bytes": 0,
+              "captured_at": "2026-04-09T13:12:52+00:00",
+              "db_size_bytes": 1452920832,
+              "listing_count": 85547,
+              "storage_bytes": 1452920832
+            },
+            {
+              "artifact_size_bytes": 0,
+              "captured_at": "2026-04-09T13:13:36+00:00",
+              "db_size_bytes": 1453780992,
+              "listing_count": 85553,
+              "storage_bytes": 1453780992
+            }
+          ]
+        },
+        "label": "Baseline FR page-limit=1",
+        "profile": "baseline-fr-page1",
+        "rank": 1,
+        "resources": {
+          "mean_cpu_percent": 5.8583,
+          "mean_ram_mb": 79.1855,
+          "peak_cpu_percent": 16.2,
+          "peak_ram_mb": 165.9414,
+          "sample_count": 12
+        },
+        "runtime": {
+          "anti_bot_challenge_count": 0,
+          "completed_cycle_count": 3,
+          "cycle_count": 3,
+          "degraded_cycle_count": 2,
+          "degraded_probe_count": 2,
+          "direct_signal_count": 18,
+          "failed_cycle_count": 0,
+          "healthy_cycle_count": 1,
+          "http_error_count": 2,
+          "inconclusive_probe_count": 0,
+          "interrupted_cycle_count": 0,
+          "partial_cycle_count": 0,
+          "state_probe_count": 18,
+          "top_reasons": [
+            {
+              "count": 15,
+              "reason": "buy_signal_open"
+            },
+            {
+              "count": 2,
+              "reason": "http_404"
+            },
+            {
+              "count": 1,
+              "reason": "buy_signal_unavailable"
+            }
+          ],
+          "transport_error_count": 0,
+          "unknown_cycle_count": 0
+        },
+        "scorecard": {
+          "bytes_per_new_listing": 47938.3704,
+          "challenge_count": 0,
+          "challenge_rate": 0.0,
+          "degraded_count": 4,
+          "degraded_rate": 0.1111,
+          "duplicate_listing_hits": 1674,
+          "duplicate_ratio": 0.9688,
+          "mean_cpu_percent": 5.8583,
+          "mean_ram_mb": 79.1855,
+          "net_new_listings": 54,
+          "net_new_listings_per_hour": 1398.9637,
+          "net_new_source": "listing_count_delta",
+          "peak_cpu_percent": 16.2,
+          "peak_ram_mb": 165.9414,
+          "raw_listing_hits": 1728,
+          "storage_growth_bytes": 2588672
+        },
+        "storage": {
+          "artifact_size_bytes_end": 0,
+          "artifact_size_bytes_start": 0,
+          "db_size_bytes_end": 1453780992,
+          "db_size_bytes_start": 1451192320,
+          "listing_count_delta": 54,
+          "listing_count_end": 85553,
+          "listing_count_start": 85499,
+          "snapshot_count": 4,
+          "storage_bytes_end": 1453780992,
+          "storage_bytes_start": 1451192320,
+          "storage_growth_bytes": 2588672
+        },
+        "window": {
+          "duration_hours": 0.0386,
+          "finished_at": "2026-04-09T13:13:36+00:00",
+          "source": "explicit",
+          "started_at": "2026-04-09T13:11:17+00:00"
+        },
+        "winner": true
+      }
+    ],
+    "generated_at": "2026-04-09T13:13:36+00:00",
+    "leaderboard": [
+      {
+        "bytes_per_new_listing": 47938.3704,
+        "challenge_count": 0,
+        "challenge_rate": 0.0,
+        "degraded_count": 4,
+        "duplicate_ratio": 0.9688,
+        "experiment_id": "baseline-fr-page1-2026-04-09T131117+0000",
+        "label": "Baseline FR page-limit=1",
+        "mean_cpu_percent": 5.8583,
+        "net_new_listings": 54,
+        "net_new_listings_per_hour": 1398.9637,
+        "peak_ram_mb": 165.9414,
+        "profile": "baseline-fr-page1",
+        "rank": 1,
+        "window_hours": 0.0386,
+        "winner": true
+      }
+    ],
+    "methodology": {
+      "formulas": {
+        "bytes_per_new_listing": "storage_growth_bytes / net_new_listings",
+        "challenge_rate": "challenge_count / (catalog_scan_count + state_probe_count)",
+        "duplicate_ratio": "max(raw_listing_hits - net_new_listings, 0) / raw_listing_hits",
+        "net_new_listings": "max(listing_count_end - listing_count_start, 0) with discovery unique hits as a fallback when listing snapshots are absent"
+      },
+      "score_fields": [
+        "net_new_listings",
+        "net_new_listings_per_hour",
+        "duplicate_ratio",
+        "challenge_count",
+        "challenge_rate",
+        "degraded_count",
+        "bytes_per_new_listing",
+        "mean_cpu_percent",
+        "peak_cpu_percent",
+        "mean_ram_mb",
+        "peak_ram_mb"
+      ],
+      "winner_sort_order": [
+        "net_new_listings_per_hour desc",
+        "duplicate_ratio asc",
+        "challenge_rate asc",
+        "degraded_count asc",
+        "bytes_per_new_listing asc",
+        "mean_cpu_percent asc",
+        "peak_ram_mb asc",
+        "experiment_id asc"
+      ]
+    },
+    "summary": {
+      "compared_profiles": [
+        {
+          "experiment_id": "baseline-fr-page1-2026-04-09T131117+0000",
+          "label": "Baseline FR page-limit=1",
+          "profile": "baseline-fr-page1"
+        }
+      ],
+      "profile_count": 1,
+      "profiles": [
+        "baseline-fr-page1"
+      ],
+      "runner_up_experiment_id": null,
+      "runner_up_label": null,
+      "runner_up_profile": null,
+      "winner_experiment_id": "baseline-fr-page1-2026-04-09T131117+0000",
+      "winner_label": "Baseline FR page-limit=1",
+      "winner_profile": "baseline-fr-page1",
+      "winner_reason": "Only one experiment was supplied, so it ranks first by default."
+    }
+  },
+  "bundle_id": "vps-benchmark-baseline-fr-page1-2026-04-09T131336+0000",
+  "generated_at": "2026-04-09T13:13:36+00:00",
+  "mode": {
+    "description": "Create a temporary SQLite snapshot on the VPS, run the bounded experiment against the snapshot, and leave the live DB plus systemd services untouched.",
+    "destructive": false,
+    "name": "preserve-live",
+    "preserves_live_service_posture": true
+  },
+  "profile": {
+    "label": "Baseline FR page-limit=1",
+    "max_leaf_categories": 6,
+    "max_price": 0.0,
+    "min_price": 30.0,
+    "name": "baseline-fr-page1",
+    "page_limit": 1,
+    "request_delay": 3.0,
+    "root_scope": "both",
+    "state_refresh_limit": 6,
+    "timeout_seconds": 20.0
+  },
+  "remote_result": {
+    "cycles": [
+      {
+        "command": [
+          "/root/Vinted/venv/bin/python",
+          "-m",
+          "vinted_radar.cli",
+          "batch",
+          "--db",
+          "/root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db",
+          "--page-limit",
+          "1",
+          "--root-scope",
+          "both",
+          "--min-price",
+          "30.0",
+          "--max-price",
+          "0.0",
+          "--state-refresh-limit",
+          "6",
+          "--request-delay",
+          "3.0",
+          "--timeout-seconds",
+          "20.0",
+          "--max-leaf-categories",
+          "6"
+        ],
+        "cycle_index": 1,
+        "finished_at": "2026-04-09T13:12:05+00:00",
+        "returncode": 0,
+        "started_at": "2026-04-09T13:11:17+00:00",
+        "stderr": "2026-04-09 13:11:18,251 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.39.4.37:5462)\n2026-04-09 13:11:20,326 [INFO] vinted_radar.http: Async session cookie acquired for http://***@45.39.4.37:5462 (status 200)\n2026-04-09 13:11:22,957 [INFO] vinted_radar.services.discovery: Catalog 1123 (Accessoires pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:11:22,957 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@216.173.80.190:6447)\n2026-04-09 13:11:22,958 [INFO] vinted_radar.services.discovery: Catalog 99 (Autres) â€“ fetching API page 1/1\n2026-04-09 13:11:22,958 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@142.111.192.20:5616)\n2026-04-09 13:11:22,958 [INFO] vinted_radar.services.discovery: Catalog 1140 (Autres accessoires) â€“ fetching API page 1/1\n2026-04-09 13:11:22,958 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@145.223.56.200:7252)\n2026-04-09 13:11:22,959 [INFO] vinted_radar.services.discovery: Catalog 2960 (Bandanas et foulards pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:11:22,959 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.38.107.150:6067)\n2026-04-09 13:11:22,959 [INFO] vinted_radar.services.discovery: Catalog 2931 (Bandanas et foulards pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:11:22,959 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@104.239.35.41:5723)\n2026-04-09 13:11:22,959 [INFO] vinted_radar.services.discovery: Catalog 244 (Autre) â€“ fetching API page 1/1\n2026-04-09 13:11:22,959 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@198.37.118.162:5621)\n2026-04-09 13:11:24,229 [INFO] vinted_radar.http: Async session cookie acquired for http://***@45.38.107.150:6067 (status 200)\n2026-04-09 13:11:24,597 [INFO] vinted_radar.http: Async session cookie acquired for http://***@198.37.118.162:5621 (status 200)\n2026-04-09 13:11:24,868 [INFO] vinted_radar.http: Async session cookie acquired for http://***@145.223.56.200:7252 (status 200)\n2026-04-09 13:11:25,186 [INFO] vinted_radar.http: Async session cookie acquired for http://***@104.239.35.41:5723 (status 200)\n2026-04-09 13:11:25,248 [INFO] vinted_radar.services.discovery: Catalog 2960 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:11:25,435 [INFO] vinted_radar.http: Async session cookie acquired for http://***@142.111.192.20:5616 (status 200)\n2026-04-09 13:11:26,135 [INFO] vinted_radar.services.discovery: Catalog 244 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:11:26,245 [INFO] vinted_radar.services.discovery: Catalog 1140 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:11:26,566 [INFO] vinted_radar.services.discovery: Catalog 2931 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:11:26,871 [INFO] vinted_radar.http: Async session cookie acquired for http://***@216.173.80.190:6447 (status 200)\n2026-04-09 13:11:27,005 [INFO] vinted_radar.services.discovery: Catalog 99 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:11:28,381 [INFO] vinted_radar.services.discovery: Catalog 1123 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:11:30,822 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.39.4.37:5462)\n2026-04-09 13:11:32,298 [INFO] vinted_radar.http: Session cookie acquired for http://***@45.39.4.37:5462 (status 200)\n2026-04-09 13:11:35,233 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@216.173.80.190:6447)\n2026-04-09 13:11:36,926 [INFO] vinted_radar.http: Session cookie acquired for http://***@216.173.80.190:6447 (status 200)\n2026-04-09 13:11:39,403 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@142.111.192.20:5616)\n2026-04-09 13:11:43,677 [INFO] vinted_radar.http: Session cookie acquired for http://***@142.111.192.20:5616 (status 200)\n2026-04-09 13:11:46,103 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@145.223.56.200:7252)\n2026-04-09 13:11:47,420 [INFO] vinted_radar.http: Session cookie acquired for http://***@145.223.56.200:7252 (status 200)\n2026-04-09 13:11:50,746 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.38.107.150:6067)\n2026-04-09 13:11:51,348 [INFO] vinted_radar.http: Session cookie acquired for http://***@45.38.107.150:6067 (status 200)\n2026-04-09 13:11:54,507 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@104.239.35.41:5723)\n2026-04-09 13:11:56,004 [INFO] vinted_radar.http: Session cookie acquired for http://***@104.239.35.41:5723 (status 200)\n",
+        "stdout": "Database: /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db\nCycle: cycle-20260409T131118-9bd88b99\nMode: batch\nStatus: completed (phase completed)\nStarted: 2026-04-09T13:11:18+00:00\nFinished: 2026-04-09T13:12:05+00:00\nTransport: proxy-pool (100 routes, concurrency 24)\nDiscovery run: 20260409T131118-6de8524d\nDiscovery: 576 sightings, 576 unique IDs, 6 successful scans, all scans clean\nState probes: 6 / 6\nState refresh health: degraded | direct 6 | inconclusive 0 | degraded 1\nTracked listings: 85537\nFreshness snapshot: first-pass 16551, fresh 68986, aging 0, stale 0\n"
+      },
+      {
+        "command": [
+          "/root/Vinted/venv/bin/python",
+          "-m",
+          "vinted_radar.cli",
+          "batch",
+          "--db",
+          "/root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db",
+          "--page-limit",
+          "1",
+          "--root-scope",
+          "both",
+          "--min-price",
+          "30.0",
+          "--max-price",
+          "0.0",
+          "--state-refresh-limit",
+          "6",
+          "--request-delay",
+          "3.0",
+          "--timeout-seconds",
+          "20.0",
+          "--max-leaf-categories",
+          "6"
+        ],
+        "cycle_index": 2,
+        "finished_at": "2026-04-09T13:12:51+00:00",
+        "returncode": 0,
+        "started_at": "2026-04-09T13:12:06+00:00",
+        "stderr": "2026-04-09 13:12:07,031 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.39.4.37:5462)\n2026-04-09 13:12:08,682 [INFO] vinted_radar.http: Async session cookie acquired for http://***@45.39.4.37:5462 (status 200)\n2026-04-09 13:12:11,451 [INFO] vinted_radar.services.discovery: Catalog 1123 (Accessoires pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:12:11,451 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@216.173.80.190:6447)\n2026-04-09 13:12:11,451 [INFO] vinted_radar.services.discovery: Catalog 99 (Autres) â€“ fetching API page 1/1\n2026-04-09 13:12:11,451 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@142.111.192.20:5616)\n2026-04-09 13:12:11,451 [INFO] vinted_radar.services.discovery: Catalog 1140 (Autres accessoires) â€“ fetching API page 1/1\n2026-04-09 13:12:11,452 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@145.223.56.200:7252)\n2026-04-09 13:12:11,452 [INFO] vinted_radar.services.discovery: Catalog 2960 (Bandanas et foulards pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:12:11,452 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.38.107.150:6067)\n2026-04-09 13:12:11,452 [INFO] vinted_radar.services.discovery: Catalog 2931 (Bandanas et foulards pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:12:11,452 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@104.239.35.41:5723)\n2026-04-09 13:12:11,452 [INFO] vinted_radar.services.discovery: Catalog 244 (Autre) â€“ fetching API page 1/1\n2026-04-09 13:12:11,452 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@198.37.118.162:5621)\n2026-04-09 13:12:12,596 [INFO] vinted_radar.http: Async session cookie acquired for http://***@45.38.107.150:6067 (status 200)\n2026-04-09 13:12:12,690 [INFO] vinted_radar.http: Async session cookie acquired for http://***@198.37.118.162:5621 (status 200)\n2026-04-09 13:12:12,771 [INFO] vinted_radar.http: Async session cookie acquired for http://***@104.239.35.41:5723 (status 200)\n2026-04-09 13:12:12,916 [INFO] vinted_radar.http: Async session cookie acquired for http://***@216.173.80.190:6447 (status 200)\n2026-04-09 13:12:13,504 [INFO] vinted_radar.services.discovery: Catalog 2960 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:12:13,561 [INFO] vinted_radar.http: Async session cookie acquired for http://***@145.223.56.200:7252 (status 200)\n2026-04-09 13:12:13,925 [INFO] vinted_radar.services.discovery: Catalog 244 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:12:14,000 [INFO] vinted_radar.http: Async session cookie acquired for http://***@142.111.192.20:5616 (status 200)\n2026-04-09 13:12:14,207 [INFO] vinted_radar.services.discovery: Catalog 2931 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:12:14,428 [INFO] vinted_radar.services.discovery: Catalog 1123 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:12:14,706 [INFO] vinted_radar.services.discovery: Catalog 1140 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:12:15,397 [INFO] vinted_radar.services.discovery: Catalog 99 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:12:16,482 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.39.4.37:5462)\n2026-04-09 13:12:18,196 [INFO] vinted_radar.http: Session cookie acquired for http://***@45.39.4.37:5462 (status 200)\n2026-04-09 13:12:22,301 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@216.173.80.190:6447)\n2026-04-09 13:12:23,899 [INFO] vinted_radar.http: Session cookie acquired for http://***@216.173.80.190:6447 (status 200)\n2026-04-09 13:12:26,497 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@142.111.192.20:5616)\n2026-04-09 13:12:29,440 [INFO] vinted_radar.http: Session cookie acquired for http://***@142.111.192.20:5616 (status 200)\n2026-04-09 13:12:30,525 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@145.223.56.200:7252)\n2026-04-09 13:12:31,919 [INFO] vinted_radar.http: Session cookie acquired for http://***@145.223.56.200:7252 (status 200)\n2026-04-09 13:12:34,542 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.38.107.150:6067)\n2026-04-09 13:12:35,277 [INFO] vinted_radar.http: Session cookie acquired for http://***@45.38.107.150:6067 (status 200)\n2026-04-09 13:12:39,014 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@104.239.35.41:5723)\n2026-04-09 13:12:40,671 [INFO] vinted_radar.http: Session cookie acquired for http://***@104.239.35.41:5723 (status 200)\n",
+        "stdout": "Database: /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db\nCycle: cycle-20260409T131206-b45a9829\nMode: batch\nStatus: completed (phase completed)\nStarted: 2026-04-09T13:12:06+00:00\nFinished: 2026-04-09T13:12:51+00:00\nTransport: proxy-pool (100 routes, concurrency 24)\nDiscovery run: 20260409T131207-c9df993c\nDiscovery: 576 sightings, 576 unique IDs, 6 successful scans, all scans clean\nState probes: 6 / 6\nState refresh health: healthy | direct 6 | inconclusive 0 | degraded 0\nTracked listings: 85547\nFreshness snapshot: first-pass 16523, fresh 69024, aging 0, stale 0\n"
+      },
+      {
+        "command": [
+          "/root/Vinted/venv/bin/python",
+          "-m",
+          "vinted_radar.cli",
+          "batch",
+          "--db",
+          "/root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db",
+          "--page-limit",
+          "1",
+          "--root-scope",
+          "both",
+          "--min-price",
+          "30.0",
+          "--max-price",
+          "0.0",
+          "--state-refresh-limit",
+          "6",
+          "--request-delay",
+          "3.0",
+          "--timeout-seconds",
+          "20.0",
+          "--max-leaf-categories",
+          "6"
+        ],
+        "cycle_index": 3,
+        "finished_at": "2026-04-09T13:13:35+00:00",
+        "returncode": 0,
+        "started_at": "2026-04-09T13:12:52+00:00",
+        "stderr": "2026-04-09 13:12:52,929 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.39.4.37:5462)\n2026-04-09 13:12:54,567 [INFO] vinted_radar.http: Async session cookie acquired for http://***@45.39.4.37:5462 (status 200)\n2026-04-09 13:12:59,267 [INFO] vinted_radar.services.discovery: Catalog 1123 (Accessoires pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:12:59,267 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@216.173.80.190:6447)\n2026-04-09 13:12:59,267 [INFO] vinted_radar.services.discovery: Catalog 99 (Autres) â€“ fetching API page 1/1\n2026-04-09 13:12:59,267 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@142.111.192.20:5616)\n2026-04-09 13:12:59,267 [INFO] vinted_radar.services.discovery: Catalog 1140 (Autres accessoires) â€“ fetching API page 1/1\n2026-04-09 13:12:59,268 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@145.223.56.200:7252)\n2026-04-09 13:12:59,268 [INFO] vinted_radar.services.discovery: Catalog 2960 (Bandanas et foulards pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:12:59,268 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.38.107.150:6067)\n2026-04-09 13:12:59,268 [INFO] vinted_radar.services.discovery: Catalog 2931 (Bandanas et foulards pour cheveux) â€“ fetching API page 1/1\n2026-04-09 13:12:59,268 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@104.239.35.41:5723)\n2026-04-09 13:12:59,268 [INFO] vinted_radar.services.discovery: Catalog 244 (Autre) â€“ fetching API page 1/1\n2026-04-09 13:12:59,268 [INFO] vinted_radar.http: Async session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@198.37.118.162:5621)\n2026-04-09 13:12:59,871 [INFO] vinted_radar.http: Async session cookie acquired for http://***@45.38.107.150:6067 (status 200)\n2026-04-09 13:13:00,719 [INFO] vinted_radar.services.discovery: Catalog 2960 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:13:01,015 [INFO] vinted_radar.http: Async session cookie acquired for http://***@216.173.80.190:6447 (status 200)\n2026-04-09 13:13:01,147 [INFO] vinted_radar.http: Async session cookie acquired for http://***@142.111.192.20:5616 (status 200)\n2026-04-09 13:13:01,194 [INFO] vinted_radar.http: Async session cookie acquired for http://***@198.37.118.162:5621 (status 200)\n2026-04-09 13:13:01,417 [INFO] vinted_radar.http: Async session cookie acquired for http://***@145.223.56.200:7252 (status 200)\n2026-04-09 13:13:01,682 [INFO] vinted_radar.http: Async session cookie acquired for http://***@104.239.35.41:5723 (status 200)\n2026-04-09 13:13:02,328 [INFO] vinted_radar.services.discovery: Catalog 1123 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:13:02,589 [INFO] vinted_radar.services.discovery: Catalog 1140 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:13:02,722 [INFO] vinted_radar.services.discovery: Catalog 99 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:13:02,813 [INFO] vinted_radar.services.discovery: Catalog 244 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:13:02,882 [INFO] vinted_radar.services.discovery: Catalog 2931 page 1 â€“ 96 listings found (page 1/10)\n2026-04-09 13:13:03,968 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.39.4.37:5462)\n2026-04-09 13:13:05,636 [INFO] vinted_radar.http: Session cookie acquired for http://***@45.39.4.37:5462 (status 200)\n2026-04-09 13:13:07,374 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@216.173.80.190:6447)\n2026-04-09 13:13:09,124 [INFO] vinted_radar.http: Session cookie acquired for http://***@216.173.80.190:6447 (status 200)\n2026-04-09 13:13:11,683 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@142.111.192.20:5616)\n2026-04-09 13:13:13,597 [INFO] vinted_radar.http: Session cookie acquired for http://***@142.111.192.20:5616 (status 200)\n2026-04-09 13:13:16,182 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@145.223.56.200:7252)\n2026-04-09 13:13:17,564 [INFO] vinted_radar.http: Session cookie acquired for http://***@145.223.56.200:7252 (status 200)\n2026-04-09 13:13:20,451 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@45.38.107.150:6067)\n2026-04-09 13:13:21,542 [INFO] vinted_radar.http: Session cookie acquired for http://***@45.38.107.150:6067 (status 200)\n2026-04-09 13:13:24,371 [INFO] vinted_radar.http: Session warm-up attempt 1/3 â€“ GET https://www.vinted.fr/ (route: http://***@104.239.35.41:5723)\n2026-04-09 13:13:25,683 [INFO] vinted_radar.http: Session cookie acquired for http://***@104.239.35.41:5723 (status 200)\n",
+        "stdout": "Database: /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db\nCycle: cycle-20260409T131252-46cae7d3\nMode: batch\nStatus: completed (phase completed)\nStarted: 2026-04-09T13:12:52+00:00\nFinished: 2026-04-09T13:13:35+00:00\nTransport: proxy-pool (100 routes, concurrency 24)\nDiscovery run: 20260409T131252-c595bf1d\nDiscovery: 576 sightings, 576 unique IDs, 6 successful scans, all scans clean\nState probes: 6 / 6\nState refresh health: degraded | direct 6 | inconclusive 0 | degraded 1\nTracked listings: 85553\nFreshness snapshot: first-pass 16518, fresh 69035, aging 0, stale 0\n"
+      }
+    ],
+    "experiment_finished_at": "2026-04-09T13:13:36+00:00",
+    "experiment_started_at": "2026-04-09T13:11:17+00:00",
+    "mode": "preserve-live",
+    "ok": true,
+    "remote_db": "/root/Vinted/data/vinted-radar.clean.db",
+    "remote_repo_root": "/root/Vinted",
+    "remote_snapshot_path": "/root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.benchmark-export-20260409T131336Z.db",
+    "resource_snapshots": [
+      {
+        "captured_at": "2026-04-09T13:11:18+00:00",
+        "cpu_percent": 0.0,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23887187968 53097627648  32% /\n",
+        "disk_free_bytes": 53097627648,
+        "disk_used_bytes": 23887187968,
+        "label": "cycle-1-start",
+        "ps": " 568412  568361  0.0  0.0  7168       00:00 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 7.0,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 1  0      0 198428 477188 5430628    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 286004 477204 5339524    0    0 10292 24524 3132 4349  9  3 86  2  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:11:34+00:00",
+        "cpu_percent": 16.2,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23891025920 53093789696  32% /\n",
+        "disk_free_bytes": 53093789696,
+        "disk_used_bytes": 23891025920,
+        "label": "cycle-1-sample-1",
+        "ps": " 568412  568361 16.2  1.5 125160      00:16 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 122.2265625,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 243480 477184 5290040    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 256788 477184 5290312    0    0     0   148 2943 4763  4  2 95  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:11:50+00:00",
+        "cpu_percent": 8.9,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23894261760 53090553856  32% /\n",
+        "disk_free_bytes": 53090553856,
+        "disk_used_bytes": 23894261760,
+        "label": "cycle-1-sample-2",
+        "ps": " 568412  568361  8.9  2.0 161768      00:32 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 157.9765625,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 301996 477184 5300928    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 297456 477184 5303520    0    0     0   148 2529 3743  3  3 94  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:12:06+00:00",
+        "cpu_percent": 0.0,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23892369408 53092446208  32% /\n",
+        "disk_free_bytes": 53092446208,
+        "disk_used_bytes": 23892369408,
+        "label": "cycle-1-finish",
+        "ps": "     82       2  0.0  0.0     0 55-23:41:49 [kworker/R-ipv6_]\n     89       2  0.0  0.0     0 55-23:41:49 [kworker/R-kstrp]\n     91       2  0.0  0.0     0 55-23:41:48 [kworker/u9:0]\n     96       2  0.0  0.0     0 55-23:41:48 [kworker/R-crypt]\n    106       2  0.0  0.0     0 55-23:41:48 [kworker/R-charg]\n    131       2  0.0  0.0     0 55-23:41:48 [kworker/0:1H-kblockd]\n    159       2  0.0  0.0     0 55-23:41:48 [kworker/3:1H-kblockd]\n    182       2  0.0  0.0     0 55-23:41:48 [hwrng]\n    189       2  0.0  0.0     0 55-23:41:48 [scsi_eh_1]\n    190       2  0.0  0.0     0 55-23:41:48 [kworker/R-scsi_]\n    191       2  0.0  0.0     0 55-23:41:48 [scsi_eh_2]\n    192       2  0.0  0.0     0 55-23:41:48 [kworker/R-scsi_]\n    193       2  0.0  0.0     0 55-23:41:48 [scsi_eh_3]\n    194       2  0.0  0.0     0 55-23:41:48 [kworker/R-scsi_]\n    195       2  0.0  0.0     0 55-23:41:48 [scsi_eh_4]\n    196       2  0.0  0.0     0 55-23:41:48 [kworker/R-scsi_]\n    198       2  0.0  0.0     0 55-23:41:48 [scsi_eh_5]\n    199       2  0.0  0.0     0 55-23:41:48 [kworker/R-scsi_]\n    200       2  0.0  0.0     0 55-23:41:48 [scsi_eh_6]\n    201       2  0.0  0.0     0 55-23:41:48 [kworker/R-scsi_]\n    235       2  0.0  0.0     0 55-23:41:47 [kworker/R-raid5]\n    277       2  0.0  0.0     0 55-23:41:46 [jbd2/sda1-8]\n    278       2  0.0  0.0     0 55-23:41:46 [kworker/R-ext4-]\n    369       2  0.0  0.0     0 55-23:41:44 [kworker/R-kmpat]\n    370       2  0.0  0.0     0 55-23:41:44 [kworker/R-kmpat]\n    913       1  0.0  0.0  4864 55-23:41:34 /usr/lib/systemd/systemd-logind\n    943       1  0.0  0.1 10232 55-23:41:33 /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal\n   1101       1  0.0  0.1  8704 55-23:38:40 /usr/lib/systemd/systemd --user --deserialize=10\n   1102    1101  0.0  0.0  1972 55-23:38:39 (sd-pam)\n   1237       2  0.0  0.0     0 55-23:38:37 [kworker/R-tls-s]\n  11600       1  0.0  0.0  2176 55-23:36:01 /usr/sbin/cron -f -P\n 136382       1  0.0  0.4 33968  4-06:34:53 /usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641\n 207421       1  0.1  0.4 33928    20:09:59 /usr/bin/containerd\n 207642       1  0.3  0.6 49680    20:09:58 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 236976       1  0.0  0.1  9080    18:37:35 /usr/bin/containerd-shim-runc-v2 -namespace moby -id fbec178db9bfbb3b8e755a55e93f3f6cac487ece83281f9b37e390f72eb76a0c -address /run/containerd/containerd.sock\n 236977       1  0.0  0.0  7384    18:37:35 /usr/bin/containerd-shim-runc-v2 -namespace moby -id a478a265bd17e778ed2c9e05c1d9a0e20046a4dfd50209eecfcf6051e1c5dedd -address /run/containerd/containerd.sock\n 236978       1  0.1  0.1  8576    18:37:35 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 33e3a880ecadee49ffc66e5937e56295e225411d0f17c4d20b5ae78dbbcd0938 -address /run/containerd/containerd.sock\n 237049  236977  1.0  1.6 133420   18:37:35 minio server /data --console-address :9001\n 237128  207642  0.0  0.0  3584    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 8123 -container-ip 172.18.0.2 -container-port 8123 -use-listen-fd\n 237135  207642  0.0  0.0  3072    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 8123 -container-ip 172.18.0.2 -container-port 8123 -use-listen-fd\n 237144  207642  0.0  0.0  3200    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9002 -container-ip 172.18.0.2 -container-port 9000 -use-listen-fd\n 237152  207642  0.0  0.0  3072    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9002 -container-ip 172.18.0.2 -container-port 9000 -use-listen-fd\n 237173  207642  4.6  0.0  3712    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 5432 -container-ip 172.18.0.3 -container-port 5432 -use-listen-fd\n 237180  207642  0.0  0.0  3072    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 5432 -container-ip 172.18.0.3 -container-port 5432 -use-listen-fd\n 237221  207642  0.0  0.0  3584    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9000 -container-ip 172.18.0.4 -container-port 9000 -use-listen-fd\n 237229  207642  0.0  0.0  3072    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9000 -container-ip 172.18.0.4 -container-port 9000 -use-listen-fd\n 237238  207642  0.0  0.0  3072    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9001 -container-ip 172.18.0.4 -container-port 9001 -use-listen-fd\n 237246  207642  0.0  0.0  3200    18:37:35 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9001 -container-ip 172.18.0.4 -container-port 9001 -use-listen-fd\n 258079    1101  0.0  0.0  2816 48-05:56:15 /usr/bin/gpg-agent --supervised\n 453420 3803790  0.0  0.1 10496    06:29:58 sshd: root@pts/0\n 471074       2  0.0  0.0     0    05:30:46 [psimon]\n 471079       1  0.4  1.6 133952   05:30:46 /root/Vinted/venv/bin/python -m vinted_radar.cli dashboard --db /root/Vinted/data/vinted-radar.clean.db --host 0.0.0.0 --port 8765\n 473406       1  9.2  8.1 648296   05:23:27 /root/Vinted/venv/bin/python -m vinted_radar.cli continuous --db /root/Vinted/data/vinted-radar.clean.db --page-limit 1 --state-refresh-limit 6 --interval-seconds 1800\n 519575       2  0.0  0.0     0    02:42:30 [kworker/1:0-events]\n 527482       2  0.0  0.0     0    02:15:38 [kworker/u8:4-flush-8:0]\n 545744       2  0.0  0.0     0    01:12:05 [kworker/0:3-events]\n 558426       2  0.0  0.0     0       31:02 [kworker/2:1-events]\n 560090       2  0.0  0.0     0       26:08 [kworker/u8:6-flush-8:0]\n 560104       2  0.1  0.0     0       26:04 [kworker/u8:7-events_power_efficient]\n 561443       2  0.0  0.0     0       21:59 [kworker/3:1-cgroup_destroy]\n 563113       2  0.0  0.0     0       17:17 [kworker/3:3]\n 563846       2  0.0  0.0     0       15:06 [kworker/1:1-cgroup_destroy]\n 564865       2  0.0  0.0     0       12:05 [kworker/2:2-cgroup_destroy]\n 565075       2  0.0  0.0     0       11:19 [kworker/0:0]\n 565276       2  0.0  0.0     0       10:48 [kworker/u8:0-flush-8:0]\n 567858       2  0.0  0.0     0       02:03 [kworker/2:0]\n 567859       2  0.0  0.0     0       02:03 [kworker/2:3-events]\n 568004 3803790  0.0  0.1  8064       01:37 sshd: [accepted]\n 568267       2  0.0  0.0     0       00:55 [kworker/3:0-events]\n 568315 3803790  0.0  0.1 10624       00:53 sshd: root@notty\n 568361  568315  4.7  0.1 14872       00:52 /root/Vinted/venv/bin/python /tmp/vps-benchmark-runner-20260409T131110Z.py\n 568469 3803790  0.0  0.1  8192       00:34 sshd: [accepted]\n 568644  568361  0.0  0.0  4224 441077234-00:18:40 ps -o pid=,ppid=,%cpu=,%mem=,rss=,etime=,command=\n3803790       1  0.0  0.0  3840 25-06:58:04 sshd: /usr/sbin/sshd -D [listener] 2 of 10-100 startups\n4130113       2  0.0  0.0     0 14-06:56:49 [psimon]\n4130119       1  0.8  0.9 72736 14-06:56:49 /usr/lib/systemd/systemd-journald\n4130245       1  0.0  0.0  5584 14-06:56:48 /usr/lib/systemd/systemd-udevd\n4130246       2  0.0  0.0     0 14-06:56:48 [psimon]\n4133904       1  0.0  0.0  3712 14-06:56:43 /usr/sbin/qemu-ga\n4133905       1  0.0  0.3 27136 14-06:56:43 /sbin/multipathd -d -s",
+        "rss_mb": 12.25,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 433056 477072 5240620    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 445764 477072 5240648    0    0     0  3300 1746 3196  1  1 98  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:12:07+00:00",
+        "cpu_percent": 0.0,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23892455424 53092360192  32% /\n",
+        "disk_free_bytes": 53092360192,
+        "disk_used_bytes": 23892455424,
+        "label": "cycle-2-start",
+        "ps": " 568648  568361  0.0  0.0  7296       00:00 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 7.125,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 1  0      0 445764 477084 5240900    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 432404 477164 5241004    0    0    84   464 3110 5227 10  3 87  1  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:12:23+00:00",
+        "cpu_percent": 14.6,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23896428544 53088387072  32% /\n",
+        "disk_free_bytes": 53088387072,
+        "disk_used_bytes": 23896428544,
+        "label": "cycle-2-sample-1",
+        "ps": " 568648  568361 14.6  1.9 152772      00:16 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 149.19140625,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 318404 477164 5255380    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 338736 477164 5255372    0    0     0    88 1932 3430  1  1 99  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:12:39+00:00",
+        "cpu_percent": 8.2,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23894474752 53090340864  32% /\n",
+        "disk_free_bytes": 53090340864,
+        "disk_used_bytes": 23894474752,
+        "label": "cycle-2-sample-2",
+        "ps": " 568648  568361  8.2  2.1 169924      00:32 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 165.94140625,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 340464 477176 5264976    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 340504 477176 5263404    0    0     0   136 1668 2876  2  1 97  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:12:52+00:00",
+        "cpu_percent": 0.0,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23898955776 53085859840  32% /\n",
+        "disk_free_bytes": 53085859840,
+        "disk_used_bytes": 23898955776,
+        "label": "cycle-2-finish",
+        "ps": "     89       2  0.0  0.0     0 55-23:42:34 [kworker/R-kstrp]\n     91       2  0.0  0.0     0 55-23:42:34 [kworker/u9:0]\n     96       2  0.0  0.0     0 55-23:42:34 [kworker/R-crypt]\n    106       2  0.0  0.0     0 55-23:42:34 [kworker/R-charg]\n    131       2  0.0  0.0     0 55-23:42:34 [kworker/0:1H-kblockd]\n    159       2  0.0  0.0     0 55-23:42:34 [kworker/3:1H-kblockd]\n    182       2  0.0  0.0     0 55-23:42:34 [hwrng]\n    189       2  0.0  0.0     0 55-23:42:34 [scsi_eh_1]\n    190       2  0.0  0.0     0 55-23:42:34 [kworker/R-scsi_]\n    191       2  0.0  0.0     0 55-23:42:34 [scsi_eh_2]\n    192       2  0.0  0.0     0 55-23:42:34 [kworker/R-scsi_]\n    193       2  0.0  0.0     0 55-23:42:34 [scsi_eh_3]\n    194       2  0.0  0.0     0 55-23:42:34 [kworker/R-scsi_]\n    195       2  0.0  0.0     0 55-23:42:34 [scsi_eh_4]\n    196       2  0.0  0.0     0 55-23:42:34 [kworker/R-scsi_]\n    198       2  0.0  0.0     0 55-23:42:34 [scsi_eh_5]\n    199       2  0.0  0.0     0 55-23:42:34 [kworker/R-scsi_]\n    200       2  0.0  0.0     0 55-23:42:34 [scsi_eh_6]\n    201       2  0.0  0.0     0 55-23:42:34 [kworker/R-scsi_]\n    235       2  0.0  0.0     0 55-23:42:33 [kworker/R-raid5]\n    277       2  0.0  0.0     0 55-23:42:32 [jbd2/sda1-8]\n    278       2  0.0  0.0     0 55-23:42:32 [kworker/R-ext4-]\n    369       2  0.0  0.0     0 55-23:42:30 [kworker/R-kmpat]\n    370       2  0.0  0.0     0 55-23:42:30 [kworker/R-kmpat]\n    913       1  0.0  0.0  4864 55-23:42:20 /usr/lib/systemd/systemd-logind\n    943       1  0.0  0.1 10232 55-23:42:19 /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal\n   1101       1  0.0  0.1  8704 55-23:39:25 /usr/lib/systemd/systemd --user --deserialize=10\n   1102    1101  0.0  0.0  1972 55-23:39:25 (sd-pam)\n   1237       2  0.0  0.0     0 55-23:39:23 [kworker/R-tls-s]\n  11600       1  0.0  0.0  2176 55-23:36:47 /usr/sbin/cron -f -P\n 136382       1  0.0  0.4 33968  4-06:35:39 /usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641\n 207421       1  0.1  0.4 33928    20:10:45 /usr/bin/containerd\n 207642       1  0.3  0.6 49680    20:10:44 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 236976       1  0.0  0.1  9060    18:38:21 /usr/bin/containerd-shim-runc-v2 -namespace moby -id fbec178db9bfbb3b8e755a55e93f3f6cac487ece83281f9b37e390f72eb76a0c -address /run/containerd/containerd.sock\n 236977       1  0.0  0.0  7384    18:38:21 /usr/bin/containerd-shim-runc-v2 -namespace moby -id a478a265bd17e778ed2c9e05c1d9a0e20046a4dfd50209eecfcf6051e1c5dedd -address /run/containerd/containerd.sock\n 236978       1  0.1  0.1  9164    18:38:21 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 33e3a880ecadee49ffc66e5937e56295e225411d0f17c4d20b5ae78dbbcd0938 -address /run/containerd/containerd.sock\n 237049  236977  1.0  1.6 133420   18:38:21 minio server /data --console-address :9001\n 237128  207642  0.0  0.0  3584    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 8123 -container-ip 172.18.0.2 -container-port 8123 -use-listen-fd\n 237135  207642  0.0  0.0  3072    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 8123 -container-ip 172.18.0.2 -container-port 8123 -use-listen-fd\n 237144  207642  0.0  0.0  3200    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9002 -container-ip 172.18.0.2 -container-port 9000 -use-listen-fd\n 237152  207642  0.0  0.0  3072    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9002 -container-ip 172.18.0.2 -container-port 9000 -use-listen-fd\n 237173  207642  4.6  0.0  3712    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 5432 -container-ip 172.18.0.3 -container-port 5432 -use-listen-fd\n 237180  207642  0.0  0.0  3072    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 5432 -container-ip 172.18.0.3 -container-port 5432 -use-listen-fd\n 237221  207642  0.0  0.0  3584    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9000 -container-ip 172.18.0.4 -container-port 9000 -use-listen-fd\n 237229  207642  0.0  0.0  3072    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9000 -container-ip 172.18.0.4 -container-port 9000 -use-listen-fd\n 237238  207642  0.0  0.0  3072    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9001 -container-ip 172.18.0.4 -container-port 9001 -use-listen-fd\n 237246  207642  0.0  0.0  3200    18:38:21 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9001 -container-ip 172.18.0.4 -container-port 9001 -use-listen-fd\n 258079    1101  0.0  0.0  2816 48-05:57:01 /usr/bin/gpg-agent --supervised\n 453420 3803790  0.0  0.1 10496    06:30:44 sshd: root@pts/0\n 471074       2  0.0  0.0     0    05:31:32 [psimon]\n 471079       1  0.4  1.6 133952   05:31:31 /root/Vinted/venv/bin/python -m vinted_radar.cli dashboard --db /root/Vinted/data/vinted-radar.clean.db --host 0.0.0.0 --port 8765\n 473406       1  9.2  8.1 648296   05:24:13 /root/Vinted/venv/bin/python -m vinted_radar.cli continuous --db /root/Vinted/data/vinted-radar.clean.db --page-limit 1 --state-refresh-limit 6 --interval-seconds 1800\n 519575       2  0.0  0.0     0    02:43:16 [kworker/1:0-events]\n 527482       2  0.0  0.0     0    02:16:24 [kworker/u8:4-flush-8:0]\n 545744       2  0.0  0.0     0    01:12:51 [kworker/0:3-events]\n 558426       2  0.0  0.0     0       31:48 [kworker/2:1-events]\n 560090       2  0.0  0.0     0       26:54 [kworker/u8:6-events_power_efficient]\n 560104       2  0.1  0.0     0       26:50 [kworker/u8:7-events_power_efficient]\n 561443       2  0.0  0.0     0       22:45 [kworker/3:1-cgroup_destroy]\n 563113       2  0.0  0.0     0       18:03 [kworker/3:3]\n 563846       2  0.0  0.0     0       15:52 [kworker/1:1-cgroup_destroy]\n 564865       2  0.0  0.0     0       12:51 [kworker/2:2-cgroup_destroy]\n 565075       2  0.0  0.0     0       12:05 [kworker/0:0]\n 565276       2  0.0  0.0     0       11:34 [kworker/u8:0-events_power_efficient]\n 567858       2  0.0  0.0     0       02:49 [kworker/2:0]\n 567859       2  0.0  0.0     0       02:49 [kworker/2:3-mm_percpu_wq]\n 568267       2  0.0  0.0     0       01:41 [kworker/3:0-events]\n 568315 3803790  0.0  0.1 10624       01:39 sshd: root@notty\n 568361  568315  2.6  0.1 14920       01:38 /root/Vinted/venv/bin/python /tmp/vps-benchmark-runner-20260409T131110Z.py\n 568469 3803790  0.0  0.1  8192       01:20 sshd: [accepted]\n 568780 3803790  0.0  0.1  8192       00:19 sshd: [accepted]\n 568855 3803790  1.7  0.1  9448       00:04 sshd: root [priv]\n 568884  568361  0.0  0.0  4224       00:00 ps -o pid=,ppid=,%cpu=,%mem=,rss=,etime=,command=\n3803790       1  0.0  0.0  3840 25-06:58:50 sshd: /usr/sbin/sshd -D [listener] 3 of 10-100 startups\n4130113       2  0.0  0.0     0 14-06:57:35 [psimon]\n4130119       1  0.8  0.9 72736 14-06:57:35 /usr/lib/systemd/systemd-journald\n4130245       1  0.0  0.0  5584 14-06:57:34 /usr/lib/systemd/systemd-udevd\n4130246       2  0.0  0.0     0 14-06:57:34 [psimon]\n4133904       1  0.0  0.0  3712 14-06:57:29 /usr/sbin/qemu-ga\n4133905       1  0.0  0.3 27136 14-06:57:29 /sbin/multipathd -d -s",
+        "rss_mb": 12.25,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 494168 477180 5198424    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 516512 477180 5199288    0    0     0 26184 2529 4051  6  2 92  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:12:53+00:00",
+        "cpu_percent": 0.0,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23899004928 53085810688  32% /\n",
+        "disk_free_bytes": 53085810688,
+        "disk_used_bytes": 23899004928,
+        "label": "cycle-3-start",
+        "ps": " 568888  568361  0.0  0.0  7936       00:00 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 7.75,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 1  0      0 515252 477180 5199288    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 494112 477180 5199336    0    0     0   772 2618 3927 10  2 88  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:13:09+00:00",
+        "cpu_percent": 14.2,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23897440256 53087375360  32% /\n",
+        "disk_free_bytes": 53087375360,
+        "disk_used_bytes": 23897440256,
+        "label": "cycle-3-sample-1",
+        "ps": " 568888  568361 14.2  1.7 135496      00:16 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 132.3203125,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 447968 477188 5209912    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 452884 477188 5209852    0    0     0    88 1544 2871  1  1 99  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:13:25+00:00",
+        "cpu_percent": 8.2,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23901515776 53083299840  32% /\n",
+        "disk_free_bytes": 53083299840,
+        "disk_used_bytes": 23901515776,
+        "label": "cycle-3-sample-2",
+        "ps": " 568888  568361  8.2  2.1 167880      00:32 /root/Vinted/venv/bin/python -m vinted_radar.cli batch --db /root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db --page-limit 1 --root-scope both --min-price 30.0 --max-price 0.0 --state-refresh-limit 6 --request-delay 3.0 --timeout-seconds 20.0 --max-leaf-categories 6\n",
+        "rss_mb": 163.9453125,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 0  0      0 379572 477192 5221008    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 365324 477192 5221072    0    0     0   124 1927 3176  2  1 97  0  0  0\n"
+      },
+      {
+        "captured_at": "2026-04-09T13:13:36+00:00",
+        "cpu_percent": 0.0,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23901589504 53083226112  32% /\n",
+        "disk_free_bytes": 53083226112,
+        "disk_used_bytes": 23901589504,
+        "label": "cycle-3-finish",
+        "ps": "     82       2  0.0  0.0     0 55-23:43:18 [kworker/R-ipv6_]\n     89       2  0.0  0.0     0 55-23:43:18 [kworker/R-kstrp]\n     91       2  0.0  0.0     0 55-23:43:18 [kworker/u9:0]\n     96       2  0.0  0.0     0 55-23:43:18 [kworker/R-crypt]\n    106       2  0.0  0.0     0 55-23:43:18 [kworker/R-charg]\n    131       2  0.0  0.0     0 55-23:43:18 [kworker/0:1H-kblockd]\n    159       2  0.0  0.0     0 55-23:43:18 [kworker/3:1H-kblockd]\n    182       2  0.0  0.0     0 55-23:43:18 [hwrng]\n    189       2  0.0  0.0     0 55-23:43:17 [scsi_eh_1]\n    190       2  0.0  0.0     0 55-23:43:17 [kworker/R-scsi_]\n    191       2  0.0  0.0     0 55-23:43:17 [scsi_eh_2]\n    192       2  0.0  0.0     0 55-23:43:17 [kworker/R-scsi_]\n    193       2  0.0  0.0     0 55-23:43:17 [scsi_eh_3]\n    194       2  0.0  0.0     0 55-23:43:17 [kworker/R-scsi_]\n    195       2  0.0  0.0     0 55-23:43:17 [scsi_eh_4]\n    196       2  0.0  0.0     0 55-23:43:17 [kworker/R-scsi_]\n    198       2  0.0  0.0     0 55-23:43:17 [scsi_eh_5]\n    199       2  0.0  0.0     0 55-23:43:17 [kworker/R-scsi_]\n    200       2  0.0  0.0     0 55-23:43:17 [scsi_eh_6]\n    201       2  0.0  0.0     0 55-23:43:17 [kworker/R-scsi_]\n    235       2  0.0  0.0     0 55-23:43:16 [kworker/R-raid5]\n    277       2  0.0  0.0     0 55-23:43:16 [jbd2/sda1-8]\n    278       2  0.0  0.0     0 55-23:43:16 [kworker/R-ext4-]\n    369       2  0.0  0.0     0 55-23:43:14 [kworker/R-kmpat]\n    370       2  0.0  0.0     0 55-23:43:14 [kworker/R-kmpat]\n    913       1  0.0  0.0  4864 55-23:43:03 /usr/lib/systemd/systemd-logind\n    943       1  0.0  0.1 10232 55-23:43:03 /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal\n   1101       1  0.0  0.1  8704 55-23:40:09 /usr/lib/systemd/systemd --user --deserialize=10\n   1102    1101  0.0  0.0  1972 55-23:40:09 (sd-pam)\n   1237       2  0.0  0.0     0 55-23:40:07 [kworker/R-tls-s]\n  11600       1  0.0  0.0  2176 55-23:37:31 /usr/sbin/cron -f -P\n 136382       1  0.0  0.4 33968  4-06:36:23 /usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641\n 207421       1  0.1  0.4 33928    20:11:29 /usr/bin/containerd\n 207642       1  0.3  0.6 49680    20:11:28 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 236976       1  0.0  0.1  9168    18:39:05 /usr/bin/containerd-shim-runc-v2 -namespace moby -id fbec178db9bfbb3b8e755a55e93f3f6cac487ece83281f9b37e390f72eb76a0c -address /run/containerd/containerd.sock\n 236977       1  0.0  0.0  7384    18:39:05 /usr/bin/containerd-shim-runc-v2 -namespace moby -id a478a265bd17e778ed2c9e05c1d9a0e20046a4dfd50209eecfcf6051e1c5dedd -address /run/containerd/containerd.sock\n 236978       1  0.1  0.1  8696    18:39:05 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 33e3a880ecadee49ffc66e5937e56295e225411d0f17c4d20b5ae78dbbcd0938 -address /run/containerd/containerd.sock\n 237049  236977  1.0  1.6 133420   18:39:05 minio server /data --console-address :9001\n 237128  207642  0.0  0.0  3584    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 8123 -container-ip 172.18.0.2 -container-port 8123 -use-listen-fd\n 237135  207642  0.0  0.0  3072    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 8123 -container-ip 172.18.0.2 -container-port 8123 -use-listen-fd\n 237144  207642  0.0  0.0  3200    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9002 -container-ip 172.18.0.2 -container-port 9000 -use-listen-fd\n 237152  207642  0.0  0.0  3072    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9002 -container-ip 172.18.0.2 -container-port 9000 -use-listen-fd\n 237173  207642  4.6  0.0  3712    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 5432 -container-ip 172.18.0.3 -container-port 5432 -use-listen-fd\n 237180  207642  0.0  0.0  3072    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 5432 -container-ip 172.18.0.3 -container-port 5432 -use-listen-fd\n 237221  207642  0.0  0.0  3584    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9000 -container-ip 172.18.0.4 -container-port 9000 -use-listen-fd\n 237229  207642  0.0  0.0  3072    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9000 -container-ip 172.18.0.4 -container-port 9000 -use-listen-fd\n 237238  207642  0.0  0.0  3072    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9001 -container-ip 172.18.0.4 -container-port 9001 -use-listen-fd\n 237246  207642  0.0  0.0  3200    18:39:05 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 9001 -container-ip 172.18.0.4 -container-port 9001 -use-listen-fd\n 258079    1101  0.0  0.0  2816 48-05:57:45 /usr/bin/gpg-agent --supervised\n 453420 3803790  0.0  0.1 10496    06:31:28 sshd: root@pts/0\n 471074       2  0.0  0.0     0    05:32:15 [psimon]\n 471079       1  0.4  1.6 133952   05:32:15 /root/Vinted/venv/bin/python -m vinted_radar.cli dashboard --db /root/Vinted/data/vinted-radar.clean.db --host 0.0.0.0 --port 8765\n 473406       1  9.2  8.1 648296   05:24:57 /root/Vinted/venv/bin/python -m vinted_radar.cli continuous --db /root/Vinted/data/vinted-radar.clean.db --page-limit 1 --state-refresh-limit 6 --interval-seconds 1800\n 519575       2  0.0  0.0     0    02:44:00 [kworker/1:0-events]\n 527482       2  0.0  0.0     0    02:17:08 [kworker/u8:4-flush-8:0]\n 545744       2  0.0  0.0     0    01:13:34 [kworker/0:3-events]\n 558426       2  0.0  0.0     0       32:32 [kworker/2:1-events]\n 560090       2  0.0  0.0     0       27:38 [kworker/u8:6-ext4-rsv-conversion]\n 560104       2  0.1  0.0     0       27:34 [kworker/u8:7-events_power_efficient]\n 561443       2  0.0  0.0     0       23:29 [kworker/3:1-cgroup_destroy]\n 563113       2  0.0  0.0     0       18:47 [kworker/3:3]\n 563846       2  0.0  0.0     0       16:35 [kworker/1:1-cgroup_destroy]\n 564865       2  0.0  0.0     0       13:34 [kworker/2:2-cgroup_destroy]\n 565075       2  0.0  0.0     0       12:49 [kworker/0:0]\n 565276       2  0.0  0.0     0       12:18 [kworker/u8:0-events_power_efficient]\n 567858       2  0.0  0.0     0       03:33 [kworker/2:0]\n 567859       2  0.0  0.0     0       03:33 [kworker/2:3-events]\n 568267       2  0.0  0.0     0       02:24 [kworker/3:0-mm_percpu_wq]\n 568315 3803790  0.0  0.1 10624       02:23 sshd: root@notty\n 568361  568315  1.8  0.1 15008       02:22 /root/Vinted/venv/bin/python /tmp/vps-benchmark-runner-20260409T131110Z.py\n 568780 3803790  0.0  0.1  8192       01:03 sshd: [accepted]\n 569107 3803790  0.0  0.1  8064       00:00 sshd: [accepted]\n 569108  568361  0.0  0.0  4224       00:00 ps -o pid=,ppid=,%cpu=,%mem=,rss=,etime=,command=\n3803790       1  0.0  0.0  3840 25-06:59:34 sshd: /usr/sbin/sshd -D [listener] 2 of 10-100 startups\n4130113       2  0.0  0.0     0 14-06:58:19 [psimon]\n4130119       1  0.8  0.9 72736 14-06:58:19 /usr/lib/systemd/systemd-journald\n4130245       1  0.0  0.0  5584 14-06:58:18 /usr/lib/systemd/systemd-udevd\n4130246       2  0.0  0.0     0 14-06:58:18 [psimon]\n4133904       1  0.0  0.0  3712 14-06:58:13 /usr/sbin/qemu-ga\n4133905       1  0.0  0.3 27136 14-06:58:13 /sbin/multipathd -d -s",
+        "rss_mb": 12.25,
+        "vmstat": "procs -----------memory---------- ---swap-- -----io---- -system-- -------cpu-------\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st gu\n 1  0      0 439548 477188 5191988    0    0  2699   485 1104    3  6  1 92  1  0  0\n 0  0      0 446532 477188 5192456    0    0     0   160 4731 8769  3  2 95  0  0  0\n"
+      }
+    ],
+    "service_status_after": [
+      {
+        "ActiveState": "active",
+        "ExecMainStartTimestamp": "Thu 2026-04-09 07:48:37 UTC",
+        "FragmentPath": "/etc/systemd/system/vinted-scraper.service",
+        "Id": "vinted-scraper.service",
+        "LoadState": "loaded",
+        "MainPID": "473406",
+        "SubState": "running",
+        "UnitFileState": "enabled",
+        "exit_code": 0,
+        "raw": "MainPID=473406\nExecMainStartTimestamp=Thu 2026-04-09 07:48:37 UTC\nId=vinted-scraper.service\nLoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/etc/systemd/system/vinted-scraper.service\nUnitFileState=enabled\n",
+        "service": "vinted-scraper.service"
+      },
+      {
+        "ActiveState": "active",
+        "ExecMainStartTimestamp": "Thu 2026-04-09 07:41:19 UTC",
+        "FragmentPath": "/etc/systemd/system/vinted-dashboard.service",
+        "Id": "vinted-dashboard.service",
+        "LoadState": "loaded",
+        "MainPID": "471079",
+        "SubState": "running",
+        "UnitFileState": "enabled",
+        "exit_code": 0,
+        "raw": "MainPID=471079\nExecMainStartTimestamp=Thu 2026-04-09 07:41:19 UTC\nId=vinted-dashboard.service\nLoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/etc/systemd/system/vinted-dashboard.service\nUnitFileState=enabled\n",
+        "service": "vinted-dashboard.service"
+      }
+    ],
+    "service_status_before": [
+      {
+        "ActiveState": "active",
+        "ExecMainStartTimestamp": "Thu 2026-04-09 07:48:37 UTC",
+        "FragmentPath": "/etc/systemd/system/vinted-scraper.service",
+        "Id": "vinted-scraper.service",
+        "LoadState": "loaded",
+        "MainPID": "473406",
+        "SubState": "running",
+        "UnitFileState": "enabled",
+        "exit_code": 0,
+        "raw": "MainPID=473406\nExecMainStartTimestamp=Thu 2026-04-09 07:48:37 UTC\nId=vinted-scraper.service\nLoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/etc/systemd/system/vinted-scraper.service\nUnitFileState=enabled\n",
+        "service": "vinted-scraper.service"
+      },
+      {
+        "ActiveState": "active",
+        "ExecMainStartTimestamp": "Thu 2026-04-09 07:41:19 UTC",
+        "FragmentPath": "/etc/systemd/system/vinted-dashboard.service",
+        "Id": "vinted-dashboard.service",
+        "LoadState": "loaded",
+        "MainPID": "471079",
+        "SubState": "running",
+        "UnitFileState": "enabled",
+        "exit_code": 0,
+        "raw": "MainPID=471079\nExecMainStartTimestamp=Thu 2026-04-09 07:41:19 UTC\nId=vinted-dashboard.service\nLoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/etc/systemd/system/vinted-dashboard.service\nUnitFileState=enabled\n",
+        "service": "vinted-dashboard.service"
+      }
+    ],
+    "storage_snapshots": [
+      {
+        "artifact_size_bytes": 0,
+        "captured_at": "2026-04-09T13:11:17+00:00",
+        "db_size_bytes": 1451192320,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23887900672 53096914944  32% /\n",
+        "disk_free_bytes": 53096914944,
+        "disk_used_bytes": 23887900672,
+        "label": "before",
+        "listing_count": 85499
+      },
+      {
+        "artifact_size_bytes": 0,
+        "captured_at": "2026-04-09T13:12:06+00:00",
+        "db_size_bytes": 1452101632,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23892369408 53092446208  32% /\n",
+        "disk_free_bytes": 53092446208,
+        "disk_used_bytes": 23892369408,
+        "label": "cycle-1-after",
+        "listing_count": 85537
+      },
+      {
+        "artifact_size_bytes": 0,
+        "captured_at": "2026-04-09T13:12:52+00:00",
+        "db_size_bytes": 1452920832,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23898955776 53085859840  32% /\n",
+        "disk_free_bytes": 53085859840,
+        "disk_used_bytes": 23898955776,
+        "label": "cycle-2-after",
+        "listing_count": 85547
+      },
+      {
+        "artifact_size_bytes": 0,
+        "captured_at": "2026-04-09T13:13:36+00:00",
+        "db_size_bytes": 1453780992,
+        "df": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/sda1      80307429376 23901589504 53083226112  32% /\n",
+        "disk_free_bytes": 53083226112,
+        "disk_used_bytes": 23901589504,
+        "label": "cycle-3-after",
+        "listing_count": 85553
+      }
+    ],
+    "working_db": "/root/Vinted/data/vinted-radar.clean.benchmark-work-20260409T131112Z.db"
+  },
+  "target": {
+    "host": "46.225.113.129",
+    "remote_db": "/root/Vinted/data/vinted-radar.clean.db",
+    "remote_python": "/root/Vinted/venv/bin/python",
+    "remote_repo_root": "/root/Vinted",
+    "ssh_identity_file": "C:\\Users\\Alexis\\.ssh\\id_ed25519",
+    "ssh_port": 22,
+    "ssh_target": "root@46.225.113.129",
+    "vps_env_file": "C:\\Users\\Alexis\\Documents\\VintedScrap2\\.env.vps"
+  }
+}
