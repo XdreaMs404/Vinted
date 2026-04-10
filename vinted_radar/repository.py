@@ -10,7 +10,7 @@ import sqlite3
 import uuid
 
 from vinted_radar.card_payload import normalize_card_snapshot
-from vinted_radar.db import connect_database
+from vinted_radar.db import DEFAULT_RUNTIME_LANE, connect_database
 from vinted_radar.models import CatalogNode, ListingCard
 from vinted_radar.state_machine import (
     ACTIVE_LATEST_SCAN_OBSERVED_CONFIDENCE,
@@ -416,19 +416,24 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         interval_seconds: float | None,
         state_probe_limit: int,
         config: dict[str, object],
+        lane_name: str = DEFAULT_RUNTIME_LANE,
+        benchmark_label: str | None = None,
     ) -> str:
+        normalized_lane_name = _normalize_runtime_lane_name(lane_name)
         cycle_id = datetime.now(UTC).strftime("cycle-%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
         started_at = _utc_now()
         with self.connection:
             self.connection.execute(
                 """
                 INSERT INTO runtime_cycles (
-                    cycle_id, started_at, mode, status, phase, interval_seconds,
+                    cycle_id, lane_name, benchmark_label, started_at, mode, status, phase, interval_seconds,
                     state_probe_limit, config_json
-                ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
                 """,
                 (
                     cycle_id,
+                    normalized_lane_name,
+                    benchmark_label,
                     started_at,
                     mode,
                     phase,
@@ -437,7 +442,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     _serialize_runtime_config(config),
                 ),
             )
-            self._upsert_runtime_controller_state(
+            self._upsert_runtime_lane_controller_state(
+                lane_name=normalized_lane_name,
                 status="running",
                 phase=phase,
                 mode=mode,
@@ -451,22 +457,33 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 last_error_at=None,
                 requested_action="none",
                 requested_at=None,
+                latest_benchmark_label=benchmark_label,
                 config=config,
             )
+            self._sync_legacy_runtime_controller_state_from_lane(normalized_lane_name)
         return cycle_id
 
     def update_runtime_cycle_phase(self, cycle_id: str, *, phase: str) -> None:
         with self.connection:
+            cycle_row = self.connection.execute(
+                "SELECT * FROM runtime_cycles WHERE cycle_id = ?",
+                (cycle_id,),
+            ).fetchone()
+            if cycle_row is None:
+                return
             self.connection.execute(
                 "UPDATE runtime_cycles SET phase = ? WHERE cycle_id = ?",
                 (phase, cycle_id),
             )
-            controller_row = self._runtime_controller_row()
+            lane_name = _normalize_runtime_lane_name(cycle_row["lane_name"])
+            controller_row = self._runtime_lane_controller_row(lane_name)
             if controller_row is not None and controller_row["active_cycle_id"] == cycle_id:
-                self._upsert_runtime_controller_state(
+                self._upsert_runtime_lane_controller_state(
+                    lane_name=lane_name,
                     phase=phase,
                     updated_at=_utc_now(),
                 )
+                self._sync_legacy_runtime_controller_state_from_lane(lane_name)
 
     def complete_runtime_cycle(
         self,
@@ -515,9 +532,11 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 ),
             )
             if cycle_row is not None:
+                lane_name = _normalize_runtime_lane_name(cycle_row["lane_name"])
                 controller_status = _controller_status_from_runtime_cycle_status(status)
                 controller_phase = _controller_phase_from_runtime_state(controller_status, phase)
-                self._upsert_runtime_controller_state(
+                self._upsert_runtime_lane_controller_state(
+                    lane_name=lane_name,
                     status=controller_status,
                     phase=controller_phase,
                     mode=cycle_row["mode"],
@@ -529,8 +548,10 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                     next_resume_at=None if controller_status != "scheduled" else _UNSET,
                     last_error=last_error,
                     last_error_at=None if last_error is None else finished_at,
+                    latest_benchmark_label=cycle_row["benchmark_label"],
                     config=_deserialize_runtime_config(cycle_row["config_json"]),
                 )
+                self._sync_legacy_runtime_controller_state_from_lane(lane_name)
 
     def runtime_cycle(self, cycle_id: str) -> dict[str, object] | None:
         row = self.connection.execute(
@@ -541,11 +562,35 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             return None
         return self._hydrate_runtime_cycle_row(row)
 
-    def runtime_controller_state(self, *, now: str | None = None) -> dict[str, object] | None:
+    def runtime_controller_state(
+        self,
+        *,
+        now: str | None = None,
+        lane_name: str | None = None,
+    ) -> dict[str, object] | None:
+        reference_now = _coerce_now(now)
+        if lane_name is not None:
+            row = self._runtime_lane_controller_row(_normalize_runtime_lane_name(lane_name))
+            if row is None:
+                return None
+            return self._hydrate_runtime_lane_controller_row(row, now_dt=reference_now)
+
         row = self._runtime_controller_row()
-        if row is None:
+        if row is not None:
+            return self._hydrate_runtime_controller_row(row, now_dt=reference_now)
+
+        lane_rows = self._runtime_lane_controller_rows()
+        if len(lane_rows) != 1:
             return None
-        return self._hydrate_runtime_controller_row(row, now_dt=_coerce_now(now))
+        return self._hydrate_runtime_lane_controller_row(lane_rows[0], now_dt=reference_now)
+
+    def runtime_lane_controller_states(self, *, now: str | None = None) -> dict[str, dict[str, object]]:
+        reference_now = _coerce_now(now)
+        rows = self._runtime_lane_controller_rows()
+        return {
+            str(row["lane_name"]): self._hydrate_runtime_lane_controller_row(row, now_dt=reference_now)
+            for row in rows
+        }
 
     def set_runtime_controller_state(
         self,
@@ -563,10 +608,14 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         last_error_at: str | None | object = _UNSET,
         requested_action: str | object = _UNSET,
         requested_at: str | None | object = _UNSET,
+        latest_benchmark_label: str | None | object = _UNSET,
         config: dict[str, object] | object = _UNSET,
+        lane_name: str = DEFAULT_RUNTIME_LANE,
     ) -> dict[str, object]:
+        normalized_lane_name = _normalize_runtime_lane_name(lane_name)
         with self.connection:
-            self._upsert_runtime_controller_state(
+            self._upsert_runtime_lane_controller_state(
+                lane_name=normalized_lane_name,
                 status=status,
                 phase=phase,
                 mode=mode,
@@ -580,20 +629,29 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 last_error_at=last_error_at,
                 requested_action=requested_action,
                 requested_at=requested_at,
+                latest_benchmark_label=latest_benchmark_label,
                 config=config,
             )
-            row = self._runtime_controller_row()
+            self._sync_legacy_runtime_controller_state_from_lane(normalized_lane_name)
+            row = self._runtime_lane_controller_row(normalized_lane_name)
         if row is None:
             raise RuntimeError("Runtime controller state was not persisted.")
         reference_now = updated_at if isinstance(updated_at, str) else None
-        return self._hydrate_runtime_controller_row(row, now_dt=_coerce_now(reference_now))
+        return self._hydrate_runtime_lane_controller_row(row, now_dt=_coerce_now(reference_now))
 
-    def request_runtime_pause(self, *, requested_at: str | None = None) -> dict[str, object]:
+    def request_runtime_pause(
+        self,
+        *,
+        requested_at: str | None = None,
+        lane_name: str = DEFAULT_RUNTIME_LANE,
+    ) -> dict[str, object]:
+        normalized_lane_name = _normalize_runtime_lane_name(lane_name)
         request_time = requested_at or _utc_now()
-        controller = self.runtime_controller_state(now=request_time)
+        controller = self.runtime_controller_state(now=request_time, lane_name=normalized_lane_name)
         if controller is not None and controller.get("status") in {"scheduled", "paused"} and controller.get("mode") == "continuous":
             paused_at = controller.get("paused_at") or request_time
             return self.set_runtime_controller_state(
+                lane_name=normalized_lane_name,
                 status="paused",
                 phase="paused",
                 updated_at=request_time,
@@ -603,16 +661,24 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 requested_at=None,
             )
         return self.set_runtime_controller_state(
+            lane_name=normalized_lane_name,
             requested_action="pause",
             requested_at=request_time,
             updated_at=request_time,
         )
 
-    def request_runtime_resume(self, *, requested_at: str | None = None) -> dict[str, object]:
+    def request_runtime_resume(
+        self,
+        *,
+        requested_at: str | None = None,
+        lane_name: str = DEFAULT_RUNTIME_LANE,
+    ) -> dict[str, object]:
+        normalized_lane_name = _normalize_runtime_lane_name(lane_name)
         request_time = requested_at or _utc_now()
-        controller = self.runtime_controller_state(now=request_time)
+        controller = self.runtime_controller_state(now=request_time, lane_name=normalized_lane_name)
         if controller is not None and controller.get("status") == "paused" and controller.get("mode") == "continuous":
             return self.set_runtime_controller_state(
+                lane_name=normalized_lane_name,
                 status="scheduled",
                 phase="waiting",
                 updated_at=request_time,
@@ -622,50 +688,81 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 requested_at=None,
             )
         if controller is not None and controller.get("requested_action") == "pause":
-            return self.clear_runtime_controller_action(updated_at=request_time)
+            return self.clear_runtime_controller_action(updated_at=request_time, lane_name=normalized_lane_name)
         return self.set_runtime_controller_state(
+            lane_name=normalized_lane_name,
             requested_action="resume",
             requested_at=request_time,
             updated_at=request_time,
         )
 
-    def clear_runtime_controller_action(self, *, updated_at: str | None = None) -> dict[str, object]:
+    def clear_runtime_controller_action(
+        self,
+        *,
+        updated_at: str | None = None,
+        lane_name: str = DEFAULT_RUNTIME_LANE,
+    ) -> dict[str, object]:
         return self.set_runtime_controller_state(
+            lane_name=lane_name,
             requested_action="none",
             requested_at=None,
             updated_at=updated_at if updated_at is not None else _utc_now(),
         )
 
-    def runtime_status(self, *, limit: int = 10, now: str | None = None) -> dict[str, object]:
+    def runtime_status(
+        self,
+        *,
+        limit: int = 10,
+        now: str | None = None,
+        lane_name: str | None = None,
+    ) -> dict[str, object]:
         now_dt = _coerce_now(now)
         generated_at = now_dt.replace(microsecond=0).isoformat()
         bounded_limit = max(int(limit), 1)
-        recent_cycles = [
-            self._hydrate_runtime_cycle_row(row)
-            for row in self.connection.execute(
-                "SELECT * FROM runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT ?",
-                (bounded_limit,),
-            )
-        ]
-        recent_failures = [
-            self._hydrate_runtime_cycle_row(row)
-            for row in self.connection.execute(
-                "SELECT * FROM runtime_cycles WHERE status = 'failed' ORDER BY started_at DESC, cycle_id DESC LIMIT ?",
-                (bounded_limit,),
-            )
-        ]
-        totals_row = self.connection.execute(
-            """
-            SELECT
-                COUNT(*) AS total_cycles,
-                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_cycles,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_cycles,
-                SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_cycles,
-                SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END) AS interrupted_cycles
-            FROM runtime_cycles
-            """
-        ).fetchone()
-        totals = dict(totals_row) if totals_row is not None else {}
+        normalized_lane_name = None if lane_name is None else _normalize_runtime_lane_name(lane_name)
+
+        controller = self.runtime_controller_state(now=generated_at, lane_name=normalized_lane_name)
+        status = self._build_runtime_status_view(
+            limit=bounded_limit,
+            now_dt=now_dt,
+            generated_at=generated_at,
+            lane_name=normalized_lane_name,
+            controller=controller,
+        )
+        if normalized_lane_name is None:
+            lane_states = self.runtime_lane_controller_states(now=generated_at)
+            lane_names = list(lane_states)
+            for known_lane_name in self._known_runtime_lane_names():
+                if known_lane_name not in lane_states:
+                    lane_names.append(known_lane_name)
+            status["lane_count"] = len(lane_names)
+            status["lanes"] = {
+                known_lane_name: self._build_runtime_status_view(
+                    limit=bounded_limit,
+                    now_dt=now_dt,
+                    generated_at=generated_at,
+                    lane_name=known_lane_name,
+                    controller=lane_states.get(known_lane_name),
+                )
+                for known_lane_name in lane_names
+            }
+            aggregate = self._aggregate_runtime_status_from_lanes(status["lanes"])
+            if aggregate is not None:
+                status.update(aggregate)
+        return status
+
+    def _build_runtime_status_view(
+        self,
+        *,
+        limit: int,
+        now_dt: datetime,
+        generated_at: str,
+        lane_name: str | None,
+        controller: dict[str, object] | None,
+    ) -> dict[str, object]:
+        recent_cycles = self._runtime_cycles(limit=limit, lane_name=lane_name)
+        recent_failures = self._runtime_cycles(limit=limit, lane_name=lane_name, status="failed")
+        totals = self._runtime_cycle_totals(lane_name=lane_name)
         latest_cycle = None if not recent_cycles else recent_cycles[0]
         latest_probe_cycle = next(
             (
@@ -675,7 +772,6 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             ),
             latest_cycle,
         )
-        controller = self.runtime_controller_state(now=generated_at)
         effective_status = None
         effective_phase = None
         effective_mode = None
@@ -712,11 +808,12 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             effective_phase = latest_cycle.get("phase")
             effective_mode = latest_cycle.get("mode")
 
-        acquisition = self.acquisition_health(latest_cycle=latest_probe_cycle, limit=bounded_limit)
+        acquisition = self.acquisition_health(latest_cycle=latest_probe_cycle, limit=limit)
 
         return {
             "generated_at": generated_at,
             "db_path": str(self.db_path),
+            "lane_name": lane_name,
             "controller": controller,
             "status": effective_status,
             "phase": effective_phase,
@@ -738,14 +835,141 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
             "latest_failure": None if not recent_failures else recent_failures[0],
             "recent_failures": recent_failures,
             "acquisition": acquisition,
-            "totals": {
-                "total_cycles": int(totals.get("total_cycles") or 0),
-                "completed_cycles": int(totals.get("completed_cycles") or 0),
-                "failed_cycles": int(totals.get("failed_cycles") or 0),
-                "running_cycles": int(totals.get("running_cycles") or 0),
-                "interrupted_cycles": int(totals.get("interrupted_cycles") or 0),
-            },
+            "totals": totals,
         }
+
+
+    def _aggregate_runtime_status_from_lanes(self, lanes: dict[str, dict[str, object]]) -> dict[str, object] | None:
+        if not lanes:
+            return None
+
+        priority = {
+            "running": 5,
+            "paused": 4,
+            "scheduled": 3,
+            "failed": 2,
+            "idle": 1,
+        }
+
+        def _parse_when(value: object) -> datetime:
+            if value in {None, ""}:
+                return datetime.min.replace(tzinfo=UTC)
+            try:
+                return datetime.fromisoformat(str(value)).astimezone(UTC)
+            except ValueError:
+                return datetime.min.replace(tzinfo=UTC)
+
+        lane_views = [lane for lane in lanes.values() if isinstance(lane, dict)]
+        if not lane_views:
+            return None
+
+        primary = max(
+            lane_views,
+            key=lambda lane: (
+                priority.get(str(lane.get("status") or "idle"), 0),
+                _parse_when(lane.get("updated_at")),
+            ),
+        )
+        aggregate = {
+            "status": primary.get("status"),
+            "phase": primary.get("phase"),
+            "mode": primary.get("mode"),
+            "updated_at": primary.get("updated_at"),
+            "paused_at": primary.get("paused_at"),
+            "next_resume_at": primary.get("next_resume_at"),
+            "elapsed_pause_seconds": primary.get("elapsed_pause_seconds"),
+            "next_resume_in_seconds": primary.get("next_resume_in_seconds"),
+            "last_error": primary.get("last_error"),
+            "last_error_at": primary.get("last_error_at"),
+            "requested_action": primary.get("requested_action"),
+            "requested_at": primary.get("requested_at"),
+            "active_cycle_id": primary.get("active_cycle_id"),
+            "latest_cycle_id": primary.get("latest_cycle_id"),
+            "heartbeat": primary.get("heartbeat"),
+        }
+
+        if aggregate["status"] == "scheduled":
+            scheduled_lanes = [lane for lane in lane_views if str(lane.get("status") or "") == "scheduled"]
+            if scheduled_lanes:
+                next_lane = min(scheduled_lanes, key=lambda lane: _parse_when(lane.get("next_resume_at")))
+                aggregate["phase"] = next_lane.get("phase")
+                aggregate["mode"] = next_lane.get("mode")
+                aggregate["updated_at"] = next_lane.get("updated_at")
+                aggregate["next_resume_at"] = next_lane.get("next_resume_at")
+                aggregate["next_resume_in_seconds"] = next_lane.get("next_resume_in_seconds")
+                aggregate["requested_action"] = next_lane.get("requested_action")
+                aggregate["requested_at"] = next_lane.get("requested_at")
+                aggregate["active_cycle_id"] = next_lane.get("active_cycle_id")
+                aggregate["latest_cycle_id"] = next_lane.get("latest_cycle_id")
+                aggregate["heartbeat"] = next_lane.get("heartbeat")
+
+        return aggregate
+
+    def _runtime_cycles(
+        self,
+        *,
+        limit: int,
+        lane_name: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, object]]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if lane_name is not None:
+            clauses.append("lane_name = ?")
+            params.append(lane_name)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where_sql = "" if not clauses else f"WHERE {' AND '.join(clauses)}"
+        rows = self.connection.execute(
+            f"SELECT * FROM runtime_cycles {where_sql} ORDER BY started_at DESC, cycle_id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        return [self._hydrate_runtime_cycle_row(row) for row in rows]
+
+    def _runtime_cycle_totals(self, *, lane_name: str | None = None) -> dict[str, int]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if lane_name is not None:
+            clauses.append("lane_name = ?")
+            params.append(lane_name)
+        where_sql = "" if not clauses else f"WHERE {' AND '.join(clauses)}"
+        totals_row = self.connection.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total_cycles,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_cycles,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_cycles,
+                SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_cycles,
+                SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END) AS interrupted_cycles
+            FROM runtime_cycles
+            {where_sql}
+            """,
+            params,
+        ).fetchone()
+        totals = dict(totals_row) if totals_row is not None else {}
+        return {
+            "total_cycles": int(totals.get("total_cycles") or 0),
+            "completed_cycles": int(totals.get("completed_cycles") or 0),
+            "failed_cycles": int(totals.get("failed_cycles") or 0),
+            "running_cycles": int(totals.get("running_cycles") or 0),
+            "interrupted_cycles": int(totals.get("interrupted_cycles") or 0),
+        }
+
+    def _known_runtime_lane_names(self) -> list[str]:
+        lane_names = {
+            str(row["lane_name"])
+            for row in self.connection.execute(
+                "SELECT DISTINCT lane_name FROM runtime_cycles WHERE lane_name IS NOT NULL AND TRIM(lane_name) != ''"
+            )
+        }
+        lane_names.update(
+            str(row["lane_name"])
+            for row in self.connection.execute(
+                "SELECT lane_name FROM runtime_lane_controller_state"
+            )
+        )
+        return sorted(lane_names, key=lambda value: (value != DEFAULT_RUNTIME_LANE, value))
 
     def acquisition_health(
         self,
@@ -2748,11 +2972,32 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         }
         return hydrated
 
+    def _hydrate_runtime_lane_controller_row(self, row: sqlite3.Row, *, now_dt: datetime) -> dict[str, object]:
+        return self._hydrate_runtime_controller_row(row, now_dt=now_dt)
+
     def _runtime_controller_row(self) -> sqlite3.Row | None:
         return self.connection.execute(
             "SELECT * FROM runtime_controller_state WHERE controller_id = ?",
             (_RUNTIME_CONTROLLER_SINGLETON_ID,),
         ).fetchone()
+
+    def _runtime_lane_controller_row(self, lane_name: str) -> sqlite3.Row | None:
+        return self.connection.execute(
+            "SELECT * FROM runtime_lane_controller_state WHERE lane_name = ?",
+            (lane_name,),
+        ).fetchone()
+
+    def _runtime_lane_controller_rows(self) -> list[sqlite3.Row]:
+        return list(
+            self.connection.execute(
+                """
+                SELECT *
+                FROM runtime_lane_controller_state
+                ORDER BY CASE WHEN lane_name = ? THEN 0 ELSE 1 END, lane_name ASC
+                """,
+                (DEFAULT_RUNTIME_LANE,),
+            )
+        )
 
     def _upsert_runtime_controller_state(
         self,
@@ -2770,6 +3015,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
         last_error_at: str | None | object = _UNSET,
         requested_action: str | object = _UNSET,
         requested_at: str | None | object = _UNSET,
+        latest_benchmark_label: str | None | object = _UNSET,
         config: dict[str, object] | object = _UNSET,
     ) -> None:
         existing_row = self._runtime_controller_row()
@@ -2789,6 +3035,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 "last_error_at": None,
                 "requested_action": "none",
                 "requested_at": None,
+                "latest_benchmark_label": None,
                 "config": {},
             }
         else:
@@ -2826,6 +3073,8 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 payload["requested_at"] = None
         if requested_at is not _UNSET:
             payload["requested_at"] = None if requested_at is None else str(requested_at)
+        if latest_benchmark_label is not _UNSET:
+            payload["latest_benchmark_label"] = None if latest_benchmark_label is None else str(latest_benchmark_label)
         if config is not _UNSET:
             payload["config"] = _sanitize_runtime_config(config)
         elif "config" not in payload:
@@ -2856,8 +3105,9 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 last_error_at,
                 requested_action,
                 requested_at,
+                latest_benchmark_label,
                 config_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(controller_id) DO UPDATE SET
                 status = excluded.status,
                 phase = excluded.phase,
@@ -2872,6 +3122,7 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 last_error_at = excluded.last_error_at,
                 requested_action = excluded.requested_action,
                 requested_at = excluded.requested_at,
+                latest_benchmark_label = excluded.latest_benchmark_label,
                 config_json = excluded.config_json
             """,
             (
@@ -2889,8 +3140,189 @@ class RadarRepository(AbstractContextManager["RadarRepository"]):
                 payload.get("last_error_at"),
                 payload.get("requested_action") or "none",
                 payload.get("requested_at"),
+                payload.get("latest_benchmark_label"),
                 _serialize_runtime_config(payload.get("config") or {}),
             ),
+        )
+
+    def _upsert_runtime_lane_controller_state(
+        self,
+        *,
+        lane_name: str,
+        status: str | object = _UNSET,
+        phase: str | object = _UNSET,
+        mode: str | None | object = _UNSET,
+        active_cycle_id: str | None | object = _UNSET,
+        latest_cycle_id: str | None | object = _UNSET,
+        interval_seconds: float | None | object = _UNSET,
+        updated_at: str | None | object = _UNSET,
+        paused_at: str | None | object = _UNSET,
+        next_resume_at: str | None | object = _UNSET,
+        last_error: str | None | object = _UNSET,
+        last_error_at: str | None | object = _UNSET,
+        requested_action: str | object = _UNSET,
+        requested_at: str | None | object = _UNSET,
+        latest_benchmark_label: str | None | object = _UNSET,
+        config: dict[str, object] | object = _UNSET,
+    ) -> None:
+        normalized_lane_name = _normalize_runtime_lane_name(lane_name)
+        existing_row = self._runtime_lane_controller_row(normalized_lane_name)
+        if existing_row is None:
+            payload: dict[str, object | None] = {
+                "lane_name": normalized_lane_name,
+                "status": "idle",
+                "phase": "idle",
+                "mode": None,
+                "active_cycle_id": None,
+                "latest_cycle_id": None,
+                "interval_seconds": None,
+                "updated_at": None,
+                "paused_at": None,
+                "next_resume_at": None,
+                "last_error": None,
+                "last_error_at": None,
+                "requested_action": "none",
+                "requested_at": None,
+                "latest_benchmark_label": None,
+                "config": {},
+            }
+        else:
+            payload = dict(existing_row)
+            payload["config"] = _deserialize_runtime_config(payload.pop("config_json", "{}"))
+
+        if status is not _UNSET:
+            payload["status"] = None if status is None else str(status)
+        if phase is not _UNSET:
+            payload["phase"] = None if phase is None else str(phase)
+        if mode is not _UNSET:
+            payload["mode"] = None if mode is None else str(mode)
+        if active_cycle_id is not _UNSET:
+            payload["active_cycle_id"] = None if active_cycle_id is None else str(active_cycle_id)
+        if latest_cycle_id is not _UNSET:
+            payload["latest_cycle_id"] = None if latest_cycle_id is None else str(latest_cycle_id)
+        if interval_seconds is not _UNSET:
+            payload["interval_seconds"] = None if interval_seconds is None else float(interval_seconds)
+        if updated_at is _UNSET:
+            payload["updated_at"] = _utc_now()
+        else:
+            payload["updated_at"] = None if updated_at is None else str(updated_at)
+        if paused_at is not _UNSET:
+            payload["paused_at"] = None if paused_at is None else str(paused_at)
+        if next_resume_at is not _UNSET:
+            payload["next_resume_at"] = None if next_resume_at is None else str(next_resume_at)
+        if last_error is not _UNSET:
+            payload["last_error"] = None if last_error is None else str(last_error)
+        if last_error_at is not _UNSET:
+            payload["last_error_at"] = None if last_error_at is None else str(last_error_at)
+        if requested_action is not _UNSET:
+            normalized_action = "none" if requested_action in {None, "", "none"} else str(requested_action)
+            payload["requested_action"] = normalized_action
+            if normalized_action == "none" and requested_at is _UNSET:
+                payload["requested_at"] = None
+        if requested_at is not _UNSET:
+            payload["requested_at"] = None if requested_at is None else str(requested_at)
+        if latest_benchmark_label is not _UNSET:
+            payload["latest_benchmark_label"] = None if latest_benchmark_label is None else str(latest_benchmark_label)
+        if config is not _UNSET:
+            payload["config"] = _sanitize_runtime_config(config)
+        elif "config" not in payload:
+            payload["config"] = {}
+
+        if payload.get("status") is None:
+            payload["status"] = "idle"
+        if payload.get("phase") is None:
+            payload["phase"] = "idle"
+        if payload.get("requested_action") is None:
+            payload["requested_action"] = "none"
+        payload["config"] = _sanitize_runtime_config(payload.get("config") or {})
+
+        self.connection.execute(
+            """
+            INSERT INTO runtime_lane_controller_state (
+                lane_name,
+                status,
+                phase,
+                mode,
+                active_cycle_id,
+                latest_cycle_id,
+                interval_seconds,
+                updated_at,
+                paused_at,
+                next_resume_at,
+                last_error,
+                last_error_at,
+                requested_action,
+                requested_at,
+                latest_benchmark_label,
+                config_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(lane_name) DO UPDATE SET
+                status = excluded.status,
+                phase = excluded.phase,
+                mode = excluded.mode,
+                active_cycle_id = excluded.active_cycle_id,
+                latest_cycle_id = excluded.latest_cycle_id,
+                interval_seconds = excluded.interval_seconds,
+                updated_at = excluded.updated_at,
+                paused_at = excluded.paused_at,
+                next_resume_at = excluded.next_resume_at,
+                last_error = excluded.last_error,
+                last_error_at = excluded.last_error_at,
+                requested_action = excluded.requested_action,
+                requested_at = excluded.requested_at,
+                latest_benchmark_label = excluded.latest_benchmark_label,
+                config_json = excluded.config_json
+            """,
+            (
+                normalized_lane_name,
+                payload["status"],
+                payload["phase"],
+                payload.get("mode"),
+                payload.get("active_cycle_id"),
+                payload.get("latest_cycle_id"),
+                payload.get("interval_seconds"),
+                payload.get("updated_at"),
+                payload.get("paused_at"),
+                payload.get("next_resume_at"),
+                payload.get("last_error"),
+                payload.get("last_error_at"),
+                payload.get("requested_action") or "none",
+                payload.get("requested_at"),
+                payload.get("latest_benchmark_label"),
+                _serialize_runtime_config(payload.get("config") or {}),
+            ),
+        )
+
+    def _sync_legacy_runtime_controller_state_from_lane(self, lane_name: str) -> None:
+        normalized_lane_name = _normalize_runtime_lane_name(lane_name)
+        lane_row = self._runtime_lane_controller_row(normalized_lane_name)
+        if lane_row is None:
+            return
+
+        default_lane_row = self._runtime_lane_controller_row(DEFAULT_RUNTIME_LANE)
+        if normalized_lane_name != DEFAULT_RUNTIME_LANE and default_lane_row is not None:
+            return
+
+        lane_rows = self._runtime_lane_controller_rows()
+        if normalized_lane_name != DEFAULT_RUNTIME_LANE and len(lane_rows) > 1:
+            return
+
+        self._upsert_runtime_controller_state(
+            status=lane_row["status"],
+            phase=lane_row["phase"],
+            mode=lane_row["mode"],
+            active_cycle_id=lane_row["active_cycle_id"],
+            latest_cycle_id=lane_row["latest_cycle_id"],
+            interval_seconds=lane_row["interval_seconds"],
+            updated_at=lane_row["updated_at"],
+            paused_at=lane_row["paused_at"],
+            next_resume_at=lane_row["next_resume_at"],
+            last_error=lane_row["last_error"],
+            last_error_at=lane_row["last_error_at"],
+            requested_action=lane_row["requested_action"],
+            requested_at=lane_row["requested_at"],
+            latest_benchmark_label=lane_row["latest_benchmark_label"],
+            config=_deserialize_runtime_config(lane_row["config_json"]),
         )
 
     def _resolve_run(self, run_id: str | None) -> sqlite3.Row | None:
@@ -2995,6 +3427,13 @@ def _controller_phase_from_runtime_state(status: str, phase: str) -> str:
     if status == "idle":
         return "idle"
     return phase
+
+
+def _normalize_runtime_lane_name(lane_name: object) -> str:
+    if lane_name is None:
+        return DEFAULT_RUNTIME_LANE
+    normalized = str(lane_name).strip()
+    return normalized or DEFAULT_RUNTIME_LANE
 
 
 def _sanitize_runtime_config(value: object) -> object:

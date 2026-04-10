@@ -467,6 +467,107 @@ def test_listing_detail_payload_preserves_price_context_without_full_score_reloa
 
 
 
+def test_runtime_payload_and_api_surface_lane_summaries_with_redacted_config(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-lanes.db"
+
+    with RadarRepository(db_path) as repository:
+        frontier_cycle = repository.start_runtime_cycle(
+            mode="continuous",
+            phase="starting",
+            interval_seconds=300.0,
+            state_probe_limit=2,
+            config={"state_refresh_limit": 2, "root_scope": "women"},
+            lane_name="frontier",
+            benchmark_label="frontier-smoke",
+        )
+        repository.complete_runtime_cycle(
+            frontier_cycle,
+            status="failed",
+            phase="discovery",
+            discovery_run_id=None,
+            state_probed_count=0,
+            tracked_listings=0,
+            freshness_counts={},
+            last_error="RuntimeError: frontier exploded",
+        )
+        expansion_cycle = repository.start_runtime_cycle(
+            mode="continuous",
+            phase="starting",
+            interval_seconds=120.0,
+            state_probe_limit=1,
+            config={"state_refresh_limit": 1, "root_scope": "men"},
+            lane_name="expansion",
+            benchmark_label="expansion-smoke",
+        )
+        repository.update_runtime_cycle_phase(expansion_cycle, phase="state_refresh")
+        repository.set_runtime_controller_state(
+            status="scheduled",
+            phase="waiting",
+            mode="continuous",
+            active_cycle_id=None,
+            latest_cycle_id=frontier_cycle,
+            interval_seconds=300.0,
+            updated_at="2026-03-23T09:15:00+00:00",
+            paused_at=None,
+            next_resume_at="2026-03-23T09:20:00+00:00",
+            last_error="RuntimeError: frontier exploded",
+            last_error_at="2026-03-23T09:14:00+00:00",
+            requested_action="none",
+            requested_at=None,
+            latest_benchmark_label="frontier-smoke",
+            config={"proxy": "http://alice:secret@frontier.proxy:8080", "root_scope": "women"},
+            lane_name="frontier",
+        )
+        repository.set_runtime_controller_state(
+            status="running",
+            phase="state_refresh",
+            mode="continuous",
+            active_cycle_id=expansion_cycle,
+            latest_cycle_id=expansion_cycle,
+            interval_seconds=120.0,
+            updated_at="2026-03-23T09:19:30+00:00",
+            paused_at=None,
+            next_resume_at=None,
+            last_error=None,
+            last_error_at=None,
+            requested_action="none",
+            requested_at=None,
+            latest_benchmark_label="expansion-smoke",
+            config={"proxy": "http://bob:secret@expansion.proxy:8080", "root_scope": "men"},
+            lane_name="expansion",
+        )
+        payload = build_runtime_payload(repository, now="2026-03-23T09:20:00+00:00")
+
+    assert payload["summary"]["lane_count"] == 2
+    assert payload["lane_summaries"]["frontier"]["latest_benchmark_label"] == "frontier-smoke"
+    assert payload["lane_summaries"]["frontier"]["config"]["proxy"] == "http://***@frontier.proxy:8080"
+    assert payload["lane_summaries"]["frontier"]["last_error"] == "RuntimeError: frontier exploded"
+    assert payload["lane_summaries"]["expansion"]["status"] == "running"
+    assert payload["lane_summaries"]["expansion"]["config"]["proxy"] == "http://***@expansion.proxy:8080"
+
+    app = DashboardApplication(db_path, now="2026-03-23T09:20:00+00:00")
+    runtime_page_status, runtime_page_body, _ = _call_app(app, "/runtime")
+    runtime_api_status, runtime_body, _ = _call_app(app, "/api/runtime")
+
+    assert runtime_page_status == "200 OK"
+    runtime_page_text = runtime_page_body.decode("utf-8")
+    assert "État par lane" in runtime_page_text
+    assert "Lane frontier" in runtime_page_text
+    assert "Lane expansion" in runtime_page_text
+    assert "http://***@frontier.proxy:8080" in runtime_page_text
+    assert "alice:secret" not in runtime_page_text
+    assert "bob:secret" not in runtime_page_text
+
+    assert runtime_api_status == "200 OK"
+    runtime_payload = json.loads(runtime_body)
+    assert runtime_payload["summary"]["lane_count"] == 2
+    assert runtime_payload["lane_summaries"]["frontier"]["config"]["proxy"] == "http://***@frontier.proxy:8080"
+    assert runtime_payload["runtime"]["lanes"]["expansion"]["status"] == "running"
+    assert "alice:secret" not in runtime_body.decode("utf-8")
+    assert "bob:secret" not in runtime_body.decode("utf-8")
+
+
+
 def test_runtime_payload_surfaces_controller_truth_separately_from_latest_cycle(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard.db"
     _seed_dashboard_db(db_path)

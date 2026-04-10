@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
+import threading
+
+DEFAULT_RUNTIME_LANE = "frontier"
+
+_DATABASE_BOOTSTRAP_LOCKS: dict[str, threading.Lock] = {}
+_DATABASE_BOOTSTRAP_LOCKS_GUARD = threading.Lock()
+_BOOTSTRAPPED_DATABASES: set[str] = set()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS discovery_runs (
@@ -147,6 +154,8 @@ CREATE TABLE IF NOT EXISTS item_page_probes (
 
 CREATE TABLE IF NOT EXISTS runtime_cycles (
     cycle_id TEXT PRIMARY KEY,
+    lane_name TEXT NOT NULL DEFAULT 'frontier',
+    benchmark_label TEXT,
     started_at TEXT NOT NULL,
     finished_at TEXT,
     mode TEXT NOT NULL,
@@ -182,6 +191,28 @@ CREATE TABLE IF NOT EXISTS runtime_controller_state (
     last_error_at TEXT,
     requested_action TEXT NOT NULL DEFAULT 'none',
     requested_at TEXT,
+    latest_benchmark_label TEXT,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (active_cycle_id) REFERENCES runtime_cycles(cycle_id) ON DELETE SET NULL,
+    FOREIGN KEY (latest_cycle_id) REFERENCES runtime_cycles(cycle_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS runtime_lane_controller_state (
+    lane_name TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    mode TEXT,
+    active_cycle_id TEXT,
+    latest_cycle_id TEXT,
+    interval_seconds REAL,
+    updated_at TEXT,
+    paused_at TEXT,
+    next_resume_at TEXT,
+    last_error TEXT,
+    last_error_at TEXT,
+    requested_action TEXT NOT NULL DEFAULT 'none',
+    requested_at TEXT,
+    latest_benchmark_label TEXT,
     config_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (active_cycle_id) REFERENCES runtime_cycles(cycle_id) ON DELETE SET NULL,
     FOREIGN KEY (latest_cycle_id) REFERENCES runtime_cycles(cycle_id) ON DELETE SET NULL
@@ -199,10 +230,12 @@ CREATE INDEX IF NOT EXISTS idx_listings_condition ON listings(condition_label, l
 CREATE INDEX IF NOT EXISTS idx_item_page_probes_listing_time ON item_page_probes(listing_id, probed_at);
 CREATE INDEX IF NOT EXISTS idx_runtime_cycles_started_at ON runtime_cycles(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runtime_controller_updated_at ON runtime_controller_state(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runtime_lane_controller_updated_at ON runtime_lane_controller_state(updated_at DESC);
 """
 
 
 POST_MIGRATION_SCHEMA = """
+CREATE INDEX IF NOT EXISTS idx_runtime_cycles_lane_started_at ON runtime_cycles(lane_name, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_listings_created_at_ts ON listings(created_at_ts DESC, listing_id DESC);
 CREATE INDEX IF NOT EXISTS idx_listings_favourite_count ON listings(favourite_count DESC, listing_id DESC);
 CREATE INDEX IF NOT EXISTS idx_listings_view_count ON listings(view_count DESC, listing_id DESC);
@@ -216,13 +249,36 @@ def connect_database(db_path: str | Path) -> sqlite3.Connection:
     connection = sqlite3.connect(db_str, timeout=30.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("PRAGMA journal_mode = WAL")
-    connection.execute("PRAGMA synchronous = NORMAL")
-    connection.executescript(SCHEMA)
-    _apply_migrations(connection)
-    connection.executescript(POST_MIGRATION_SCHEMA)
-    connection.commit()
+    connection.execute("PRAGMA busy_timeout = 30000")
+
+    if db_str == ":memory:":
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        connection.executescript(SCHEMA)
+        _apply_migrations(connection)
+        connection.executescript(POST_MIGRATION_SCHEMA)
+        connection.commit()
+        return connection
+
+    with _database_bootstrap_lock(db_str):
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        if _database_requires_bootstrap(connection, db_str):
+            connection.executescript(SCHEMA)
+            _apply_migrations(connection)
+            connection.executescript(POST_MIGRATION_SCHEMA)
+            connection.commit()
+            _BOOTSTRAPPED_DATABASES.add(db_str)
     return connection
+
+
+def _database_bootstrap_lock(db_str: str) -> threading.Lock:
+    with _DATABASE_BOOTSTRAP_LOCKS_GUARD:
+        return _DATABASE_BOOTSTRAP_LOCKS.setdefault(db_str, threading.Lock())
+
+
+def _database_requires_bootstrap(connection: sqlite3.Connection, db_str: str) -> bool:
+    return db_str not in _BOOTSTRAPPED_DATABASES or not _table_exists(connection, "discovery_runs")
 
 
 def _apply_migrations(connection: sqlite3.Connection) -> None:
@@ -243,6 +299,9 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
 
     for table_name, column_spec in (
         ("runtime_cycles", "state_refresh_summary_json TEXT NOT NULL DEFAULT '{}'"),
+        ("runtime_cycles", f"lane_name TEXT NOT NULL DEFAULT '{DEFAULT_RUNTIME_LANE}'"),
+        ("runtime_cycles", "benchmark_label TEXT"),
+        ("runtime_controller_state", "latest_benchmark_label TEXT"),
         ("catalog_scans", "api_listing_count INTEGER"),
         ("catalog_scans", "accepted_listing_count INTEGER"),
         ("catalog_scans", "filtered_out_count INTEGER"),
@@ -286,6 +345,16 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             """
         )
 
+    if _table_exists(connection, "runtime_cycles"):
+        connection.execute(
+            """
+            UPDATE runtime_cycles
+            SET lane_name = ?
+            WHERE lane_name IS NULL OR TRIM(lane_name) = ''
+            """,
+            (DEFAULT_RUNTIME_LANE,),
+        )
+
     if _table_exists(connection, "listing_discoveries") and _table_exists(connection, "listings"):
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version < 1:
@@ -293,6 +362,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 1")
 
     _backfill_runtime_controller_state(connection)
+    _backfill_runtime_lane_controller_state(connection)
 
 
 
@@ -335,8 +405,9 @@ def _backfill_runtime_controller_state(connection: sqlite3.Connection) -> None:
             last_error_at,
             requested_action,
             requested_at,
+            latest_benchmark_label,
             config_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'none', NULL, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'none', NULL, ?, ?)
         """,
         (
             1,
@@ -351,7 +422,82 @@ def _backfill_runtime_controller_state(connection: sqlite3.Connection) -> None:
             None,
             last_error,
             last_error_at,
+            latest_cycle["benchmark_label"],
             latest_cycle["config_json"] or "{}",
+        ),
+    )
+
+
+
+def _backfill_runtime_lane_controller_state(connection: sqlite3.Connection) -> None:
+    if not _table_exists(connection, "runtime_lane_controller_state"):
+        return
+
+    existing_rows = connection.execute(
+        "SELECT lane_name FROM runtime_lane_controller_state LIMIT 1"
+    ).fetchone()
+    if existing_rows is not None:
+        return
+
+    controller_row = None
+    if _table_exists(connection, "runtime_controller_state"):
+        controller_row = connection.execute(
+            "SELECT * FROM runtime_controller_state WHERE controller_id = 1"
+        ).fetchone()
+
+    latest_cycle = None
+    if _table_exists(connection, "runtime_cycles"):
+        latest_cycle = connection.execute(
+            "SELECT * FROM runtime_cycles ORDER BY started_at DESC, cycle_id DESC LIMIT 1"
+        ).fetchone()
+
+    if controller_row is None and latest_cycle is None:
+        return
+
+    lane_name = DEFAULT_RUNTIME_LANE
+    latest_benchmark_label = None
+    if latest_cycle is not None:
+        lane_name = str(latest_cycle["lane_name"] or DEFAULT_RUNTIME_LANE)
+        latest_benchmark_label = latest_cycle["benchmark_label"]
+
+    connection.execute(
+        """
+        INSERT INTO runtime_lane_controller_state (
+            lane_name,
+            status,
+            phase,
+            mode,
+            active_cycle_id,
+            latest_cycle_id,
+            interval_seconds,
+            updated_at,
+            paused_at,
+            next_resume_at,
+            last_error,
+            last_error_at,
+            requested_action,
+            requested_at,
+            latest_benchmark_label,
+            config_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            lane_name,
+            (None if controller_row is None else controller_row["status"]) or _controller_status_from_cycle_status(str(latest_cycle["status"] if latest_cycle is not None else "idle")),
+            (None if controller_row is None else controller_row["phase"]) or (None if latest_cycle is None else latest_cycle["phase"]) or "idle",
+            (None if controller_row is None else controller_row["mode"]) or (None if latest_cycle is None else latest_cycle["mode"]),
+            None if controller_row is None else controller_row["active_cycle_id"],
+            (None if controller_row is None else controller_row["latest_cycle_id"]) or (None if latest_cycle is None else latest_cycle["cycle_id"]),
+            (None if controller_row is None else controller_row["interval_seconds"]) or (None if latest_cycle is None else latest_cycle["interval_seconds"]),
+            (None if controller_row is None else controller_row["updated_at"]) or (None if latest_cycle is None else (latest_cycle["finished_at"] or latest_cycle["started_at"])),
+            None if controller_row is None else controller_row["paused_at"],
+            None if controller_row is None else controller_row["next_resume_at"],
+            None if controller_row is None else controller_row["last_error"],
+            None if controller_row is None else controller_row["last_error_at"],
+            (None if controller_row is None else controller_row["requested_action"]) or "none",
+            None if controller_row is None else controller_row["requested_at"],
+            (None if controller_row is None else controller_row["latest_benchmark_label"]) or latest_benchmark_label,
+            (None if controller_row is None else controller_row["config_json"]) or (None if latest_cycle is None else latest_cycle["config_json"]) or "{}",
         ),
     )
 

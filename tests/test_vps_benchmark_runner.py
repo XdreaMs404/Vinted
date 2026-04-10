@@ -112,24 +112,28 @@ def test_run_remote_experiment_uploads_remote_script_and_executes_it(monkeypatch
     copied_script: dict[str, object] = {}
     cleanup_calls: list[str] = []
 
-    class FakeCompletedProcess:
-        def __init__(self) -> None:
+    class FakeProcess:
+        def __init__(self, *, stdout_handle, stderr_handle) -> None:
             self.returncode = 0
-            self.stdout = '{"ok": true, "cycles": [], "resource_snapshots": [], "storage_snapshots": []}'
-            self.stderr = ""
+            stdout_handle.write('{"ok": true, "cycles": [], "resource_snapshots": [], "storage_snapshots": []}')
+            stdout_handle.flush()
+            stderr_handle.flush()
+
+        def wait(self):
+            return self.returncode
 
     def fake_copy_local_file_to_remote(**kwargs) -> None:
         copied_script["remote_path"] = kwargs["remote_path"]
         copied_script["content"] = kwargs["local_path"].read_text(encoding="utf-8")
 
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         captured["command"] = command
         captured["kwargs"] = kwargs
-        return FakeCompletedProcess()
+        return FakeProcess(stdout_handle=kwargs["stdout"], stderr_handle=kwargs["stderr"])
 
     monkeypatch.setattr(module, "_copy_local_file_to_remote", fake_copy_local_file_to_remote)
     monkeypatch.setattr(module, "_cleanup_remote_snapshot", lambda **kwargs: cleanup_calls.append(str(kwargs["remote_path"])))
-    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
 
     result = module._run_remote_experiment(
         ssh_binary="ssh",
@@ -163,8 +167,8 @@ def test_run_remote_experiment_uploads_remote_script_and_executes_it(monkeypatch
     assert isinstance(kwargs, dict)
     assert kwargs["env"] == {"DISPLAY": "gsd"}
     assert kwargs["text"] is True
-    assert kwargs["capture_output"] is True
-    assert "input" not in kwargs
+    assert Path(kwargs["stdout"].name).name == "remote-stdout.log"
+    assert Path(kwargs["stderr"].name).name == "remote-stderr.log"
 
 
 
@@ -399,6 +403,295 @@ def test_run_vps_benchmark_labels_live_db_mode_as_destructive_and_can_keep_remot
     assert payload["mode"]["destructive"] is True
     assert cleanup_calls == []
     assert "Destructive: `yes`" in markdown
+
+
+
+def test_run_vps_benchmark_uses_remote_benchmark_experiment_without_copying_snapshot(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_runner_module()
+    module.BENCHMARK_DIR = tmp_path / "benchmarks"
+    module.BENCHMARK_DIR.mkdir(parents=True, exist_ok=True)
+
+    db_snapshot = tmp_path / "seeded-benchmark.db"
+    _seed_repository_benchmark_db(db_snapshot)
+    remote_payload = _remote_result()
+    remote_payload["mode"] = "live-db"
+    remote_payload["benchmark_experiment"] = module.collect_acquisition_benchmark_facts(
+        db_snapshot,
+        experiment_id="remote-generated",
+        profile="dual-lane-smoke",
+        label="Dual-lane frontier + expansion smoke",
+        window_started_at=str(remote_payload["experiment_started_at"]),
+        window_finished_at=str(remote_payload["experiment_finished_at"]),
+        storage_snapshots=list(remote_payload.get("storage_snapshots") or []),
+        resource_snapshots=list(remote_payload.get("resource_snapshots") or []),
+    )
+
+    monkeypatch.setattr(module, "_require_binary", lambda binary_name: None)
+    monkeypatch.setattr(module, "_resolve_remote_python", lambda **kwargs: "/root/Vinted/venv/bin/python")
+    monkeypatch.setattr(module, "_run_remote_experiment", lambda **kwargs: remote_payload)
+    monkeypatch.setattr(
+        module,
+        "_copy_remote_snapshot",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("snapshot copy should be skipped when remote facts exist")),
+    )
+    monkeypatch.setattr(module, "_cleanup_remote_snapshot", lambda **kwargs: None)
+
+    exit_code = module.main(
+        [
+            "--host",
+            "46.225.113.129",
+            "--profile",
+            "dual-lane-smoke",
+            "--duration-minutes",
+            "15",
+        ]
+    )
+
+    assert exit_code == 0
+    json_path = module.BENCHMARK_DIR / "dual-lane-smoke.json"
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["mode"]["name"] == "live-db"
+    assert payload["benchmark_report"]["leaderboard"][0]["experiment_id"].startswith("dual-lane-smoke-")
+    assert payload["benchmark_report"]["summary"]["winner_profile"] == "dual-lane-smoke"
+
+
+
+def test_run_vps_benchmark_dual_lane_profile_forwards_serving_verification_and_renders_lane_sections(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_runner_module()
+    module.BENCHMARK_DIR = tmp_path / "benchmarks"
+    module.BENCHMARK_DIR.mkdir(parents=True, exist_ok=True)
+
+    captured_remote_kwargs: dict[str, object] = {}
+    db_snapshot = tmp_path / "seeded-benchmark.db"
+    _seed_repository_benchmark_db(db_snapshot)
+
+    monkeypatch.setattr(module, "_require_binary", lambda binary_name: None)
+    monkeypatch.setattr(module, "_resolve_remote_python", lambda **kwargs: "/root/Vinted/venv/bin/python")
+
+    def fake_run_remote_experiment(**kwargs):
+        captured_remote_kwargs.update(kwargs)
+        payload = _remote_result()
+        payload["mode"] = "live-db"
+        payload["lane_results"] = {
+            "frontier": [{"status": "completed", "benchmark_label": "frontier-smoke"}],
+            "expansion": [{"status": "completed", "benchmark_label": "expansion-smoke"}],
+        }
+        payload["serving_verification"] = {
+            "base_url": "http://46.225.113.129:8765",
+            "expected_lanes": ["frontier", "expansion"],
+            "proof_observed": True,
+            "final_truth_observed": True,
+            "unexpected_failures": [],
+            "ok": True,
+            "samples": [
+                {
+                    "captured_at": "2026-04-09T12:05:00+00:00",
+                    "runtime": {"status": 200, "ok": True, "lane_markers_present": True},
+                    "runtime_api": {
+                        "status": 200,
+                        "ok": True,
+                        "running_lanes": ["frontier", "expansion"],
+                    },
+                    "health": {"status": 200, "ok": True},
+                }
+            ],
+        }
+        return payload
+
+    monkeypatch.setattr(module, "_run_remote_experiment", fake_run_remote_experiment)
+
+    def fake_copy_remote_snapshot(**kwargs) -> None:
+        shutil.copyfile(db_snapshot, kwargs["local_path"])
+
+    monkeypatch.setattr(module, "_copy_remote_snapshot", fake_copy_remote_snapshot)
+    monkeypatch.setattr(module, "_cleanup_remote_snapshot", lambda **kwargs: None)
+
+    exit_code = module.main(
+        [
+            "--host",
+            "46.225.113.129",
+            "--profile",
+            "dual-lane-smoke",
+            "--duration-minutes",
+            "15",
+            "--verify-base-url",
+            "http://46.225.113.129:8765",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_remote_kwargs["mode"] == "live-db"
+    assert captured_remote_kwargs["export_remote_snapshot"] is False
+    assert captured_remote_kwargs["verify_base_url"] == "http://46.225.113.129:8765"
+    assert captured_remote_kwargs["verify_poll_interval_seconds"] == 10.0
+    assert captured_remote_kwargs["verify_timeout_seconds"] == 20.0
+
+    json_path = module.BENCHMARK_DIR / "dual-lane-smoke.json"
+    markdown_path = module.BENCHMARK_DIR / "dual-lane-smoke.md"
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    markdown = markdown_path.read_text(encoding="utf-8")
+
+    assert payload["mode"]["name"] == "live-db"
+    assert payload["profile"]["execution_kind"] == "multi-lane-runtime"
+    assert payload["profile"]["expected_lanes"] == ["frontier", "expansion"]
+    assert payload["remote_result"]["serving_verification"]["ok"] is True
+    assert "## Lane profile" in markdown
+    assert "## Lane runtime outcomes" in markdown
+    assert "## Serving verification" in markdown
+    assert "frontier" in markdown
+    assert "expansion" in markdown
+
+
+
+def test_resolve_mode_name_rejects_preserve_live_for_dual_lane_profile() -> None:
+    module = _load_runner_module()
+    args = module.parse_args(
+        [
+            "--host",
+            "46.225.113.129",
+            "--profile",
+            "dual-lane-smoke",
+            "--duration-minutes",
+            "15",
+            "--mode",
+            "preserve-live",
+        ]
+    )
+
+    profile = module._resolve_profile(args)
+
+    try:
+        module._resolve_mode_name(args=args, profile=profile)
+    except SystemExit as exc:
+        assert "requires the live SQLite database" in str(exc)
+    else:
+        raise AssertionError("expected dual-lane-smoke to reject preserve-live mode")
+
+
+
+def test_verify_runtime_serving_during_process_records_probe_errors_without_aborting(monkeypatch) -> None:
+    module = _load_runner_module()
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self._poll_results = [None, 0]
+
+        def poll(self):
+            if self._poll_results:
+                return self._poll_results.pop(0)
+            return 0
+
+    calls = {"count": 0}
+
+    def fake_capture_runtime_serving_sample(**kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise TimeoutError("health probe timed out")
+        return {
+            "captured_at": "2026-04-09T12:10:00+00:00",
+            "runtime": {"ok": True, "lane_markers_present": True},
+            "runtime_api": {
+                "ok": True,
+                "expected_lanes_present": True,
+                "running_lanes": ["frontier", "expansion"],
+            },
+            "health": {"ok": True, "consistent_with_runtime_api": True},
+            "proof": {"lane_truth_visible": True, "concurrent_running_visible": True},
+        }
+
+    monkeypatch.setattr(module, "_capture_runtime_serving_sample", fake_capture_runtime_serving_sample)
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    result = module._verify_runtime_serving_during_process(
+        process=FakeProcess(),
+        base_url="http://46.225.113.129:8765",
+        expected_lanes=("frontier", "expansion"),
+        poll_interval_seconds=10.0,
+        timeout_seconds=20.0,
+    )
+
+    assert result["base_url"] == "http://46.225.113.129:8765"
+    assert result["proof_observed"] is False
+    assert result["final_truth_observed"] is True
+    assert result["ok"] is False
+    assert len(result["samples"]) == 1
+    assert len(result["startup_failures"]) == 1
+    assert result["unexpected_failures"] == []
+    assert "health probe timed out" in result["startup_failures"][0]
+
+
+
+def test_verify_runtime_serving_during_process_tolerates_transition_between_runtime_api_and_health(monkeypatch) -> None:
+    module = _load_runner_module()
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self._poll_results = [None, 0]
+
+        def poll(self):
+            if self._poll_results:
+                return self._poll_results.pop(0)
+            return 0
+
+    calls = {"count": 0}
+
+    def fake_capture_runtime_serving_sample(**kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "captured_at": "2026-04-10T08:26:05+00:00",
+                "runtime": {"ok": True, "lane_markers_present": True},
+                "runtime_api": {
+                    "ok": True,
+                    "expected_lanes_present": True,
+                    "running_lanes": ["frontier", "expansion"],
+                    "status_value": "running",
+                },
+                "health": {
+                    "ok": True,
+                    "consistent_with_runtime_api": False,
+                    "current_runtime_status": "scheduled",
+                },
+                "proof": {"lane_truth_visible": True, "concurrent_running_visible": True},
+            }
+        return {
+            "captured_at": "2026-04-10T08:26:45+00:00",
+            "runtime": {"ok": True, "lane_markers_present": True},
+            "runtime_api": {
+                "ok": True,
+                "expected_lanes_present": True,
+                "running_lanes": [],
+                "status_value": "scheduled",
+            },
+            "health": {
+                "ok": True,
+                "consistent_with_runtime_api": True,
+                "current_runtime_status": "scheduled",
+            },
+            "proof": {"lane_truth_visible": True, "concurrent_running_visible": False},
+        }
+
+    monkeypatch.setattr(module, "_capture_runtime_serving_sample", fake_capture_runtime_serving_sample)
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    result = module._verify_runtime_serving_during_process(
+        process=FakeProcess(),
+        base_url="http://46.225.113.129:8765",
+        expected_lanes=("frontier", "expansion"),
+        poll_interval_seconds=10.0,
+        timeout_seconds=20.0,
+    )
+
+    assert result["proof_observed"] is True
+    assert result["final_truth_observed"] is True
+    assert result["ok"] is True
+    assert result["startup_failures"] == []
+    assert result["unexpected_failures"] == []
+    assert len(result["samples"]) == 2
 
 
 

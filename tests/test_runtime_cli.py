@@ -721,6 +721,121 @@ def test_runtime_status_cli_table_shows_controller_timing(tmp_path: Path) -> Non
         ],
     )
 
+def test_runtime_status_cli_table_and_json_show_lane_truth_and_redacted_config(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    with RadarRepository(db_path) as repository:
+        frontier_cycle = repository.start_runtime_cycle(
+            mode="continuous",
+            phase="starting",
+            interval_seconds=300.0,
+            state_probe_limit=2,
+            config={"state_refresh_limit": 2, "root_scope": "women"},
+            lane_name="frontier",
+            benchmark_label="frontier-smoke",
+        )
+        repository.complete_runtime_cycle(
+            frontier_cycle,
+            status="failed",
+            phase="discovery",
+            discovery_run_id=None,
+            state_probed_count=0,
+            tracked_listings=0,
+            freshness_counts={},
+            last_error="RuntimeError: frontier exploded",
+        )
+        expansion_cycle = repository.start_runtime_cycle(
+            mode="continuous",
+            phase="starting",
+            interval_seconds=120.0,
+            state_probe_limit=1,
+            config={"state_refresh_limit": 1, "root_scope": "men"},
+            lane_name="expansion",
+            benchmark_label="expansion-smoke",
+        )
+        repository.update_runtime_cycle_phase(expansion_cycle, phase="state_refresh")
+        repository.set_runtime_controller_state(
+            status="scheduled",
+            phase="waiting",
+            mode="continuous",
+            active_cycle_id=None,
+            latest_cycle_id=frontier_cycle,
+            interval_seconds=300.0,
+            updated_at="2026-03-23T09:15:00+00:00",
+            paused_at=None,
+            next_resume_at="2026-03-23T09:20:00+00:00",
+            last_error="RuntimeError: frontier exploded",
+            last_error_at="2026-03-23T09:14:00+00:00",
+            requested_action="none",
+            requested_at=None,
+            latest_benchmark_label="frontier-smoke",
+            config={"proxy": "http://alice:secret@frontier.proxy:8080", "root_scope": "women"},
+            lane_name="frontier",
+        )
+        repository.set_runtime_controller_state(
+            status="running",
+            phase="state_refresh",
+            mode="continuous",
+            active_cycle_id=expansion_cycle,
+            latest_cycle_id=expansion_cycle,
+            interval_seconds=120.0,
+            updated_at="2026-03-23T09:19:30+00:00",
+            paused_at=None,
+            next_resume_at=None,
+            last_error=None,
+            last_error_at=None,
+            requested_action="none",
+            requested_at=None,
+            latest_benchmark_label="expansion-smoke",
+            config={"proxy": "http://bob:secret@expansion.proxy:8080", "root_scope": "men"},
+            lane_name="expansion",
+        )
+
+    monkeypatch.setattr(
+        "vinted_radar.cli.load_platform_audit_snapshot",
+        lambda *args, **kwargs: {
+            "overall_status": "healthy",
+            "summary": {
+                "reconciliation_status": "healthy",
+                "current_state_status": "healthy",
+                "analytical_status": "healthy",
+                "lifecycle_status": "healthy",
+                "backfill_status": "healthy",
+            },
+        },
+    )
+    runner = CliRunner()
+
+    table_result = runner.invoke(
+        app,
+        [
+            "runtime-status",
+            "--db",
+            str(db_path),
+            "--now",
+            "2026-03-23T09:20:00+00:00",
+        ],
+    )
+    json_result = runner.invoke(app, ["runtime-status", "--db", str(db_path), "--format", "json"])
+
+    assert table_result.exit_code == 0
+    assert "Lane count: 2" in table_result.stdout
+    assert "- frontier | scheduled | phase waiting | mode continuous | benchmark frontier-smoke" in table_result.stdout
+    assert "- expansion | running | phase state_refresh | mode continuous | benchmark expansion-smoke" in table_result.stdout
+    assert 'config: {"proxy": "http://***@frontier.proxy:8080", "root_scope": "women"}' in table_result.stdout
+    assert "last error: RuntimeError: frontier exploded" in table_result.stdout
+    assert "alice:secret" not in table_result.stdout
+    assert "bob:secret" not in table_result.stdout
+
+    assert json_result.exit_code == 0
+    payload = json.loads(json_result.stdout)
+    assert payload["lanes"]["frontier"]["controller"]["config"]["proxy"] == "http://***@frontier.proxy:8080"
+    assert payload["lanes"]["frontier"]["latest_cycle"]["benchmark_label"] == "frontier-smoke"
+    assert payload["lanes"]["expansion"]["status"] == "running"
+    assert "alice:secret" not in json_result.stdout
+    assert "bob:secret" not in json_result.stdout
+
+
+
 def test_runtime_status_cli_stays_on_sqlite_in_shadow_mode(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     with RadarRepository(db_path) as repository:

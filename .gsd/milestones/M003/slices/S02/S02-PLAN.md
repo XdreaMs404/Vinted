@@ -4,7 +4,7 @@
 **Demo:** After this: After this: the runtime can execute named lanes such as frontier and expansion start-to-start, and `/runtime` / CLI surfaces show truthful per-lane state, timers, errors, and current config.
 
 ## Tasks
-- [ ] **T01: Add lane-aware runtime persistence and repository contracts** — Why: The current controller state assumes one continuous loop and cannot describe parallel acquisition lanes truthfully.
+- [x] **T01: Add lane-aware runtime persistence and repository contracts** — Why: The current controller state assumes one continuous loop and cannot describe parallel acquisition lanes truthfully.
 Do:
 - Extend runtime controller/cycle persistence to represent named lanes, their current config, active cycle, next scheduled start, and latest benchmark label.
 - Preserve backward-compatible FR single-lane reads where possible so the migration is observable rather than disruptive.
@@ -14,7 +14,7 @@ Done when:
   - Estimate: 1.5h
   - Files: vinted_radar/repository.py, vinted_radar/db.py, tests/test_runtime_repository.py, tests/test_runtime_service.py
   - Verify: python -m pytest tests/test_runtime_repository.py tests/test_runtime_service.py -q
-- [ ] **T02: Implement start-to-start scheduling and multi-lane orchestration** — Why: Throughput improvements require fresh-frontier and expansion work to run on deliberate schedules, not on one serialized loop.
+- [x] **T02: Added start-to-start per-lane scheduling and a threaded multi-lane runtime orchestrator with lane isolation tests.** — Why: Throughput improvements require fresh-frontier and expansion work to run on deliberate schedules, not on one serialized loop.
 Do:
 - Rework runtime scheduling so interval semantics are start-to-start.
 - Add a lane orchestrator that can run named workload profiles with bounded overlap and clear ownership of proxies/concurrency settings.
@@ -24,7 +24,7 @@ Done when:
   - Estimate: 2h
   - Files: vinted_radar/services/runtime.py, tests/test_runtime_service.py, tests/test_runtime_cli.py
   - Verify: python -m pytest tests/test_runtime_service.py tests/test_runtime_cli.py -q
-- [ ] **T03: Expose lane-aware status through CLI and runtime surfaces** — Why: The new runtime contract is not usable if operators cannot inspect and control it through the existing surfaces.
+- [x] **T03: Added lane-aware runtime-status output and /api/runtime summaries with redacted per-lane config and failure visibility.** — Why: The new runtime contract is not usable if operators cannot inspect and control it through the existing surfaces.
 Do:
 - Extend CLI runtime commands and runtime/dashboard payloads to show lane-level status, timers, configs, benchmark labels, and last errors.
 - Keep the public operator surfaces lightweight so they do not reintroduce request-path stalls under load.
@@ -34,7 +34,7 @@ Done when:
   - Estimate: 1.5h
   - Files: vinted_radar/cli.py, vinted_radar/dashboard.py, tests/test_runtime_cli.py, tests/test_dashboard.py
   - Verify: python -m pytest tests/test_runtime_cli.py tests/test_dashboard.py -q
-- [ ] **T04: Prove the lane runtime on the VPS** — Why: The slice is not retired until the runtime contract survives on the real VPS.
+- [x] **T04: Prove the lane runtime on the VPS** — Why: The slice is not retired until the runtime contract survives on the real VPS.
 Do:
 - Run a bounded dual-lane smoke on the VPS using conservative frontier + expansion configs.
 - Verify that `/runtime`, `/api/runtime`, `/health`, and the benchmark artifact bundle all stay truthful while both lanes run.

@@ -211,11 +211,16 @@ class DashboardApplication:
 
         if path == "/api/runtime":
             with self._open_query_backend() as query_backend:
-                runtime_status = query_backend.runtime_status(limit=8, now=self.now)
-            payload = dict(runtime_status)
-            payload["cutover"] = _load_cutover_snapshot().as_dict()
-            payload["platform_audit"] = load_platform_audit_snapshot(self.db_path, reference_now=self.now, embedded=True)
-            body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+                payload = build_runtime_payload(query_backend, now=self.now, route_context=route_context)
+            body = json.dumps(
+                {
+                    **(payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}),
+                    **payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
             return _respond(start_response, "200 OK", body, content_type="application/json; charset=utf-8")
 
         if path.startswith("/listings/"):
@@ -614,6 +619,7 @@ def build_runtime_payload(
     latest_cycle = runtime.get("latest_cycle") or {}
     heartbeat = runtime.get("heartbeat") or {}
     acquisition = runtime.get("acquisition") or {}
+    lane_summaries = _build_runtime_lane_summaries(runtime)
     cutover = _load_cutover_snapshot()
     platform_audit = load_platform_audit_snapshot(repository.db_path, reference_now=now, embedded=True)
     audit_summary = dict(platform_audit.get("summary") or {})
@@ -646,6 +652,7 @@ def build_runtime_payload(
             "latest_cycle_id": runtime.get("latest_cycle_id"),
             "controller_mode": controller.get("mode"),
             "acquisition_status": acquisition.get("status"),
+            "lane_count": int(runtime.get("lane_count") or len(lane_summaries)),
             "cutover_mode": cutover.mode,
             "cutover_read_path": cutover.read_path,
             "cutover_dual_write_active": cutover.dual_write_active,
@@ -658,6 +665,7 @@ def build_runtime_payload(
         "recent_cycles": runtime.get("recent_cycles") or [],
         "recent_failures": runtime.get("recent_failures") or [],
         "totals": runtime.get("totals") or {},
+        "lane_summaries": lane_summaries,
         "diagnostics": {
             "home": route_context.path("/"),
             "dashboard_api": route_context.path("/api/dashboard"),
@@ -672,6 +680,63 @@ def build_runtime_payload(
             "failed": "Un cycle raté reste visible dans l'historique, mais le contrôleur peut revenir à `scheduled` si la boucle continue avec retry.",
         },
     }
+
+
+
+def _runtime_lane_config(status_view: dict[str, Any]) -> dict[str, object]:
+    controller = status_view.get("controller")
+    if isinstance(controller, dict):
+        controller_config = controller.get("config")
+        if isinstance(controller_config, dict) and controller_config:
+            return dict(controller_config)
+    latest_cycle = status_view.get("latest_cycle")
+    if isinstance(latest_cycle, dict):
+        latest_cycle_config = latest_cycle.get("config")
+        if isinstance(latest_cycle_config, dict) and latest_cycle_config:
+            return dict(latest_cycle_config)
+    return {}
+
+
+
+def _build_runtime_lane_summaries(runtime: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    lanes = runtime.get("lanes")
+    if not isinstance(lanes, dict):
+        return {}
+
+    summaries: dict[str, dict[str, Any]] = {}
+    for raw_lane_name, raw_lane in lanes.items():
+        if not isinstance(raw_lane, dict):
+            continue
+        lane_name = str(raw_lane_name)
+        controller = raw_lane.get("controller") if isinstance(raw_lane.get("controller"), dict) else {}
+        latest_cycle = raw_lane.get("latest_cycle") if isinstance(raw_lane.get("latest_cycle"), dict) else {}
+        latest_failure = raw_lane.get("latest_failure") if isinstance(raw_lane.get("latest_failure"), dict) else None
+        heartbeat = raw_lane.get("heartbeat") if isinstance(raw_lane.get("heartbeat"), dict) else {}
+        summaries[lane_name] = {
+            "lane_name": lane_name,
+            "status": raw_lane.get("status"),
+            "phase": raw_lane.get("phase"),
+            "mode": raw_lane.get("mode") or latest_cycle.get("mode"),
+            "updated_at": raw_lane.get("updated_at"),
+            "paused_at": raw_lane.get("paused_at"),
+            "next_resume_at": raw_lane.get("next_resume_at"),
+            "elapsed_pause_seconds": raw_lane.get("elapsed_pause_seconds"),
+            "next_resume_in_seconds": raw_lane.get("next_resume_in_seconds"),
+            "requested_action": raw_lane.get("requested_action"),
+            "requested_at": raw_lane.get("requested_at"),
+            "active_cycle_id": raw_lane.get("active_cycle_id"),
+            "latest_cycle_id": raw_lane.get("latest_cycle_id"),
+            "latest_benchmark_label": controller.get("latest_benchmark_label") or latest_cycle.get("benchmark_label"),
+            "last_error": raw_lane.get("last_error"),
+            "last_error_at": raw_lane.get("last_error_at"),
+            "heartbeat": heartbeat,
+            "config": _runtime_lane_config(raw_lane),
+            "latest_cycle": latest_cycle,
+            "latest_failure": latest_failure,
+            "recent_failure_count": len(raw_lane.get("recent_failures") or []),
+            "totals": raw_lane.get("totals") or {},
+        }
+    return summaries
 
 
 
@@ -1862,6 +1927,7 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
     notes = payload.get("notes") or {}
     heartbeat = summary.get("heartbeat") or {}
     acquisition = payload.get("acquisition") or {}
+    lane_summaries = payload.get("lane_summaries") if isinstance(payload.get("lane_summaries"), dict) else {}
 
     status = str(summary.get("status") or "idle")
     acquisition_status = str(summary.get("acquisition_status") or acquisition.get("status") or "unknown")
@@ -1871,6 +1937,7 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
         ("Statut courant", status_label),
         ("Phase", _runtime_phase_label(summary.get("phase"))),
         ("Mode", str(current_mode)),
+        ("Lanes connues", str(int(summary.get("lane_count") or 0))),
         ("Cutover", str(summary.get("cutover_mode") or "inconnu")),
         ("Lecture", str(summary.get("cutover_read_path") or "inconnue")),
         ("Écritures", ", ".join(list(summary.get("cutover_write_targets") or [])) or "n/a"),
@@ -1898,6 +1965,54 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
         for label, value in controller_rows
     )
 
+    lane_cards = ""
+    for lane_name, lane in lane_summaries.items():
+        lane_heartbeat = lane.get("heartbeat") if isinstance(lane.get("heartbeat"), dict) else {}
+        lane_config = lane.get("config") if isinstance(lane.get("config"), dict) else {}
+        lane_config_display = "n/a" if not lane_config else json.dumps(lane_config, ensure_ascii=False, sort_keys=True)
+        lane_status = str(lane.get("status") or "idle")
+        lane_error = lane.get("last_error")
+        if lane_error is None and isinstance(lane.get("latest_failure"), dict):
+            lane_error = lane["latest_failure"].get("last_error")
+        lane_window_value = (
+            _format_optional_timestamp(lane.get("next_resume_at"))
+            if lane.get("next_resume_at")
+            else _format_optional_timestamp(lane.get("paused_at"))
+            if lane.get("paused_at")
+            else "aucune"
+        )
+        lane_window_detail = (
+            _format_seconds_duration(lane.get("next_resume_in_seconds"))
+            if lane.get("next_resume_at")
+            else _format_seconds_duration(lane.get("elapsed_pause_seconds"))
+            if lane.get("paused_at")
+            else "n/a"
+        )
+        lane_cards += f'''
+        <article class="cycle-card">
+          <div class="explorer-head">
+            <div>
+              <h3>Lane {_escape(lane_name)}</h3>
+              <p class="subhead">{_escape(_runtime_phase_label(lane.get('phase')))} · {_escape(_runtime_mode_label(lane.get('mode')))} · benchmark {_escape(str(lane.get('latest_benchmark_label') or 'n/a'))}</p>
+            </div>
+            <span class="pill {_runtime_status_tone(lane_status)}">{_escape(_runtime_status_label(lane_status))}</span>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-block"><span class="meta-label">Dernier heartbeat</span><strong>{_escape(_format_optional_timestamp(lane.get('updated_at')))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Âge heartbeat</span><strong>{_escape(_format_seconds_duration(lane_heartbeat.get('age_seconds')))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Fenêtre lane</span><strong>{_escape(lane_window_value)}</strong></div>
+            <div class="meta-block"><span class="meta-label">Timer lane</span><strong>{_escape(lane_window_detail)}</strong></div>
+            <div class="meta-block"><span class="meta-label">Cycle actif</span><strong>{_escape(str(lane.get('active_cycle_id') or 'aucun'))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Dernier cycle</span><strong>{_escape(str(lane.get('latest_cycle_id') or 'aucun'))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Dernière erreur</span><strong>{_escape(str(lane_error or 'aucune'))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Échecs récents</span><strong>{_escape(str(lane.get('recent_failure_count') or 0))}</strong></div>
+            <div class="meta-block" style="grid-column: 1 / -1;"><span class="meta-label">Config lane</span><code>{_escape(lane_config_display)}</code></div>
+          </div>
+        </article>
+        '''
+    if not lane_cards:
+        lane_cards = '<div class="empty-state"><p>Aucune lane nommée persistée. Le runtime reste affiché comme un contrôleur unique.</p></div>'
+
     cycle_cards = "".join(
         f'''
         <article class="cycle-card">
@@ -1911,6 +2026,8 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
           <div class="meta-grid">
             <div class="meta-block"><span class="meta-label">Démarré</span><strong>{_escape(_format_optional_timestamp(cycle.get('started_at')))}</strong></div>
             <div class="meta-block"><span class="meta-label">Terminé</span><strong>{_escape(_format_optional_timestamp(cycle.get('finished_at')))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Lane</span><strong>{_escape(str(cycle.get('lane_name') or 'default'))}</strong></div>
+            <div class="meta-block"><span class="meta-label">Benchmark</span><strong>{_escape(str(cycle.get('benchmark_label') or 'n/a'))}</strong></div>
             <div class="meta-block"><span class="meta-label">Annonces</span><strong>{_escape(str(cycle.get('tracked_listings') or 0))}</strong></div>
             <div class="meta-block"><span class="meta-label">Probes</span><strong>{_escape(str(cycle.get('state_probed_count') or 0))}</strong></div>
           </div>
@@ -1920,7 +2037,7 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
     ) or '<div class="empty-state"><p>Aucun cycle runtime enregistré.</p></div>'
 
     failures_html = "".join(
-        f"<li><strong>{_escape(str(cycle.get('cycle_id') or 'cycle inconnu'))}</strong><span>{_escape(str(cycle.get('last_error') or 'erreur inconnue'))}</span></li>"
+        f"<li><strong>{_escape(str(cycle.get('cycle_id') or 'cycle inconnu'))}</strong><span> — lane {_escape(str(cycle.get('lane_name') or 'default'))} · {_escape(str(cycle.get('last_error') or 'erreur inconnue'))}</span></li>"
         for cycle in recent_failures[:6]
     ) or '<li><strong>Aucun échec récent</strong><span>Le contrôleur n’a pas conservé de cycle en échec dans la fenêtre demandée.</span></li>'
 
@@ -1996,6 +2113,14 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
                 ],
             ),
             _metric_card(
+                "Lanes",
+                _escape(str(int(summary.get("lane_count") or 0))),
+                [
+                    f"Échecs {totals.get('failed_cycles') or 0}",
+                    f"Cycles {totals.get('total_cycles') or 0}",
+                ],
+            ),
+            _metric_card(
                 "Historique",
                 _escape(str(totals.get("total_cycles") or 0)),
                 [
@@ -2006,12 +2131,14 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
         )
     )
 
+    lane_pill = "" if not lane_summaries else f'<span class="pill">Lanes {_escape(str(len(lane_summaries)))}</span>'
     status_html = (
         '<div class="status-line" role="status" aria-live="polite">'
         f'<span class="pill {_runtime_status_tone(status)}">{_escape(status_label)}</span>'
         f'<span class="pill {_acquisition_status_tone(acquisition_status)}">{_escape(_acquisition_status_label(acquisition_status))}</span>'
         f'<span class="pill">Phase {_escape(_runtime_phase_label(summary.get("phase")))}</span>'
         f'<span class="pill">Mode {_escape(str(current_mode))}</span>'
+        f'{lane_pill}'
         '</div>'
     )
 
@@ -2032,6 +2159,13 @@ def render_runtime_html(payload: dict[str, Any]) -> str:
             <p>Cette vue répond à la question « que fait le radar maintenant ? » sans confondre attente saine, pause opérateur et dernier résultat de cycle.</p>
           </div>
           <div class="facts">{controller_html}</div>
+        </section>
+        <section class="panel" aria-labelledby="lanes-title">
+          <div class="panel-head">
+            <h2 id="lanes-title">État par lane</h2>
+            <p>Chaque lane garde sa propre vérité opérateur : timers, benchmark courant, config redacted et dernière erreur restent visibles sans masquer les lanes saines.</p>
+          </div>
+          <div class="cycle-grid">{lane_cards}</div>
         </section>
         <section class="panel" aria-labelledby="acquisition-title">
           <div class="panel-head">

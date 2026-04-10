@@ -397,6 +397,8 @@ class VintedHttpClient:
         attempted_routes: set[int] = set()
 
         for attempt in range(1, self._max_retries + 1):
+            if len(attempted_routes) >= len(self._routes):
+                attempted_routes.clear()
             route = self._select_sync_route(exclude=attempted_routes)
             attempted_routes.add(route.index)
             try:
@@ -456,6 +458,8 @@ class VintedHttpClient:
         attempted_routes: set[int] = set()
 
         for attempt in range(1, self._max_retries + 1):
+            if len(attempted_routes) >= len(self._routes):
+                attempted_routes.clear()
             route = await self._reserve_async_route(exclude=attempted_routes)
             attempted_routes.add(route.index)
             try:

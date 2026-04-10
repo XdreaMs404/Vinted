@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import threading
 
 from vinted_radar.http import FetchedPage
 from vinted_radar.models import CatalogNode, ListingCard
@@ -11,7 +12,7 @@ from vinted_radar.platform.object_store import S3ObjectStore
 from vinted_radar.platform.outbox import PostgresOutbox
 from vinted_radar.repository import RadarRepository
 from vinted_radar.services.discovery import DiscoveryOptions, DiscoveryRunReport, DiscoveryService, _build_api_catalog_url
-from vinted_radar.services.runtime import RadarRuntimeOptions, RadarRuntimeService
+from vinted_radar.services.runtime import RadarRuntimeLaneProfile, RadarRuntimeOptions, RadarRuntimeService
 from vinted_radar.services.state_refresh import StateRefreshReport, StateRefreshService
 
 from tests.platform_test_fakes import FakePostgresConnection, FakeS3Client
@@ -272,6 +273,132 @@ class FakeClock:
 
     def iso(self) -> str:
         return self.current.replace(microsecond=0).isoformat()
+
+
+class SequencedTimedDiscoveryService(PersistingDiscoveryService):
+    def __init__(self, db_path: Path, *, clock: FakeClock, started_at: list[str], sleep_seconds: float) -> None:
+        super().__init__(db_path)
+        self.clock = clock
+        self.started_at = started_at
+        self.sleep_seconds = sleep_seconds
+
+    def run(self, options) -> DiscoveryRunReport:
+        self.started_at.append(self.clock.iso())
+        self.clock.sleep(self.sleep_seconds)
+        return super().run(options)
+
+
+class SequencedTimedDiscoveryFactory:
+    def __init__(self, db_path: Path, *, clock: FakeClock, sleep_seconds: list[float]) -> None:
+        self.db_path = db_path
+        self.clock = clock
+        self.sleep_seconds = list(sleep_seconds)
+        self.started_at: list[str] = []
+
+    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
+        if not self.sleep_seconds:
+            raise AssertionError("No more sequenced discovery durations were configured")
+        return SequencedTimedDiscoveryService(
+            self.db_path,
+            clock=self.clock,
+            started_at=self.started_at,
+            sleep_seconds=self.sleep_seconds.pop(0),
+        )
+
+
+class BlockingLaneDiscoveryService(PersistingDiscoveryService):
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        lane_name: str,
+        started_lanes: list[str],
+        start_lock: threading.Lock,
+        both_started_event: threading.Event,
+        release_event: threading.Event,
+        expected_lane_count: int,
+    ) -> None:
+        super().__init__(db_path)
+        self.lane_name = lane_name
+        self.started_lanes = started_lanes
+        self.start_lock = start_lock
+        self.both_started_event = both_started_event
+        self.release_event = release_event
+        self.expected_lane_count = expected_lane_count
+
+    def run(self, options) -> DiscoveryRunReport:
+        with self.start_lock:
+            self.started_lanes.append(self.lane_name)
+            if len(set(self.started_lanes)) >= self.expected_lane_count:
+                self.both_started_event.set()
+        if not self.both_started_event.wait(timeout=5):
+            raise AssertionError("Timed out waiting for all runtime lanes to start discovery")
+        if not self.release_event.wait(timeout=5):
+            raise AssertionError("Timed out waiting for the test to release concurrent lane discovery")
+        return super().run(options)
+
+
+class LaneAwareDiscoveryFactory:
+    def __init__(self, db_path: Path, *, lane_from_proxies: dict[tuple[str, ...], str]) -> None:
+        self.db_path = db_path
+        self.lane_from_proxies = {tuple(key): value for key, value in lane_from_proxies.items()}
+        self.calls: list[dict[str, object]] = []
+
+    def _lane_name(self, proxies: list[str] | None) -> str:
+        key = tuple(proxies or [])
+        if key not in self.lane_from_proxies:
+            raise AssertionError(f"Unexpected proxy pool for lane selection: {key!r}")
+        return self.lane_from_proxies[key]
+
+
+class BlockingLaneDiscoveryFactory(LaneAwareDiscoveryFactory):
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        lane_from_proxies: dict[tuple[str, ...], str],
+        expected_lane_count: int,
+        both_started_event: threading.Event,
+        release_event: threading.Event,
+    ) -> None:
+        super().__init__(db_path, lane_from_proxies=lane_from_proxies)
+        self.expected_lane_count = expected_lane_count
+        self.both_started_event = both_started_event
+        self.release_event = release_event
+        self.start_lock = threading.Lock()
+        self.started_lanes: list[str] = []
+
+    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
+        lane_name = self._lane_name(proxies)
+        self.calls.append({"lane_name": lane_name, "proxies": proxies, "timeout_seconds": timeout_seconds, "request_delay": request_delay})
+        return BlockingLaneDiscoveryService(
+            self.db_path,
+            lane_name=lane_name,
+            started_lanes=self.started_lanes,
+            start_lock=self.start_lock,
+            both_started_event=self.both_started_event,
+            release_event=self.release_event,
+            expected_lane_count=self.expected_lane_count,
+        )
+
+
+class FailingLaneDiscoveryFactory(LaneAwareDiscoveryFactory):
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        lane_from_proxies: dict[tuple[str, ...], str],
+        failing_lanes: set[str],
+    ) -> None:
+        super().__init__(db_path, lane_from_proxies=lane_from_proxies)
+        self.failing_lanes = set(failing_lanes)
+
+    def __call__(self, *, db_path: str, timeout_seconds: float, request_delay: float, proxies: list[str] | None = None):
+        lane_name = self._lane_name(proxies)
+        self.calls.append({"lane_name": lane_name, "proxies": proxies, "timeout_seconds": timeout_seconds, "request_delay": request_delay})
+        if lane_name in self.failing_lanes:
+            return FailingDiscoveryService(self.db_path, message=f"{lane_name} exploded")
+        return PersistingDiscoveryService(self.db_path)
 
 
 class InMemoryControlPlaneRepository:
@@ -656,6 +783,135 @@ def test_runtime_service_defaults_to_bounded_discovery_options(tmp_path: Path) -
     assert forwarded_options.max_price == 0.0
 
 
+def test_runtime_service_continuous_mode_uses_start_to_start_cadence_when_cycles_finish_early(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    clock = FakeClock("2026-03-23T12:00:00+00:00")
+    discovery_factory = SequencedTimedDiscoveryFactory(db_path, clock=clock, sleep_seconds=[2.0, 2.0])
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+        sleep_fn=clock.sleep,
+        now_fn=clock.now,
+    )
+
+    reports = runtime.run_continuous(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=2,
+        ),
+        interval_seconds=5.0,
+        max_cycles=2,
+        continue_on_error=True,
+    )
+
+    assert len(reports) == 2
+    assert [report.status for report in reports] == ["completed", "completed"]
+    assert discovery_factory.started_at == [
+        "2026-03-23T12:00:00+00:00",
+        "2026-03-23T12:00:05+00:00",
+    ]
+    assert clock.iso() == "2026-03-23T12:00:07+00:00"
+
+
+def test_runtime_service_continuous_mode_catches_up_immediately_after_start_to_start_overrun(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    clock = FakeClock("2026-03-23T12:30:00+00:00")
+    discovery_factory = SequencedTimedDiscoveryFactory(db_path, clock=clock, sleep_seconds=[7.0, 1.0])
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+        sleep_fn=clock.sleep,
+        now_fn=clock.now,
+    )
+
+    reports = runtime.run_continuous(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=2,
+        ),
+        interval_seconds=5.0,
+        max_cycles=2,
+        continue_on_error=True,
+    )
+
+    assert len(reports) == 2
+    assert [report.status for report in reports] == ["completed", "completed"]
+    assert discovery_factory.started_at == [
+        "2026-03-23T12:30:00+00:00",
+        "2026-03-23T12:30:07+00:00",
+    ]
+    assert clock.iso() == "2026-03-23T12:30:08+00:00"
+
+
+def test_runtime_service_continuous_mode_can_force_immediate_start_over_existing_future_schedule(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    clock = FakeClock("2026-03-23T13:00:00+00:00")
+    discovery_factory = SequencedTimedDiscoveryFactory(db_path, clock=clock, sleep_seconds=[2.0])
+
+    with RadarRepository(db_path) as repository:
+        repository.set_runtime_controller_state(
+            lane_name="frontier",
+            status="scheduled",
+            phase="waiting",
+            mode="continuous",
+            active_cycle_id=None,
+            latest_cycle_id=None,
+            interval_seconds=900.0,
+            updated_at="2026-03-23T12:55:00+00:00",
+            paused_at=None,
+            next_resume_at="2026-03-23T13:15:00+00:00",
+            requested_action="none",
+            requested_at=None,
+            config={"page_limit": 1},
+        )
+
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+        sleep_fn=clock.sleep,
+        now_fn=clock.now,
+    )
+
+    reports = runtime.run_continuous(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=2,
+        ),
+        interval_seconds=900.0,
+        max_cycles=1,
+        continue_on_error=True,
+        lane_name="frontier",
+        benchmark_label="frontier-smoke",
+        start_immediately=True,
+    )
+
+    assert len(reports) == 1
+    assert reports[0].status == "completed"
+    assert discovery_factory.started_at == ["2026-03-23T13:00:00+00:00"]
+    assert clock.iso() == "2026-03-23T13:00:02+00:00"
+
+    with RadarRepository(db_path) as repository:
+        status = repository.runtime_status(limit=5, now=clock.iso())
+
+    assert status["lanes"]["frontier"]["status"] == "idle"
+    assert status["lanes"]["frontier"]["latest_cycle"]["benchmark_label"] == "frontier-smoke"
+
+
 def test_runtime_service_continuous_mode_keeps_failed_cycle_visible_and_continues(tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     clock = FakeClock("2026-03-23T10:00:00+00:00")
@@ -754,3 +1010,253 @@ def test_runtime_service_continuous_mode_observes_pause_and_resume_between_cycle
     assert status["status"] == "idle"
     assert status["controller"] is not None
     assert status["controller"]["latest_cycle_id"] == reports[-1].cycle_id
+
+
+def test_runtime_service_pause_and_resume_for_named_lane_preserves_frontier_truth(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    clock = FakeClock("2026-03-23T11:30:00+00:00")
+    resume_requested = {"value": False}
+
+    with RadarRepository(db_path) as repository:
+        repository.set_runtime_controller_state(
+            lane_name="frontier",
+            status="scheduled",
+            phase="waiting",
+            mode="continuous",
+            active_cycle_id=None,
+            latest_cycle_id=None,
+            interval_seconds=300.0,
+            updated_at="2026-03-23T11:25:00+00:00",
+            paused_at=None,
+            next_resume_at="2026-03-23T11:35:00+00:00",
+            requested_action="none",
+            requested_at=None,
+            config={"state_refresh_limit": 1},
+        )
+
+    def sleep(seconds: float) -> None:
+        with RadarRepository(db_path) as repository:
+            controller = repository.runtime_controller_state(now=clock.iso(), lane_name="expansion") or {}
+            if controller.get("status") == "paused" and not resume_requested["value"]:
+                repository.request_runtime_resume(requested_at=clock.iso(), lane_name="expansion")
+                resume_requested["value"] = True
+        clock.sleep(seconds)
+
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=lambda **kwargs: PersistingDiscoveryService(db_path),
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+        sleep_fn=sleep,
+        now_fn=clock.now,
+    )
+
+    callback_count = {"value": 0}
+
+    def on_cycle_complete(report) -> None:
+        callback_count["value"] += 1
+        if callback_count["value"] == 1:
+            with RadarRepository(db_path) as repository:
+                repository.request_runtime_pause(requested_at=clock.iso(), lane_name="expansion")
+
+    reports = runtime.run_continuous(
+        RadarRuntimeOptions(
+            page_limit=1,
+            max_leaf_categories=1,
+            root_scope="women",
+            request_delay=0.0,
+            timeout_seconds=5.0,
+            state_refresh_limit=2,
+            proxies=("http://expansion-proxy:8080",),
+        ),
+        interval_seconds=5.0,
+        max_cycles=2,
+        continue_on_error=True,
+        on_cycle_complete=on_cycle_complete,
+        lane_name="expansion",
+        benchmark_label="expansion-smoke",
+    )
+
+    assert len(reports) == 2
+    assert [report.lane_name for report in reports] == ["expansion", "expansion"]
+    assert resume_requested["value"] is True
+
+    with RadarRepository(db_path) as repository:
+        status = repository.runtime_status(limit=5, now=clock.iso())
+
+    assert status["status"] == "scheduled"
+    assert status["lanes"]["frontier"]["status"] == "scheduled"
+    assert status["lanes"]["frontier"]["next_resume_at"] == "2026-03-23T11:35:00+00:00"
+    assert status["lanes"]["expansion"]["status"] == "idle"
+    assert status["lanes"]["expansion"]["controller"]["latest_cycle_id"] == reports[-1].cycle_id
+    assert status["lanes"]["expansion"]["latest_cycle"]["benchmark_label"] == "expansion-smoke"
+
+
+def test_runtime_service_multi_lane_orchestrator_runs_named_lanes_concurrently_with_distinct_configs(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    both_started_event = threading.Event()
+    release_event = threading.Event()
+    lane_from_proxies = {
+        ("http://frontier-proxy:8080",): "frontier",
+        ("http://expansion-proxy-a:8080", "http://expansion-proxy-b:8080"): "expansion",
+    }
+    discovery_factory = BlockingLaneDiscoveryFactory(
+        db_path,
+        lane_from_proxies=lane_from_proxies,
+        expected_lane_count=2,
+        both_started_event=both_started_event,
+        release_event=release_event,
+    )
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+    )
+
+    result_holder: dict[str, object] = {}
+    error_holder: dict[str, BaseException] = {}
+
+    def run_orchestrator() -> None:
+        try:
+            result_holder["results"] = runtime.run_multi_lane_continuous(
+                [
+                    RadarRuntimeLaneProfile(
+                        lane_name="frontier",
+                        interval_seconds=60.0,
+                        max_cycles=1,
+                        options=RadarRuntimeOptions(
+                            page_limit=1,
+                            max_leaf_categories=1,
+                            root_scope="women",
+                            request_delay=0.0,
+                            timeout_seconds=5.0,
+                            state_refresh_limit=1,
+                            concurrency=2,
+                            proxies=("http://frontier-proxy:8080",),
+                        ),
+                        benchmark_label="frontier-demo",
+                    ),
+                    RadarRuntimeLaneProfile(
+                        lane_name="expansion",
+                        interval_seconds=60.0,
+                        max_cycles=1,
+                        options=RadarRuntimeOptions(
+                            page_limit=1,
+                            max_leaf_categories=1,
+                            root_scope="men",
+                            request_delay=0.0,
+                            timeout_seconds=5.0,
+                            state_refresh_limit=1,
+                            concurrency=4,
+                            proxies=("http://expansion-proxy-a:8080", "http://expansion-proxy-b:8080"),
+                        ),
+                        benchmark_label="expansion-demo",
+                    ),
+                ],
+                continue_on_error=True,
+            )
+        except BaseException as exc:  # noqa: BLE001
+            error_holder["error"] = exc
+
+    orchestrator_thread = threading.Thread(target=run_orchestrator, name="test-multi-lane-orchestrator", daemon=True)
+    orchestrator_thread.start()
+
+    assert both_started_event.wait(timeout=5) is True
+    with RadarRepository(db_path) as repository:
+        live_status = repository.runtime_status(limit=5)
+
+    assert live_status["lane_count"] == 2
+    assert live_status["lanes"]["frontier"]["status"] == "running"
+    assert live_status["lanes"]["expansion"]["status"] == "running"
+
+    release_event.set()
+    orchestrator_thread.join(timeout=5)
+    assert not orchestrator_thread.is_alive()
+    assert "error" not in error_holder
+
+    results = result_holder.get("results")
+    assert isinstance(results, dict)
+    assert [report.status for report in results["frontier"]] == ["completed"]
+    assert [report.status for report in results["expansion"]] == ["completed"]
+    assert results["frontier"][0].lane_name == "frontier"
+    assert results["expansion"][0].lane_name == "expansion"
+    assert results["frontier"][0].config["concurrency"] == 2
+    assert results["frontier"][0].config["proxy_pool_size"] == 1
+    assert results["frontier"][0].benchmark_label == "frontier-demo"
+    assert results["expansion"][0].config["concurrency"] == 4
+    assert results["expansion"][0].config["proxy_pool_size"] == 2
+    assert results["expansion"][0].benchmark_label == "expansion-demo"
+    assert sorted(discovery_factory.started_lanes) == ["expansion", "frontier"]
+
+    with RadarRepository(db_path) as repository:
+        final_status = repository.runtime_status(limit=5)
+
+    assert final_status["lane_count"] == 2
+    assert final_status["lanes"]["frontier"]["status"] == "idle"
+    assert final_status["lanes"]["frontier"]["latest_cycle"]["lane_name"] == "frontier"
+    assert final_status["lanes"]["expansion"]["status"] == "idle"
+    assert final_status["lanes"]["expansion"]["latest_cycle"]["lane_name"] == "expansion"
+
+
+def test_runtime_service_multi_lane_orchestrator_keeps_failure_visibility_per_lane(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    lane_from_proxies = {
+        ("http://frontier-proxy:8080",): "frontier",
+        ("http://expansion-proxy:8080",): "expansion",
+    }
+    discovery_factory = FailingLaneDiscoveryFactory(
+        db_path,
+        lane_from_proxies=lane_from_proxies,
+        failing_lanes={"frontier"},
+    )
+    runtime = RadarRuntimeService(
+        db_path,
+        discovery_service_factory=discovery_factory,
+        state_refresh_service_factory=lambda **kwargs: FakeStateRefreshService(db_path),
+    )
+
+    results = runtime.run_multi_lane_continuous(
+        [
+            RadarRuntimeLaneProfile(
+                lane_name="frontier",
+                interval_seconds=60.0,
+                max_cycles=1,
+                options=RadarRuntimeOptions(
+                    page_limit=1,
+                    max_leaf_categories=1,
+                    root_scope="women",
+                    request_delay=0.0,
+                    timeout_seconds=5.0,
+                    state_refresh_limit=1,
+                    proxies=("http://frontier-proxy:8080",),
+                ),
+            ),
+            RadarRuntimeLaneProfile(
+                lane_name="expansion",
+                interval_seconds=60.0,
+                max_cycles=1,
+                options=RadarRuntimeOptions(
+                    page_limit=1,
+                    max_leaf_categories=1,
+                    root_scope="men",
+                    request_delay=0.0,
+                    timeout_seconds=5.0,
+                    state_refresh_limit=1,
+                    proxies=("http://expansion-proxy:8080",),
+                ),
+            ),
+        ],
+        continue_on_error=True,
+    )
+
+    assert [report.status for report in results["frontier"]] == ["failed"]
+    assert [report.status for report in results["expansion"]] == ["completed"]
+    assert "frontier exploded" in str(results["frontier"][0].last_error)
+
+    with RadarRepository(db_path) as repository:
+        status = repository.runtime_status(limit=5)
+
+    assert status["lane_count"] == 2
+    assert status["lanes"]["frontier"]["latest_cycle"]["status"] == "failed"
+    assert "frontier exploded" in str(status["lanes"]["frontier"]["latest_failure"]["last_error"])
+    assert status["lanes"]["expansion"]["latest_cycle"]["status"] == "completed"
+    assert status["lanes"]["expansion"]["latest_failure"] is None

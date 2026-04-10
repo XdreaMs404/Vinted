@@ -914,6 +914,60 @@ def runtime_status(
             )
         )
 
+    lane_views = status.get("lanes") if isinstance(status.get("lanes"), dict) else {}
+    if lane_views:
+        typer.echo(f"Lane count: {len(lane_views)}")
+        typer.echo("Lane truth:")
+        for lane_name, lane_status in lane_views.items():
+            lane_controller = lane_status.get("controller") if isinstance(lane_status.get("controller"), dict) else {}
+            lane_latest_cycle = lane_status.get("latest_cycle") if isinstance(lane_status.get("latest_cycle"), dict) else {}
+            lane_heartbeat = lane_status.get("heartbeat") if isinstance(lane_status.get("heartbeat"), dict) else {}
+            lane_config = lane_controller.get("config") if isinstance(lane_controller.get("config"), dict) else {}
+            if not lane_config:
+                lane_config = lane_latest_cycle.get("config") if isinstance(lane_latest_cycle.get("config"), dict) else {}
+            lane_benchmark = lane_controller.get("latest_benchmark_label") or lane_latest_cycle.get("benchmark_label") or "n/a"
+            lane_error = lane_status.get("last_error")
+            if lane_error is None and isinstance(lane_status.get("latest_failure"), dict):
+                lane_error = lane_status["latest_failure"].get("last_error")
+            typer.echo(
+                "- {lane} | {status} | phase {phase} | mode {mode} | benchmark {benchmark}".format(
+                    lane=lane_name,
+                    status=lane_status.get("status") or "n/a",
+                    phase=lane_status.get("phase") or "n/a",
+                    mode=lane_status.get("mode") or lane_latest_cycle.get("mode") or "n/a",
+                    benchmark=lane_benchmark,
+                )
+            )
+            if lane_heartbeat:
+                typer.echo(
+                    "  heartbeat: age {age} / stale after {threshold} / stale {stale}".format(
+                        age=_format_duration_seconds(lane_heartbeat.get("age_seconds")),
+                        threshold=_format_duration_seconds(lane_heartbeat.get("stale_after_seconds")),
+                        stale="yes" if lane_heartbeat.get("is_stale") else "no",
+                    )
+                )
+            if lane_status.get("paused_at"):
+                typer.echo(
+                    f"  paused since: {lane_status['paused_at']} ({_format_duration_seconds(lane_status.get('elapsed_pause_seconds'))})"
+                )
+            if lane_status.get("next_resume_at"):
+                typer.echo(
+                    f"  next resume: {lane_status['next_resume_at']} ({_format_duration_seconds(lane_status.get('next_resume_in_seconds'))} remaining)"
+                )
+            typer.echo(
+                "  cycles: active {active} | latest {latest}".format(
+                    active=lane_status.get("active_cycle_id") or "none",
+                    latest=lane_status.get("latest_cycle_id") or "none",
+                )
+            )
+            typer.echo(
+                "  config: {config}".format(
+                    config=json.dumps(lane_config, ensure_ascii=False, sort_keys=True) if lane_config else "n/a",
+                )
+            )
+            if lane_error:
+                typer.echo(f"  last error: {lane_error}")
+
     typer.echo(
         "Cycle totals: completed {completed_cycles}, failed {failed_cycles}, running {running_cycles}, interrupted {interrupted_cycles}".format(
             **totals

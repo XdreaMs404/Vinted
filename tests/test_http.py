@@ -90,6 +90,54 @@ def test_http_client_spreads_async_requests_across_multiple_proxies(transport_re
 
 
 
+def test_http_client_retries_single_direct_route_after_sync_failure(transport_recorder: _Recorder) -> None:
+    attempts = {"count": 0}
+
+    def sync_response_factory(proxy: str | None, url: str) -> _FakeResponse:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise ConnectionError("temporary direct failure")
+        return _FakeResponse(url, 200, "ok")
+
+    transport_recorder.sync_response_factory = sync_response_factory
+    client = VintedHttpClient(request_delay=0.0, max_retries=2)
+    try:
+        page = client.get_text("https://example.com/data")
+    finally:
+        client.close()
+
+    assert page.status_code == 200
+    data_calls = [proxy for proxy, url in transport_recorder.sync_calls if url != VINTED_HOME]
+    assert data_calls == [None, None]
+
+
+
+def test_http_client_retries_single_direct_route_after_async_failure(transport_recorder: _Recorder) -> None:
+    attempts = {"count": 0}
+
+    async def _exercise() -> object:
+        def async_response_factory(proxy: str | None, url: str) -> _FakeResponse:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise ConnectionError("temporary async direct failure")
+            return _FakeResponse(url, 200, "ok")
+
+        transport_recorder.async_response_factory = async_response_factory
+        client = VintedHttpClient(request_delay=0.0, max_retries=2)
+        try:
+            return await client.get_text_async("https://example.com/data")
+        finally:
+            await client.close_async()
+            client.close()
+
+    page = asyncio.run(_exercise())
+
+    assert page.status_code == 200
+    data_calls = [proxy for proxy, url in transport_recorder.async_calls if url != VINTED_HOME]
+    assert data_calls == [None, None]
+
+
+
 def test_http_client_retries_retryable_status_on_another_route(transport_recorder: _Recorder) -> None:
     first_proxy = "http://alice:secret@1.1.1.1:8000"
     second_proxy = "http://bob:token@2.2.2.2:8000"
